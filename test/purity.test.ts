@@ -20,9 +20,17 @@ function collectSources(dir: string): string[] {
 
 describe("purity", () => {
   const srcRoot = fileURLToPath(new URL("../src", import.meta.url));
+  const scannedDirs = [
+    "engine",
+    "log",
+    "decision",
+    "world",
+    "entities",
+    "scenario",
+  ];
   const files = [
-    ...collectSources(join(srcRoot, "kernel")),
-    ...collectSources(join(srcRoot, "demo")),
+    ...scannedDirs.flatMap((dir) => collectSources(join(srcRoot, dir))),
+    join(srcRoot, "sim.ts"),
   ];
 
   it("finds source files to scan", () => {
@@ -30,7 +38,7 @@ describe("purity", () => {
   });
 
   for (const banned of BANNED) {
-    it(`no source under src/kernel or src/demo uses ${banned}`, () => {
+    it(`no engine source uses ${banned}`, () => {
       for (const file of files) {
         const text = readFileSync(file, "utf8");
         expect(text.includes(banned), `${file} contains ${banned}`).toBe(

@@ -5,9 +5,9 @@
 // (unless disabled in config) and a violation throws, because a world that
 // broke its own rules should stop, not drift.
 
-import { EventLog, type SimEvent } from "./events.ts";
+import { EventLog, type SimEvent } from "../log/events.ts";
 import { StreamRegistry } from "./rng.ts";
-import type { DecisionSource } from "./decisions.ts";
+import type { DecisionSource } from "../decision/decisions.ts";
 
 export interface SimConfig {
   seed: number | string;

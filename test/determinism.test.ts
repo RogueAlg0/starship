@@ -1,19 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { runDemo } from "../src/demo/world.ts";
-import { StreamRegistry } from "../src/kernel/rng.ts";
+import { StreamRegistry } from "../src/engine/rng.ts";
+import { runSimulation } from "../src/sim.ts";
 
 describe("determinism", () => {
   it("same seed twice gives identical hash and event count", () => {
-    const a = runDemo({ seed: 42 }, 120);
-    const b = runDemo({ seed: 42 }, 120);
+    const a = runSimulation({ seed: 42 }, 120);
+    const b = runSimulation({ seed: 42 }, 120);
     expect(a.world.events.hash()).toBe(b.world.events.hash());
     expect(a.world.events.size).toBe(b.world.events.size);
     expect(a.decisions).toEqual(b.decisions);
   });
 
   it("different seed gives a different hash", () => {
-    const a = runDemo({ seed: 42 }, 120);
-    const b = runDemo({ seed: 43 }, 120);
+    const a = runSimulation({ seed: 42 }, 120);
+    const b = runSimulation({ seed: 43 }, 120);
     expect(a.world.events.hash()).not.toBe(b.world.events.hash());
   });
 

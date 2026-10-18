@@ -199,6 +199,36 @@ walls, props) is pre-rendered once per ship to an offscreen canvas,
 and each frame draws that image, the dynamic light and spark layer
 (particles capped at 200), the bodies, and the labels.
 
+The ship travels through a living sky. Behind the hull hangs a
+procedural backdrop generated from the voyage's own seed
+(`viewer/src/space.ts`): soft nebula clouds in a restrained seeded
+palette (two hues per voyage from deep teal, violet, ember, rose,
+and ice blue, always darker than the ship, so the deck stays the
+subject) and three star layers drifting past at parallax speeds,
+far stars crawling, near stars sliding, the brightest few wearing
+a cross sparkle. The drift scales with playback speed; paused, it
+slows to a twentieth of the slowest sail instead of stopping, so
+space breathes even at anchor. Every seed sails a slightly
+different sector of space.
+
+The ship also keeps a day. The viewer reads the ship's clock as
+light (`viewer/src/daynight.ts`): the day watch is fully lit, the
+evening (19:00-22:00) dims through warm amber to about half, the
+night watch (22:00-06:00) sits at about 40% brightness under a
+cool blue tint, and dawn (06:00-07:00) warms back up, all ramped
+smoothly over the boundary hours. The tint is a translucent fill
+over the deck; everything that emits light (equipment blink
+lights, the reactor and engine glow, navigation lights, sparks,
+the radar sweep, system labels and condition bars) is drawn above
+it, so a night ship reads as a lit ship in dark space. Crew bodies
+dim less than the rooms (to 82% at the darkest), and resting crew
+lie down on their bunks, so at 03:00 the ship is visibly asleep
+except for the watch-standers at their lit consoles. A small sun
+or moon beside the clock names the watch. The engine does not act
+on any of this yet; the engine analog (a night watch leaves fewer
+awake witnesses, thinning the evidence behind suspicion) is
+recorded as design-future in DECISIONS.md.
+
 ## Faces
 
 The crew are not dots. Following the reference viewer's pattern, each

@@ -32,6 +32,8 @@ import {
 } from "./faces.ts";
 import { dailySeed } from "./daily.ts";
 import { DeckView } from "./deck.ts";
+import { watchName, type WatchName } from "./daynight.ts";
+import { spriteCanvas, type SpriteDef } from "./props.ts";
 
 /** Playback speeds: keys and buttons 1 to 6, mirroring the reference. */
 const SPEEDS = [
@@ -84,6 +86,8 @@ let stickToBottom = true;
 const shipNameEl = must<HTMLElement>("ship-name");
 const clockDayEl = must<HTMLElement>("clock-day");
 const clockTimeEl = must<HTMLElement>("clock-time");
+const watchIcon = must<HTMLCanvasElement>("watch-icon");
+const watchLabelEl = must<HTMLElement>("watch-label");
 const speedReadoutEl = must<HTMLElement>("speed-readout");
 const hashEl = must<HTMLElement>("hash");
 const eventCountEl = must<HTMLElement>("event-count");
@@ -666,6 +670,44 @@ function shipClock(tick: number): { day: number; time: string } {
   return { day, time: `${hh}:${mm}` };
 }
 
+/** Sun and moon for the header watch indicator, pixel-drawn like all the art. */
+const SUN_ROWS = [
+  "....o....",
+  ".o..o..o.",
+  "....o....",
+  "...yyy...",
+  "..yyyyy..",
+  "...yyy...",
+  "....o....",
+  ".o..o..o.",
+  "....o....",
+] as const;
+const MOON_ROWS = [
+  "...ccc...",
+  "..ccc....",
+  ".ccc.....",
+  ".cc......",
+  ".cc......",
+  ".cc......",
+  ".ccc.....",
+  "..ccc....",
+  "...ccc...",
+] as const;
+const WATCH_ICONS: Record<WatchName, SpriteDef> = {
+  "Day watch": { rows: SUN_ROWS, pal: { o: "#c47b2a", y: "#ffd76a" } },
+  "Dawn watch": { rows: SUN_ROWS, pal: { o: "#b87f36", y: "#f7cf7d" } },
+  "Evening watch": { rows: MOON_ROWS, pal: { c: "#e8c98a" } },
+  "Night watch": { rows: MOON_ROWS, pal: { c: "#aebfe0" } },
+};
+let shownWatch: WatchName | null = null;
+
+function paintWatchIcon(watch: WatchName): void {
+  const ctx = watchIcon.getContext("2d");
+  if (ctx === null) return;
+  ctx.clearRect(0, 0, watchIcon.width, watchIcon.height);
+  ctx.drawImage(spriteCanvas(WATCH_ICONS[watch]), 0, 0);
+}
+
 let shownTick = -1;
 function updateHeader(): void {
   if (run.tick === shownTick) return;
@@ -675,6 +717,14 @@ function updateHeader(): void {
   clockTimeEl.textContent = clock.time;
   hashEl.textContent = run.hash().slice(0, 10);
   eventCountEl.textContent = String(run.world.events.size);
+  const watch = watchName(
+    (run.tick % CONFIG.time.ticksPerDay) * CONFIG.time.minutesPerTick,
+  );
+  if (watch !== shownWatch) {
+    shownWatch = watch;
+    watchLabelEl.textContent = watch;
+    paintWatchIcon(watch);
+  }
 }
 
 function updateSlowUi(): void {
@@ -747,6 +797,11 @@ function frame(nowMs: number): void {
       snap: speedIndex >= 4,
       selectedId: selectedCrew,
       workSystem: workSystemByMember,
+      dayMinutes:
+        (run.tick % CONFIG.time.ticksPerDay) * CONFIG.time.minutesPerTick,
+      speedTps: playing
+        ? (SPEEDS[speedIndex] as (typeof SPEEDS)[number]).ticksPerSecond
+        : 0,
     });
   }
 

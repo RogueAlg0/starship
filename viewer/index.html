@@ -46,6 +46,7 @@
   .title-row .meta { color: var(--muted); font-size: 13px; }
   .title-row .meta b { color: var(--text); font-weight: 600; }
   #hash { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  #watch-icon { image-rendering: pixelated; vertical-align: -1px; }
   .controls {
     display: flex;
     flex-wrap: wrap;
@@ -319,6 +320,7 @@
   <div class="title-row">
     <h1 id="ship-name">Starship</h1>
     <span class="meta">Day <b id="clock-day">1</b>, <b id="clock-time">00:00</b></span>
+    <span class="meta"><canvas id="watch-icon" width="9" height="9" aria-hidden="true"></canvas> <b id="watch-label">Day watch</b></span>
     <span class="meta">speed <b id="speed-readout">3x</b></span>
     <span class="meta">stream <b id="hash">…</b></span>
     <span class="meta"><b id="event-count">0</b> events</span>

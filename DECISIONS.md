@@ -207,6 +207,66 @@ engineers building raw frame sections into finished rooms over
 long legs, and refits at ports. Future/post-v0 design only; no
 code was written for it.
 
+## Living space, and the ship's night (Oct 18, 2026)
+
+The viewer gained a moving space backdrop and a day/night cycle,
+both presentation of facts it already holds, both viewer-only, the
+engine untouched (the seed-42 gate still reads cf1dffaeb4796f91).
+
+The backdrop (`viewer/src/space.ts`) is generated per voyage from
+the ship's seed key, the same hash arithmetic the deck derivation
+uses: three star layers at parallax drift speeds (far 0.7, mid
+2.2, near 6.5 px/s at drift factor 1, the factor 0.45 + sqrt of
+the playback ticks per second, and 0.05 when paused, so space
+breathes at anchor), a few bright stars with cross sparkles, and
+soft radial nebula clouds in a seeded pair of palettes from a
+curated set (deep teal, violet, ember, rose, ice blue), kept low
+saturation and darker than the ship so the deck stays the subject.
+The old static starfield in the deck render is gone; there is one
+backdrop, and it moves.
+
+Day and night (`viewer/src/daynight.ts`) is the ship's clock read
+as light: day watch (07:00-19:00) full brightness; evening ramp
+(19:00-22:00) dimming through warm amber; night watch (22:00-06:00)
+at 40% brightness (tint alpha 0.6 toward a cool blue); dawn ramp
+(06:00-07:00) warming back; all smoothstepped over the boundary
+hours. The render order carries the decision: backdrop, deck, tint,
+then everything emissive above the tint (equipment lights, reactor
+and engine glow, navigation lights, sparks, the radar sweep, labels
+and condition bars), near stars above the tint too, and crew bodies
+drawn after the tint under a mild brightness filter (0.82 at the
+darkest). Resting crew are drawn horizontal on the bunks and medbay
+beds of the room the engine already has them resting in; nothing
+about their position is invented, only the posture. A sun/moon
+pixel icon and the watch name sit beside the header clock.
+
+Crew movement also gained easing in the same pass: per-person
+velocity, acceleration 42 tiles/s^2 (braking 1.7x that), and a
+cruise scaled down over the last 1.5 tiles of a walk, so crew set
+off and arrive instead of halting dead at full pace.
+
+Recorded as engine-future, not built: in the reference village
+sim, light is engine state; at night fewer villagers are awake to
+witness a crime and notice chances drop. Our analog is that the
+night watch should thin the presence evidence behind suspicion:
+fewer awake witnesses, emptier corridors, weaker almost-seeing.
+DESIGN.md carries the note (Ship's night, in the world list).
+
+## Future systems recorded (Oct 18, 2026)
+
+At the user's direction on Oct 18, 2026, DESIGN.md gains a
+"Getting around, and getting word around (future, engine notes)"
+section, in the same future area as Construction and refit: EVA
+spacewalks (external systems repaired by a suited crew member
+moving slowly, tethered, along the hull; maneuvering as the
+tension, the analog of the squad sim's slow march), distance
+costing real ticks (where crew stand when something fails decides
+how late help arrives), and communications and runners (the comms
+system as the instant channel; with comms damaged, word travels by
+runner at walking speed and by voice range; between ships, signals
+take days and stale information is the galaxy's normal state).
+Future engine design only; no code was written for any of it.
+
 ## Chronicle truth mode
 
 The chronicle renders the event log as a ship's log. The config flag

@@ -113,6 +113,14 @@ Dunya is unlicensed, so its code is not ours to reuse. Its ideas are.
     investigators form beliefs only from what survived to be found.
     Design the evidence lifetimes and the erasure weather first, and the
     drama builds itself.
+  - Ship's night (future, engine): the village sim's light is engine
+    state, not scenery: after dark, fewer villagers are awake to see a
+    crime, so notice chances fall. Our analog: presence evidence should
+    thin on the night watch, when most of the crew sleeps in quarters
+    and the corridors stand empty. Sabotage at 03:00 is a different act
+    from sabotage at noon, because almost nobody was there to almost
+    see it. The viewer already renders the day/night cycle as
+    presentation; the engine version is design-future, not built.
 
 ## The galaxy around the ship
 
@@ -297,6 +305,47 @@ construction accidents join the harm model, and how the deck
 derivation in the viewer grows a room mid-run (the floor plan is
 derived per ship today; a growing ship needs it derived per era of
 the ship). None of this touches v0.
+
+## Getting around, and getting word around (future, engine notes)
+
+**Status: future design, post-v0. Not built.** Recorded Oct 18, 2026,
+at the user's direction.
+
+### EVA: the slow march, in a suit
+
+The squad sim's tension is bodies crossing ground slowly. Ours is
+the spacewalk: external systems (engines, comms, hull) are repaired
+by a suited crew member who exits the airlock and moves slowly,
+tethered, along the hull, while the clock runs. The maneuvering
+itself is the tension, the direct analog of the march. EVA
+accidents join the harm model when this is built.
+
+### Distance costs time
+
+Crossing the ship should take real ticks, so where the crew happen
+to be when something fails decides the shape of the next hour: help
+that is near arrives, help that is far arrives late, and late help
+is a story. The engineer asleep two decks from engineering is a
+different incident from the engineer awake beside the reactor.
+
+### Communications and runners
+
+In the squad sim, help calls are asymmetric: one side radios
+instantly, the other sends a runner, a physical man who must cross
+the ground; the call is heard only when he arrives, and a runner
+can be given up on. Shouts carry by proximity; radios have limited
+reach.
+
+Aboard ship, the comms system is the instant channel: the captain's
+decisions, accusation broadcasts, repair coordination. With comms
+damaged (a prime sabotage target), the ship falls back to runners:
+crew carrying word between rooms, so information moves at walking
+speed; rumours and accusations spread by voice range, a room and
+its neighbours, instead of shipwide; repair coordination and
+inquiry testimony degrade. Between ships, signals take days: a
+distress call is answered as it was described, not as things now
+stand. Stale information is the galaxy's normal state, and it pairs
+with the bounty design, whose posters are beliefs all the way down.
 
 ## Version zero slice
 

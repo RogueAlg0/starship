@@ -168,6 +168,7 @@ function desiredBubble(
     }
   }
   if (worst !== null) return { icon: worst[1], kind: "thought" };
+  if (member.activity === "rest") return { icon: "zzz", kind: "thought" };
   if (member.beliefs.grudges.length > 0) {
     return { icon: "anger", kind: "thought" };
   }

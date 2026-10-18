@@ -3,10 +3,12 @@
 // hash arithmetic: the same ship always yields the same deck, and the
 // engine never hears about any of it. All art is code: floors, walls,
 // and props are painted once into a static offscreen canvas; each
-// frame draws that image, then the dynamic layer (glows, blinking
-// lights, damage sparks, welding sparks), then crew bodies with
-// door-to-door waypoint movement, working crew at their stations,
-// system labels, and bubbles.
+// frame draws the moving space backdrop (space.ts), that image, the
+// ship's light for the hour (daynight.ts: a tint over the deck, with
+// everything that emits light drawn above it), then the dynamic layer
+// (glows, blinking lights, damage sparks, welding sparks), then crew
+// bodies with door-to-door waypoint movement, working crew at their
+// stations, system labels, and bubbles.
 //
 // Layout: two room bands (dorsal and ventral) flank a central
 // corridor inside an elongated hull, tapered at the bow, flat at the
@@ -24,6 +26,8 @@ import type { ShipSystem } from "../../src/world/systems.ts";
 import { hash01 } from "./faces.ts";
 import { getBodySprites } from "./bodies.ts";
 import { BubbleLayer } from "./bubbles.ts";
+import { SpaceBackdrop } from "./space.ts";
+import { lightAt, NIGHT_DARK } from "./daynight.ts";
 import {
   corridorTile,
   floorEdge,
@@ -112,6 +116,8 @@ interface RoomLayout {
   doorInside: { x: number; y: number };
   screenRect: { x: number; y: number; w: number; h: number } | null;
   systemIds: string[];
+  /** Bunk and medbay-bed tile centres: where resting crew lie down. */
+  bunks: Array<{ x: number; y: number }>;
 }
 
 interface SideDoor {
@@ -134,7 +140,6 @@ export interface DeckLayout {
   reactorCore: { x: number; y: number; w: number; h: number } | null;
   engineGlow: { x: number; y: number };
   navLights: Array<{ x: number; y: number; colour: string; phase: number }>;
-  twinkles: Array<{ x: number; y: number; phase: number }>;
   bridgeScreen: { x: number; y: number; w: number; h: number } | null;
 }
 
@@ -528,7 +533,6 @@ export function buildLayout(ship: Ship): DeckLayout {
       y: (OY + CORR_Y + 1) * TILE_PX + 4,
     },
     navLights: [],
-    twinkles: [],
     bridgeScreen: null,
   };
 
@@ -667,6 +671,9 @@ export function buildLayout(ship: Ship): DeckLayout {
       doorInside: { x: info.doorTx + 0.5, y: info.insideTy + 0.5 },
       screenRect: build.screenRect,
       systemIds: ship.systemsInRoom(room.index).map((s) => s.id),
+      bunks: build.props
+        .filter((p) => p.name === "bunk" || p.name === "bed")
+        .map((p) => ({ x: p.tx + 0.5, y: p.ty + 0.5 })),
     };
     if (build.screenRect !== null) layout.bridgeScreen = build.screenRect;
   }
@@ -690,13 +697,6 @@ export function buildLayout(ship: Ship): DeckLayout {
     { x: (OX + deckW + 5) * TILE_PX, y: (OY + DECK_H - 2) * TILE_PX, colour: "#4ae88a", phase: 2.2 },
     { x: (OX - 4) * TILE_PX + 2, y: (OY + CORR_Y + 1) * TILE_PX + 4, colour: "#f4f6fa", phase: 4.1 },
   ];
-  for (let i = 0; i < 16; i++) {
-    layout.twinkles.push({
-      x: hash01(seedKey, i * 7 + 1) * layout.widthPx,
-      y: hash01(seedKey, i * 7 + 2) * layout.heightPx,
-      phase: hash01(seedKey, i * 7 + 3) * Math.PI * 2,
-    });
-  }
   return layout;
 }
 
@@ -710,16 +710,9 @@ function renderStatic(layout: DeckLayout, ship: Ship): HTMLCanvasElement {
   if (ctx === null) return canvas;
   const { seedKey, deckW } = layout;
 
-  // Space and starfield.
-  ctx.fillStyle = "#04060a";
-  ctx.fillRect(0, 0, layout.widthPx, layout.heightPx);
-  for (let i = 0; i < 240; i++) {
-    const x = hash01(seedKey, i * 3 + 11) * layout.widthPx;
-    const y = hash01(seedKey, i * 3 + 12) * layout.heightPx;
-    const b = hash01(seedKey, i * 3 + 13);
-    ctx.fillStyle = b > 0.92 ? "#dfe8f5" : b > 0.6 ? "#8fa0bb" : "#4c5a72";
-    ctx.fillRect(x, y, b > 0.92 ? 2 : 1, b > 0.92 ? 2 : 1);
-  }
+  // Space itself is not painted here: the moving backdrop (space.ts)
+  // is drawn under this canvas every frame, and this layer stays
+  // transparent beyond the hull so the sky shows through.
 
   // Hull silhouette.
   const hullTop = (OY - 1) * TILE_PX;
@@ -886,6 +879,10 @@ export interface DeckFrameOpts {
   selectedId: string | null;
   /** Last system each member worked, from work events (main.ts). */
   workSystem: ReadonlyMap<string, string | null>;
+  /** Minutes into the ship's day (0-1439): the day/night light. */
+  dayMinutes: number;
+  /** Playback rate in ticks per second; 0 when paused (sky drift). */
+  speedTps: number;
 }
 
 interface PersonState {
@@ -900,6 +897,10 @@ interface PersonState {
   lastRoom: number;
   stationKey: string;
   phase: number;
+  /** Current glide speed, tiles per second (movement easing). */
+  vel: number;
+  /** The destination is a bunk or bed: draw horizontal on arrival. */
+  lying: boolean;
 }
 
 interface Particle {
@@ -920,6 +921,7 @@ export class DeckView {
   private readonly ship: Ship;
   private readonly layout: DeckLayout;
   private readonly staticCanvas: HTMLCanvasElement;
+  private readonly backdrop: SpaceBackdrop;
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D | null;
   private readonly people = new Map<string, PersonState>();
@@ -935,6 +937,11 @@ export class DeckView {
     canvas.width = this.layout.widthPx;
     canvas.height = this.layout.heightPx;
     this.staticCanvas = renderStatic(this.layout, ship);
+    this.backdrop = new SpaceBackdrop(
+      this.layout.seedKey,
+      this.layout.widthPx,
+      this.layout.heightPx,
+    );
     this.ctx = canvas.getContext("2d");
   }
 
@@ -1064,12 +1071,36 @@ export class DeckView {
     member: CrewMember,
     slot: number,
     workSystem: ReadonlyMap<string, string | null>,
-  ): { point: { x: number; y: number }; key: string; fx: number } {
+    bunkIndex: number,
+  ): {
+    point: { x: number; y: number };
+    key: string;
+    fx: number;
+    lying: boolean;
+  } {
     const room = this.layout.rooms[member.room];
     const seedKey = this.layout.seedKey;
     const num = Number(member.id.replace(/\D/g, "")) || 0;
     if (room === undefined) {
-      return { point: { x: 2.5, y: CORR_Y + 1.5 }, key: "void", fx: 0 };
+      return {
+        point: { x: 2.5, y: CORR_Y + 1.5 },
+        key: "void",
+        fx: 0,
+        lying: false,
+      };
+    }
+    if (member.activity === "rest" && room.bunks.length > 0) {
+      // Resting crew lie down: a bunk in quarters, a bed in medbay,
+      // whichever this room offers. The position is the engine's
+      // (their room, their activity); only the posture is ours.
+      const idx = (bunkIndex >= 0 ? bunkIndex : 0) % room.bunks.length;
+      const bunk = room.bunks[idx] as { x: number; y: number };
+      return {
+        point: { x: bunk.x, y: bunk.y },
+        key: `b:${member.room}:${idx}`,
+        fx: 0,
+        lying: true,
+      };
     }
     if (member.activity === "work" || member.activity === "repair") {
       let target: WorkPoint | undefined;
@@ -1104,12 +1135,13 @@ export class DeckView {
           point: { x: target.x, y: target.y },
           key: `w:${member.room}:${target.systemId ?? target.tag}`,
           fx: target.fx,
+          lying: false,
         };
       }
     }
     const tiles = room.standTiles;
     if (tiles.length === 0) {
-      return { point: room.center, key: `i:${member.room}:c`, fx: 0 };
+      return { point: room.center, key: `i:${member.room}:c`, fx: 0, lying: false };
     }
     const base = Math.floor(hash01(seedKey, num * 29 + member.room * 7) * tiles.length);
     const tile = tiles[(base + slot) % tiles.length] as { x: number; y: number };
@@ -1119,6 +1151,7 @@ export class DeckView {
       point: { x: tile.x + jx, y: tile.y + jy },
       key: `i:${member.room}:${(base + slot) % tiles.length}`,
       fx: 0,
+      lying: false,
     };
   }
 
@@ -1129,6 +1162,8 @@ export class DeckView {
     const now = opts.now;
     const dt = Math.min(0.1, Math.max(0, opts.dtMs / 1000));
     ctx.imageSmoothingEnabled = false;
+    // The moving sky behind the hull, then the ship herself.
+    this.backdrop.drawFar(ctx, dt, opts.speedTps);
     ctx.drawImage(this.staticCanvas, 0, 0);
 
     // Occupant slots, for spreading stand positions inside a room.
@@ -1139,6 +1174,15 @@ export class DeckView {
       slots.set(member.id, slot);
       perRoom.set(member.room, slot + 1);
     }
+    // Resting members in roster order per room: who takes which bunk.
+    const restSlot = new Map<string, number>();
+    const restPerRoom = new Map<number, number>();
+    for (const member of crew) {
+      if (member.activity !== "rest") continue;
+      const idx = restPerRoom.get(member.room) ?? 0;
+      restSlot.set(member.id, idx);
+      restPerRoom.set(member.room, idx + 1);
+    }
 
     // ---- movement and stations
     for (const member of crew) {
@@ -1148,6 +1192,7 @@ export class DeckView {
         member,
         slots.get(member.id) ?? 0,
         opts.workSystem,
+        restSlot.get(member.id) ?? -1,
       );
       if (st === undefined) {
         st = {
@@ -1162,6 +1207,8 @@ export class DeckView {
           lastRoom: member.room,
           stationKey: want.key,
           phase: hash01(layout.seedKey, num * 67) * Math.PI * 2,
+          vel: 0,
+          lying: want.lying,
         };
         this.people.set(member.id, st);
       }
@@ -1173,12 +1220,14 @@ export class DeckView {
           st.x = want.point.x;
           st.y = want.point.y;
           st.path = [];
+          st.vel = 0;
         } else {
           st.path = path;
         }
         st.lastRoom = member.room;
         st.stationKey = want.key;
         st.workFx = want.fx;
+        st.lying = want.lying;
         st.atStation = false;
       }
       st.moving = false;
@@ -1192,14 +1241,22 @@ export class DeckView {
           py = pt.y;
         }
         const tickSec = opts.tickMs / 1000;
-        let speed = 14;
+        let cruise = 14;
         if (Number.isFinite(tickSec) && tickSec > 0) {
-          speed = Math.max(
+          cruise = Math.max(
             10,
             Math.min(60, remaining / Math.max(0.2, tickSec * 0.9)),
           );
         }
-        let step = speed * dt;
+        // Ease the walk: accelerate away from a standstill, and slow
+        // into the destination rather than halting dead at full pace.
+        // Velocity is per person, so a mid-walk retarget stays smooth.
+        const target =
+          cruise * Math.max(0.18, Math.min(1, remaining / 1.5));
+        const accel = 42 * dt;
+        st.vel += Math.max(-accel * 1.7, Math.min(accel, target - st.vel));
+        if (st.vel < 0) st.vel = 0;
+        let step = st.vel * dt;
         while (step > 0 && st.path.length > 0) {
           const target = st.path[0] as { x: number; y: number };
           const dx = target.x - st.x;
@@ -1218,28 +1275,33 @@ export class DeckView {
           step -= move;
           if (move >= d) st.path.shift();
         }
-        if (st.path.length === 0) st.atStation = st.stationKey.startsWith("w:");
+        if (st.path.length === 0) {
+          st.atStation = st.stationKey.startsWith("w:");
+          st.vel = 0;
+        }
       } else {
         st.atStation = st.stationKey.startsWith("w:");
+        st.vel = 0;
         if (st.atStation && st.workFx !== 0) st.facing = st.workFx;
       }
     }
 
-    // ---- twinkling stars beyond the hull
-    const hx0 = (OX - 1) * TILE_PX;
-    const hx1 = (OX + layout.deckW + 7) * TILE_PX;
-    const hy0 = (OY - 1) * TILE_PX;
-    const hy1 = (OY + DECK_H + 1) * TILE_PX;
-    ctx.fillStyle = "#e8eefb";
-    for (const star of layout.twinkles) {
-      if (star.x > hx0 && star.x < hx1 && star.y > hy0 && star.y < hy1) {
-        continue;
-      }
-      ctx.globalAlpha =
-        0.25 + 0.6 * (0.5 + 0.5 * Math.sin(now / 700 + star.phase));
-      ctx.fillRect(star.x, star.y, 1, 1);
+    // ---- the ship's light for the hour: a tint over the deck, and
+    // everything that emits light drawn after it, so the night watch
+    // reads as a lit ship in dark space, not a dark smear. The tint
+    // is a translucent fill toward the phase colour (cool blue at
+    // night, warm amber through the evening), so full night lands at
+    // about 40% of the day's brightness.
+    const light = lightAt(opts.dayMinutes);
+    if (light.dark > 0.004) {
+      const cr = Math.round(8 + (43 - 8) * light.warm);
+      const cg = Math.round(14 + (26 - 14) * light.warm);
+      const cb = Math.round(36 + (9 - 36) * light.warm);
+      ctx.fillStyle = `rgba(${cr},${cg},${cb},${light.dark.toFixed(3)})`;
+      ctx.fillRect(0, 0, layout.widthPx, layout.heightPx);
     }
-    ctx.globalAlpha = 1;
+    // Near stars stay crisp above the tint: they are outside the ship.
+    this.backdrop.drawNear(ctx, now);
 
     // ---- hydroponics light sweep
     for (const room of layout.rooms) {
@@ -1452,6 +1514,12 @@ export class DeckView {
     ctx.globalAlpha = 1;
 
     // ---- crew bodies
+    // Bodies dim less than the deck at night (0.82 of full at the
+    // darkest): crew carry their own small light in-fiction, and a
+    // watch-stander must stay findable in a dark room.
+    const bodyDim = 1 - 0.18 * (light.dark / NIGHT_DARK);
+    ctx.filter =
+      bodyDim < 0.999 ? `brightness(${bodyDim.toFixed(3)})` : "none";
     const positions = new Map<string, { x: number; y: number }>();
     const ordered = [...crew].sort(
       (a, b) =>
@@ -1470,6 +1538,8 @@ export class DeckView {
       } else if (working) {
         sprite = Math.floor(now / 170) % 2 === 0 ? sprites.work : sprites.idle;
       }
+      const lying = st.lying && !st.moving;
+      if (lying) sprite = sprites.idle;
       let bob = 0;
       let swayX = 0;
       if (st.moving) bob = -Math.abs(Math.sin(st.walkPhase * 2.2)) * 1;
@@ -1484,7 +1554,8 @@ export class DeckView {
       // Shadow, then the selection ring, then the body.
       ctx.fillStyle = "rgba(0,0,0,0.35)";
       ctx.beginPath();
-      ctx.ellipse(px, py - 1, 3.5, 1.2, 0, 0, Math.PI * 2);
+      if (lying) ctx.ellipse(px, py - 2, 5.5, 1.6, 0, 0, Math.PI * 2);
+      else ctx.ellipse(px, py - 1, 3.5, 1.2, 0, 0, Math.PI * 2);
       ctx.fill();
       if (opts.selectedId === member.id) {
         ctx.strokeStyle = `rgba(255,215,106,${(0.7 + 0.3 * Math.sin(now / 300)).toFixed(3)})`;
@@ -1494,7 +1565,13 @@ export class DeckView {
         ctx.stroke();
       }
       ctx.save();
-      if (st.facing < 0) {
+      if (lying) {
+        // Horizontal on the bunk, head toward the bow, breathing slow.
+        const breathe = Math.sin(now / 2600 + st.phase) * 0.3;
+        ctx.translate(px, py - 4 + breathe);
+        ctx.rotate(Math.PI / 2);
+        ctx.drawImage(sprite, -4, -6);
+      } else if (st.facing < 0) {
         ctx.translate(px, 0);
         ctx.scale(-1, 1);
         ctx.drawImage(sprite, -4, py - 12 + bob);
@@ -1503,6 +1580,7 @@ export class DeckView {
       }
       ctx.restore();
     }
+    ctx.filter = "none";
 
     // ---- bubbles, above everything
     this.bubbles.update(now, crew);

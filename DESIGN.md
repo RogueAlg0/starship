@@ -144,6 +144,36 @@ is one crew among many simulated actors. Nobody controls any of them.
   stranded crews), taken by NPC captains as often as by the witnessed
   ship. A mission board is a window into what the galaxy needs.
 
+## Crew flow: how new crew arrive (designed, post-v0)
+
+Ships are not closed casts. Vacancies open through deaths, injuries that
+retire, and crew who quit at port when morale and trust collapse. New
+crew arrive through chains, each an event sequence on the same kernel:
+
+- Port hiring: at a resupply stop, candidates sign on. Who applies
+  depends on the port, the faction, and the ship's reputation as it is
+  believed to be, not as it is.
+- Rescue: a distress call or a wreck yields survivors. They arrive
+  grateful, traumatized, or lying. A rescued stranger is a suspicion
+  engine: they may be exactly what the bounty posters describe.
+- Stowaway: discovered cycles after departure, in cargo or at an
+  airlock. The crew decides from beliefs: brig, adopt, or put off at
+  the next port. The stowaway may be running from someone, which
+  imports that someone into the story.
+- Passengers who stay: a ferry or escort mission ends with a passenger
+  asking to sign on. Missions become recruitment by accident.
+- Transfer and imposition: a faction assigns a liaison, or an allied
+  ship exchanges crew. An imposed officer arrives with loyalty pointing
+  off-ship, which the whole mess hall can feel.
+- Birth: on long voyages, bonded pairs have children who grow into
+  crew. The slowest chain, and the one that makes a long run a saga.
+- Manufacture: the ship builds or wakes a synthetic crew member at a
+  resource cost. The crew's beliefs about what it is become the story.
+
+Every arrival enters with empty relationships and a past the others
+cannot see. The chronicle introduces them the way the crew meets them:
+as a name and a knock on the airlock door.
+
 ## Version zero slice
 
 One ship. Twelve crew. Needs and relationships. One incident generator:

@@ -26,6 +26,8 @@ describe("purity", () => {
     "decision",
     "world",
     "entities",
+    "perception",
+    "plots",
     "scenario",
   ];
   const files = [

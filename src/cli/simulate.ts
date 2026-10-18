@@ -1,6 +1,7 @@
 // Run a simulation and, with --out, write the run to a directory:
-// events.ndjson, decisions.ndjson, and summary.json (which also records
-// elapsedMs and ticksPerSecond, because speed is a requirement).
+// events.ndjson, decisions.ndjson, summary.json (which also records
+// elapsedMs and ticksPerSecond, because speed is a requirement), and
+// chronicle.txt, the event log rendered as a readable ship's log.
 //
 // This file is platform code, not engine code: it may read the wall clock
 // (for the speed report) and touch the file system.
@@ -9,6 +10,7 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { renderChronicle } from "../log/chronicle.ts";
 import { runSimulation } from "../sim.ts";
 import { argValue } from "./args.ts";
 
@@ -66,6 +68,10 @@ function main(args: string[]): void {
     writeFileSync(
       join(out, "summary.json"),
       JSON.stringify(summary, null, 2) + "\n",
+    );
+    writeFileSync(
+      join(out, "chronicle.txt"),
+      renderChronicle(world.events.events),
     );
     console.log(`wrote ${out}`);
   }

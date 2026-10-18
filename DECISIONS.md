@@ -46,3 +46,45 @@ village package, so skills and reading habits transfer both ways.
 
 The git repository is local only, with no remote. It stays private
 until there is something real and a fresh decision says otherwise.
+
+## Ten-minute ticks (v0 slice, Oct 18, 2026)
+
+Ship time runs at ten minutes per tick, 144 ticks to a ship day, the
+village scale from the reference design. A 30-day voyage is 4,320 ticks
+and runs in about a second. Finer time can be layered onto incidents
+later; the daily rhythm of meals, rest, and work reads correctly at
+this grain.
+
+## Crew of twelve (v0 slice)
+
+The crew is fixed at twelve, one per role (captain through
+quartermaster), generated on the "crewgen" stream: names, traits, and
+seeded pairwise beliefs, including a few directed rivalries with a head
+start toward grudges. Twelve is personal: every name in the chronicle
+recurs often enough to be remembered. The ship itself is procedural
+(10 to 14 rooms, spanning tree plus loops, every system kind guaranteed
+aboard) on the "shipgen" stream.
+
+## Grudges incite sabotage (first incident generator)
+
+The first drama engine is the one the design named: trust that falls
+below -0.5 and stays there for twelve ship-hours becomes a grudge; a
+grudge-holder alone in a room with a ship system may sabotage it, with
+temperament gating the act (bold and hot-tempered raise it, disciplined
+lowers it). Suspicion after an act is formed from presence evidence,
+who was seen near the room in the surrounding ticks, weighted by the
+observer's prior distrust, so a bystander can be suspected wrongly and
+an accusation is a belief spoken aloud, never a finding. Grudges ease
+if trust recovers, suspicion fades over days, and striking back spends
+some of a grudge's heat: the system needs its negative feedback, or
+every long run ends in a ship-wide feud (early tuning did exactly
+that).
+
+## Chronicle truth mode
+
+The chronicle renders the event log as a ship's log. The config flag
+`chronicle.knowsTruth` defaults to true: sabotage lines name the
+culprit, marked as what the log knows and the crew does not.
+Accusation lines are always rendered as accusations. Turning the flag
+off produces the crew's-eye view, where only discovered damage and
+spoken beliefs appear.

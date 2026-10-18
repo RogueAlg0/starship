@@ -2,6 +2,7 @@
   "description": "Deterministic starship crew simulation (private, local-only).",
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "esbuild": "^0.28.2",
     "typescript": "^5.8.0",
     "vitest": "^3.2.0"
   },
@@ -16,7 +17,10 @@
     "replay": "node --no-warnings src/cli/replay.ts",
     "simulate": "node --no-warnings src/cli/simulate.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit -p ."
+    "typecheck": "tsc --noEmit -p . && tsc --noEmit -p viewer",
+    "viewer": "node --no-warnings viewer/build.ts && node --no-warnings viewer/serve.ts",
+    "viewer:build": "node --no-warnings viewer/build.ts",
+    "viewer:static": "node --no-warnings viewer/build.ts --static"
   },
   "type": "module",
   "version": "0.0.1"

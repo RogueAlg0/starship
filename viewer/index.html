@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Starship — viewer</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%9A%80%3C/text%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #0b0f16;
+    --panel: #131a26;
+    --panel-2: #182233;
+    --line: #2c3e5a;
+    --text: #dbe4f0;
+    --muted: #8fa3bf;
+    --accent: #e8a33d;
+    --good: #57c465;
+    --warn: #e8a33d;
+    --bad: #e5534b;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    padding: 10px 12px 8px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+    position: sticky;
+    top: 0;
+    z-index: 5;
+  }
+  .title-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px 14px;
+  }
+  h1 { font-size: 20px; margin: 0; letter-spacing: 0.02em; }
+  .title-row .meta { color: var(--muted); font-size: 13px; }
+  .title-row .meta b { color: var(--text); font-weight: 600; }
+  #hash { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-top: 10px;
+  }
+  button {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    min-height: 40px;
+    padding: 6px 14px;
+    font-size: 15px;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  button:active { transform: translateY(1px); }
+  button.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 700;
+  }
+  #play-btn { min-width: 96px; font-weight: 700; }
+  .speed-group { display: flex; gap: 4px; }
+  .speed-group button { padding: 6px 10px; min-width: 44px; }
+  .seed-group { display: flex; gap: 6px; align-items: center; }
+  .seed-group label { color: var(--muted); font-size: 14px; }
+  #seed-input {
+    width: 92px;
+    min-height: 40px;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 6px 8px;
+    font-size: 15px;
+  }
+  .toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 40px;
+    color: var(--muted);
+    font-size: 14px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .toggle input { width: 20px; height: 20px; accent-color: var(--accent); }
+  #weather-banner {
+    padding: 7px 12px;
+    font-size: 14px;
+    color: var(--muted);
+    background: #0e141f;
+    border-bottom: 1px solid var(--line);
+  }
+  #weather-banner b { color: var(--text); }
+  #weather-banner.storm { color: var(--warn); }
+  #weather-banner.storm b { color: var(--warn); }
+  main {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    padding: 12px;
+    flex: 1;
+    width: 100%;
+    max-width: 1500px;
+    margin: 0 auto;
+  }
+  section {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 10px;
+    min-width: 0;
+  }
+  section h2 {
+    margin: 0 0 8px;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  #ship-svg { width: 100%; height: auto; display: block; }
+  #ship-svg .edge { stroke: #33465f; stroke-width: 2; }
+  #ship-svg .room-rect {
+    fill: var(--panel-2);
+    stroke: var(--line);
+    stroke-width: 1.5;
+  }
+  #ship-svg .room.damaged .room-rect {
+    stroke: var(--bad);
+    stroke-width: 2.5;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    #ship-svg .room.damaged .room-rect { animation: pulse 1.6s ease-in-out infinite; }
+    @keyframes pulse { 50% { stroke-opacity: 0.45; } }
+  }
+  #ship-svg .room-name {
+    fill: var(--text);
+    font-size: 12.5px;
+    font-weight: 600;
+    text-anchor: middle;
+    pointer-events: none;
+  }
+  #ship-svg .room-sys {
+    fill: var(--muted);
+    font-size: 10.5px;
+    text-anchor: middle;
+    pointer-events: none;
+  }
+  #ship-svg .condbar-bg { fill: #0d1420; }
+  #ship-svg .crew-dot circle.core {
+    stroke: #0b0f16;
+    stroke-width: 1.5;
+  }
+  #ship-svg .crew-dot text {
+    font-size: 9px;
+    font-weight: 700;
+    text-anchor: middle;
+    pointer-events: none;
+  }
+  #ship-svg .crew-dot.selected circle.core {
+    stroke: #ffffff;
+    stroke-width: 3;
+  }
+  #side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .crew-row {
+    display: grid;
+    grid-template-columns: 14px minmax(0, 1fr);
+    gap: 4px 10px;
+    padding: 7px 6px;
+    border-radius: 8px;
+    cursor: pointer;
+    align-items: center;
+  }
+  .crew-row + .crew-row { border-top: 1px solid #1d293d; }
+  .crew-row.selected { background: var(--panel-2); }
+  .crew-row .swatch {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    grid-row: span 2;
+  }
+  .crew-row .who { min-width: 0; }
+  .crew-row .who .name { font-size: 14.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .crew-row .who .role { font-size: 12px; color: var(--muted); }
+  .crew-row .needs {
+    grid-column: 2;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+  }
+  .need { display: flex; flex-direction: column; gap: 2px; }
+  .need .need-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .need .bar { height: 6px; background: #0d1420; border-radius: 3px; overflow: hidden; }
+  .need .bar > div { height: 100%; background: var(--good); border-radius: 3px; }
+  .need .bar > div.low { background: var(--bad); }
+  .need .bar > div.mid { background: var(--warn); }
+  #chronicle {
+    overflow-y: auto;
+    height: 46dvh;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 4px 2px;
+    overflow-wrap: anywhere;
+  }
+  #chronicle .line { padding: 1px 6px; border-radius: 4px; }
+  #chronicle .line.routine { color: #93a5c4; }
+  #chronicle .line.hl { color: #f0dfae; }
+  #chronicle .line.dim { opacity: 0.28; }
+  #chronicle .line.blank { padding: 0; }
+  @media (min-width: 980px) {
+    main { grid-template-columns: minmax(0, 7fr) minmax(330px, 5fr); }
+    #chronicle { height: calc(100dvh - 210px); max-height: 900px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="title-row">
+    <h1 id="ship-name">Starship</h1>
+    <span class="meta">Day <b id="clock-day">1</b>, <b id="clock-time">00:00</b></span>
+    <span class="meta">speed <b id="speed-readout">3x</b></span>
+    <span class="meta">stream <b id="hash">…</b></span>
+    <span class="meta"><b id="event-count">0</b> events</span>
+  </div>
+  <div class="controls">
+    <button id="play-btn" type="button">Pause</button>
+    <div class="speed-group" id="speed-group" role="group" aria-label="Playback speed"></div>
+    <div class="seed-group">
+      <label for="seed-input">Seed</label>
+      <input id="seed-input" type="number" value="42" step="1">
+      <button id="new-voyage-btn" type="button">New voyage</button>
+      <button id="random-btn" type="button">Random seed</button>
+    </div>
+    <label class="toggle">
+      <input id="highlights-toggle" type="checkbox" checked>
+      Highlights only
+    </label>
+  </div>
+</header>
+<div id="weather-banner">Space weather: <b id="weather-name">calm</b></div>
+<main>
+  <section aria-label="Ship schematic">
+    <h2>Ship</h2>
+    <svg id="ship-svg" role="img" aria-label="Schematic of the ship and crew positions"></svg>
+  </section>
+  <div id="side">
+    <section aria-label="Crew">
+      <h2>Crew</h2>
+      <div id="crew-panel"></div>
+    </section>
+    <section aria-label="Chronicle">
+      <h2>Chronicle</h2>
+      <div id="chronicle"></div>
+    </section>
+  </div>
+</main>
+<script src="./dist/bundle.js"></script>
+</body>
+</html>

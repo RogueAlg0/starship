@@ -80,6 +80,29 @@ some of a grudge's heat: the system needs its negative feedback, or
 every long run ends in a ship-wide feud (early tuning did exactly
 that).
 
+## The viewer is a separate layer (Oct 18, 2026)
+
+The browser viewer lives under `viewer/` (its own tsconfig, an esbuild
+bundle, a small static server on port 5176) and imports the engine from
+`src/` unchanged, like the reference project's viewer. To drive a run
+incrementally, `src/sim.ts` gained a stepper API (`createRun` /
+`step()`), and the batch `runSimulation` is implemented on top of it;
+the refactor is proven bit-identical by the seed-42 gate: hash
+cf1dffaeb4796f91 over 4,320 ticks before and after, with the event and
+chronicle files byte-identical. The chronicle renderer was split the
+same way: one implementation renders a finished log at once for the
+CLI and streams line by line for the viewer.
+
+Playback mirrors the reference viewer's scheme: speeds 1 to 6, with
+1x as the slow witness pace (one tick every 2.5 seconds) up to 60
+ticks per second at 6x, Space to pause, the seed in the URL. The
+viewer is built for long, slow sessions on a phone: a frame advances
+at most 5 ticks and discards any larger backlog, so a tab that slept
+for hours resumes gently instead of burst-simulating its absence; and
+the chronicle keeps at most 300 line elements in the DOM (the full
+rendered log stays in memory as text) so hours of streaming stay
+smooth.
+
 ## Chronicle truth mode
 
 The chronicle renders the event log as a ship's log. The config flag

@@ -96,10 +96,45 @@ tests.
   evidence afterwards.
 - `test/`: the test suites, at the package root like the reference
   layout.
+- `viewer/`: the browser viewer (own tsconfig, esbuild bundle, static
+  server), a separate layer over the same engine. See the Viewer
+  section below.
 
 ## Viewer
 
-A viewer is planned as a separate layer that runs the same engine,
-mirroring how the reference project separates its viewer from its
-simulation. It will live under `viewer/` and will not change engine
-code paths. It does not exist yet.
+The viewer is a separate layer that runs the same engine in the
+browser, mirroring how the reference project separates its viewer from
+its simulation. It lives under `viewer/`, imports the engine from
+`src/`, and changes no engine code paths: a run is driven through the
+stepper API in `src/sim.ts` (`createRun`, then `step()` per tick),
+which the batch CLI also uses.
+
+```bash
+npm run viewer
+```
+
+Then open http://localhost:5176. The seed rides in the URL —
+http://localhost:5176/?seed=42 opens that voyage directly, and the URL
+updates when a new voyage starts — so a link can carry a specific ship
+to a phone. The page is mobile-first and touch-friendly: a schematic of
+the ship with the crew as dots gliding between rooms, a live crew panel
+with need bars (tap a name to highlight that person on the schematic
+and in the chronicle), the space-weather banner, and the chronicle
+streaming in ship time with a highlights-only filter on by default.
+
+Playback mirrors the reference viewer's controls: a Play/Pause button,
+the Space key, and speed keys 1 to 6 (with matching on-screen buttons).
+Speeds are 1x = one tick every 2.5 seconds (the slow witness pace),
+2x = 1 tick/sec, 3x = 3 ticks/sec, 4x = 8 ticks/sec, 5x = 20 ticks/sec,
+6x = 60 ticks/sec. The header shows the ship's name, the Day and
+ship-clock, the current speed, and the live event-stream hash, so
+determinism stays visible. Two choices keep long 1x sessions smooth:
+a frame advances at most 5 ticks and discards any larger backlog (a
+slept phone resumes gently, never burst-simulating), and the chronicle
+keeps at most 300 line elements in the DOM while the full rendered log
+stays in memory.
+
+For link publishing, `npm run viewer:static` writes a single
+self-contained page at `viewer/dist-static/index.html` with the bundle
+inlined. Build outputs (`viewer/dist/`, `viewer/dist-static/`) are not
+committed.

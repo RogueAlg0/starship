@@ -31,6 +31,12 @@ export interface BuiltWorld {
   crew: CrewMember[];
   /** Records of the live source; empty when a replay source was supplied. */
   readonly decisions: DecisionRecord[];
+  /**
+   * Advance exactly one tick. The run_start and departure events are
+   * emitted on the first step, so a stepped run and a batch run produce
+   * the same event stream.
+   */
+  step(): void;
   run(ticks: number): void;
 }
 
@@ -88,6 +94,14 @@ export function buildWorld(
   engine.addInvariant("crew state in range", () => checkCrewState(crew, ship));
   engine.addInvariant("ship state in range", () => checkShipState(ship));
 
+  let started = false;
+  const start = (): void => {
+    if (started) return;
+    started = true;
+    world.emit("run_start", [], { seed: String(config.seed) });
+    world.emit("departure", [], { ship: ship.name });
+  };
+
   return {
     world,
     engine,
@@ -96,11 +110,57 @@ export function buildWorld(
     get decisions() {
       return decisions instanceof UtilitySource ? decisions.records : [];
     },
+    step() {
+      start();
+      engine.step();
+    },
     run(ticks: number) {
-      world.emit("run_start", [], { seed: String(config.seed) });
-      world.emit("departure", [], { ship: ship.name });
+      start();
       engine.run(ticks);
     },
+  };
+}
+
+/**
+ * A run driven incrementally: the shape the viewer uses. step() advances
+ * exactly one tick; world, ship, and crew expose the live state; hash()
+ * names the event stream so far.
+ */
+export interface RunContext {
+  readonly world: World;
+  readonly engine: Engine;
+  readonly ship: Ship;
+  readonly crew: CrewMember[];
+  /** Records of the live source; empty when a replay source was supplied. */
+  readonly decisions: DecisionRecord[];
+  /** The current tick (ticks completed so far). */
+  readonly tick: number;
+  step(): void;
+  run(ticks: number): void;
+  /** The event-stream hash of everything emitted so far. */
+  hash(): string;
+}
+
+/** Create a run context without advancing it. */
+export function createRun(
+  config: SimConfig,
+  source?: DecisionSource,
+): RunContext {
+  const built = buildWorld(config, source);
+  return {
+    world: built.world,
+    engine: built.engine,
+    ship: built.ship,
+    crew: built.crew,
+    get decisions() {
+      return built.decisions;
+    },
+    get tick() {
+      return built.world.tick;
+    },
+    step: () => built.step(),
+    run: (ticks: number) => built.run(ticks),
+    hash: () => built.world.events.hash(),
   };
 }
 
@@ -115,7 +175,7 @@ export function runSimulation(
   ticks: number,
   source?: DecisionSource,
 ): SimulationOutcome {
-  const built = buildWorld(config, source);
-  built.run(ticks);
-  return { world: built.world, decisions: built.decisions };
+  const run = createRun(config, source);
+  run.run(ticks);
+  return { world: run.world, decisions: run.decisions };
 }

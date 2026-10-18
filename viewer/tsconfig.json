@@ -1,0 +1,1 @@
+{"compilerOptions":{"lib":["ES2022","DOM","DOM.Iterable"],"types":[]},"extends":"../tsconfig.json","include":["src"]}

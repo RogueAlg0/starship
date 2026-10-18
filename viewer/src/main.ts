@@ -23,16 +23,15 @@ import type { SimEvent } from "../../src/log/events.ts";
 import { CONFIG } from "../../src/scenario/config.ts";
 import { createRun, type RunContext } from "../../src/sim.ts";
 import type { CrewMember } from "../../src/entities/crew.ts";
-import type { Ship } from "../../src/world/ship.ts";
 import {
   appearanceOf,
   departmentOf,
   faceStateOf,
-  getFace,
   getPortraitCanvas,
   stateSignature,
 } from "./faces.ts";
 import { dailySeed } from "./daily.ts";
+import { DeckView } from "./deck.ts";
 
 /** Playback speeds: keys and buttons 1 to 6, mirroring the reference. */
 const SPEEDS = [
@@ -47,11 +46,6 @@ const SPEEDS = [
 const MAX_TICKS_PER_FRAME = 5;
 const MAX_CHRONICLE_DOM_LINES = 300;
 
-const ROOM_W = 148;
-const ROOM_H = 64;
-const GAP_X = 48;
-const GAP_Y = 18;
-
 const NEED_KEYS = ["energy", "hunger", "social", "morale"] as const;
 type NeedKey = (typeof NEED_KEYS)[number];
 const NEED_LABELS: Record<NeedKey, string> = {
@@ -61,31 +55,10 @@ const NEED_LABELS: Record<NeedKey, string> = {
   morale: "Morale",
 };
 
-const SVGNS = "http://www.w3.org/2000/svg";
-
 function must<T extends Element>(id: string): T {
   const element = document.getElementById(id);
   if (element === null) throw new Error(`viewer: no element #${id}`);
   return element as unknown as T;
-}
-
-function svg<K extends keyof SVGElementTagNameMap>(
-  tag: K,
-  attrs: Record<string, string | number>,
-): SVGElementTagNameMap[K] {
-  const element = document.createElementNS(SVGNS, tag);
-  for (const [key, value] of Object.entries(attrs)) {
-    element.setAttribute(key, String(value));
-  }
-  return element;
-}
-
-function luminance(hex: string): number {
-  const n = Number.parseInt(hex.slice(1), 16);
-  const r = (n >> 16) & 255;
-  const g = (n >> 8) & 255;
-  const b = n & 255;
-  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
 }
 
 // ---------------------------------------------------------------- state
@@ -122,238 +95,28 @@ const speedGroup = must<HTMLElement>("speed-group");
 const seedInput = must<HTMLInputElement>("seed-input");
 const weatherBanner = must<HTMLElement>("weather-banner");
 const weatherNameEl = must<HTMLElement>("weather-name");
-const svgEl = must<SVGSVGElement>("ship-svg");
+const deckCanvas = must<HTMLCanvasElement>("ship-canvas");
 const crewPanel = must<HTMLElement>("crew-panel");
 const chronicleEl = must<HTMLElement>("chronicle");
 const highlightsToggle = must<HTMLInputElement>("highlights-toggle");
 
-// ------------------------------------------------------------- schematic
+// ------------------------------------------------------------------ deck
 
-interface RoomPos {
-  x: number;
-  y: number;
+/** The procedural deck view for the current run's ship. */
+let deck: DeckView | null = null;
+
+/**
+ * The system each member last worked, from their work events: the
+ * viewer remembers it so the deck can stand them at that system's
+ * equipment while they work. Repairs need no memory: the member's
+ * live repairTarget names the system.
+ */
+const workSystemByMember = new Map<string, string | null>();
+
+function buildDeck(): void {
+  deck = new DeckView(run.ship, deckCanvas);
 }
 
-let roomPos: RoomPos[] = [];
-let roomGroups = new Map<number, SVGGElement>();
-let roomCondBars = new Map<number, SVGRectElement>();
-let roomSysLabels = new Map<number, SVGTextElement>();
-
-interface Dot {
-  group: SVGGElement;
-  member: CrewMember;
-  image: SVGImageElement | null;
-  /** Face state signature the marker currently shows. */
-  sig: string;
-  x: number;
-  y: number;
-  tx: number;
-  ty: number;
-}
-let dots = new Map<string, Dot>();
-
-function computeLayout(ship: Ship): { pos: RoomPos[]; width: number; height: number } {
-  const { dist } = ship.distancesFrom(0);
-  const layers = new Map<number, number[]>();
-  ship.rooms.forEach((room) => {
-    const d = Math.max(0, dist[room.index] ?? 0);
-    const layer = layers.get(d) ?? [];
-    layer.push(room.index);
-    layers.set(d, layer);
-  });
-  const maxLayer = Math.max(...layers.keys());
-  const maxRows = Math.max(...[...layers.values()].map((a) => a.length));
-  const width = (maxLayer + 1) * (ROOM_W + GAP_X) - GAP_X + 16;
-  const height = maxRows * (ROOM_H + GAP_Y) - GAP_Y + 16;
-  const pos: RoomPos[] = new Array<RoomPos>(ship.rooms.length);
-  for (const [d, members] of layers) {
-    const columnHeight = members.length * (ROOM_H + GAP_Y) - GAP_Y;
-    const y0 = (height - columnHeight) / 2;
-    members.forEach((roomIndex, row) => {
-      pos[roomIndex] = {
-        x: 8 + d * (ROOM_W + GAP_X),
-        y: y0 + row * (ROOM_H + GAP_Y),
-      };
-    });
-  }
-  return { pos, width, height };
-}
-
-function slotTarget(
-  member: CrewMember,
-  occupants: Map<number, CrewMember[]>,
-): { x: number; y: number } {
-  const roomIndex = member.room;
-  const group = occupants.get(roomIndex) ?? [member];
-  const slot = Math.max(0, group.indexOf(member));
-  const count = group.length;
-  const base = roomPos[roomIndex] ?? { x: 0, y: 0 };
-  const cols = Math.max(1, Math.ceil(Math.sqrt(count)));
-  const rows = Math.max(1, Math.ceil(count / cols));
-  const col = slot % cols;
-  const row = Math.floor(slot / cols);
-  const areaTop = 22;
-  const areaH = ROOM_H - areaTop - 24;
-  return {
-    x: base.x + ((col + 1) * ROOM_W) / (cols + 1),
-    y: base.y + areaTop + ((row + 1) * areaH) / (rows + 1),
-  };
-}
-
-function buildSchematic(): void {
-  const ship = run.ship;
-  const layout = computeLayout(ship);
-  roomPos = layout.pos;
-  svgEl.setAttribute(
-    "viewBox",
-    `0 0 ${layout.width} ${layout.height}`,
-  );
-  svgEl.replaceChildren();
-  roomGroups = new Map();
-  roomCondBars = new Map();
-  roomSysLabels = new Map();
-
-  // Connections first, under the rooms.
-  for (const room of ship.rooms) {
-    for (const next of room.neighbors) {
-      if (next < room.index) continue;
-      const a = layout.pos[room.index] as RoomPos;
-      const b = layout.pos[next] as RoomPos;
-      svgEl.appendChild(
-        svg("line", {
-          x1: a.x + ROOM_W / 2,
-          y1: a.y + ROOM_H / 2,
-          x2: b.x + ROOM_W / 2,
-          y2: b.y + ROOM_H / 2,
-          class: "edge",
-        }),
-      );
-    }
-  }
-
-  for (const room of ship.rooms) {
-    const p = layout.pos[room.index] as RoomPos;
-    const group = svg("g", { class: "room" });
-    group.appendChild(
-      svg("rect", {
-        x: p.x,
-        y: p.y,
-        width: ROOM_W,
-        height: ROOM_H,
-        rx: 9,
-        class: "room-rect",
-      }),
-    );
-    const name = svg("text", {
-      x: p.x + ROOM_W / 2,
-      y: p.y + 16,
-      class: "room-name",
-    });
-    name.textContent = room.name;
-    group.appendChild(name);
-    const sysLabel = svg("text", {
-      x: p.x + ROOM_W / 2,
-      y: p.y + ROOM_H - 12,
-      class: "room-sys",
-    });
-    group.appendChild(sysLabel);
-    roomSysLabels.set(room.index, sysLabel);
-    if (ship.systemsInRoom(room.index).length > 0) {
-      group.appendChild(
-        svg("rect", {
-          x: p.x + 6,
-          y: p.y + ROOM_H - 8,
-          width: ROOM_W - 12,
-          height: 4,
-          rx: 2,
-          class: "condbar-bg",
-        }),
-      );
-      const bar = svg("rect", {
-        x: p.x + 6,
-        y: p.y + ROOM_H - 8,
-        width: ROOM_W - 12,
-        height: 4,
-        rx: 2,
-        fill: "#57c465",
-      });
-      group.appendChild(bar);
-      roomCondBars.set(room.index, bar);
-    }
-    svgEl.appendChild(group);
-    roomGroups.set(room.index, group);
-  }
-
-  // Crew markers on top: a mini face in a department-coloured ring.
-  // If a face cannot be rendered for some reason, the marker falls back
-  // to the old coloured dot with the person's initial.
-  dots = new Map();
-  const occupants = occupantsByRoom();
-  for (const member of run.crew) {
-    const dept = departmentOf(member.roleKey);
-    const group = svg("g", { class: "crew-dot" });
-    let image: SVGImageElement | null = null;
-    let sig = "";
-    try {
-      const face = getFace(member);
-      sig = face.signature;
-      group.appendChild(
-        svg("rect", {
-          x: -12,
-          y: -12,
-          width: 24,
-          height: 24,
-          rx: 7,
-          fill: dept.colour,
-          class: "marker-ring",
-        }),
-      );
-      image = svg("image", {
-        x: -10,
-        y: -10,
-        width: 20,
-        height: 20,
-        href: face.miniUrl,
-      });
-      group.appendChild(image);
-    } catch {
-      const circle = svg("circle", { r: 8.5, fill: dept.colour, class: "core" });
-      const letter = svg("text", { y: 3 });
-      letter.setAttribute(
-        "fill",
-        luminance(dept.colour) > 0.55 ? "#131a26" : "#f4f7fb",
-      );
-      letter.textContent = member.name.charAt(0);
-      group.appendChild(circle);
-      group.appendChild(letter);
-    }
-    group.addEventListener("click", () => {
-      tapCrew(member.id);
-    });
-    svgEl.appendChild(group);
-    const target = slotTarget(member, occupants);
-    dots.set(member.id, {
-      group,
-      member,
-      image,
-      sig,
-      x: target.x,
-      y: target.y,
-      tx: target.x,
-      ty: target.y,
-    });
-  }
-}
-
-function occupantsByRoom(): Map<number, CrewMember[]> {
-  const map = new Map<number, CrewMember[]>();
-  for (const member of run.crew) {
-    const list = map.get(member.room) ?? [];
-    list.push(member);
-    map.set(member.room, list);
-  }
-  return map;
-}
 
 // ------------------------------------------------------------ crew panel
 
@@ -445,9 +208,6 @@ function selectCrew(id: string | null): void {
   selectedCrew = id;
   for (const [crewId, ui] of crewUi) {
     ui.row.classList.toggle("selected", crewId === id);
-  }
-  for (const [crewId, dot] of dots) {
-    dot.group.classList.toggle("selected", crewId === id);
   }
   refreshLineDims();
 }
@@ -806,6 +566,21 @@ function drainEvents(): void {
       const to = event.data.to;
       if (typeof to === "string") weatherName = to;
     }
+    if (event.type === "work") {
+      const actor = event.actors[0];
+      const system = event.data.system;
+      if (actor !== undefined) {
+        workSystemByMember.set(
+          actor,
+          typeof system === "string" ? system : null,
+        );
+      }
+    }
+    if (event.type === "accusation") {
+      // Accusations are spoken aloud in-fiction: a speech bubble.
+      const actor = event.actors[0];
+      if (actor !== undefined) deck?.speech(actor);
+    }
     for (const line of renderer.push(event)) {
       allLines.push(line);
       appendLineToDom(line);
@@ -860,10 +635,11 @@ function startVoyage(seed: number, opts?: { daily?: boolean }): void {
   closePersonCard();
   accumulator = 0;
   weatherName = CONFIG.weather.states[0] ?? "calm";
+  workSystemByMember.clear();
   chronicleEl.replaceChildren();
   shipNameEl.textContent = run.ship.name;
   seedInput.value = String(seed);
-  buildSchematic();
+  buildDeck();
   buildCrewPanel();
   drainEvents(); // ship_generated and crew_generated header lines
   updateHeader();
@@ -925,11 +701,6 @@ function updateSlowUi(): void {
         faceCtx.clearRect(0, 0, ui.face.width, ui.face.height);
         faceCtx.drawImage(getPortraitCanvas(member, state), 0, 0);
       }
-      const dot = dots.get(member.id);
-      if (dot !== undefined && dot.image !== null) {
-        dot.sig = sig;
-        dot.image.setAttribute("href", getFace(member, state).miniUrl);
-      }
     }
   }
 
@@ -938,38 +709,6 @@ function updateSlowUi(): void {
     renderPersonCard();
   }
 
-  for (const room of run.ship.rooms) {
-    const systems = run.ship.systemsInRoom(room.index);
-    const bar = roomCondBars.get(room.index);
-    const group = roomGroups.get(room.index);
-    const label = roomSysLabels.get(room.index);
-    if (systems.length === 0) continue;
-    let worst = systems[0] as (typeof systems)[number];
-    for (const system of systems) {
-      if (system.condition < worst.condition) worst = system;
-    }
-    if (bar !== undefined) {
-      const width = Math.max(0, (ROOM_W - 12) * worst.condition);
-      bar.setAttribute("width", width.toFixed(1));
-      bar.setAttribute(
-        "fill",
-        worst.condition < 0.35
-          ? "#e5534b"
-          : worst.condition < 0.65
-            ? "#e8a33d"
-            : "#57c465",
-      );
-    }
-    if (label !== undefined) {
-      label.textContent =
-        systems.length === 1
-          ? `${worst.name} ${Math.round(worst.condition * 100)}%`
-          : `${worst.name} ${Math.round(worst.condition * 100)}% +${systems.length - 1}`;
-    }
-    if (group !== undefined) {
-      group.classList.toggle("damaged", worst.condition < 0.5);
-    }
-  }
 }
 
 function frame(nowMs: number): void {
@@ -996,17 +735,21 @@ function frame(nowMs: number): void {
     }
   }
 
-  // Crew dots glide toward their rooms.
-  const occupants = occupantsByRoom();
-  const blend = Math.min(1, dtMs / 220);
-  for (const dot of dots.values()) {
-    const target = slotTarget(dot.member, occupants);
-    dot.tx = target.x;
-    dot.ty = target.y;
-    dot.x += (dot.tx - dot.x) * blend;
-    dot.y += (dot.ty - dot.y) * blend;
-    dot.group.setAttribute("transform", `translate(${dot.x.toFixed(1)} ${dot.y.toFixed(1)})`);
+  // The deck: bodies glide, work, spark, and think, on canvas.
+  if (deck !== null) {
+    const tickMs = playing
+      ? 1000 / (SPEEDS[speedIndex] as (typeof SPEEDS)[number]).ticksPerSecond
+      : Number.POSITIVE_INFINITY;
+    deck.frame(run.crew, {
+      now: nowMs,
+      dtMs,
+      tickMs,
+      snap: speedIndex >= 4,
+      selectedId: selectedCrew,
+      workSystem: workSystemByMember,
+    });
   }
+
 
   if (nowMs - lastSlowUiMs > 200) {
     lastSlowUiMs = nowMs;
@@ -1041,6 +784,14 @@ SPEEDS.forEach((speed, i) => {
 
 playBtn.addEventListener("click", () => setPlaying(!playing));
 dailyBtn.addEventListener("click", () => startDailyVoyage());
+deckCanvas.addEventListener("click", (event) => {
+  const rect = deckCanvas.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return;
+  const x = (event.clientX - rect.left) * (deckCanvas.width / rect.width);
+  const y = (event.clientY - rect.top) * (deckCanvas.height / rect.height);
+  const id = deck?.pick(x, y);
+  if (id !== null && id !== undefined) tapCrew(id);
+});
 must<HTMLButtonElement>("new-voyage-btn").addEventListener("click", () => {
   const seed = Number(seedInput.value);
   startVoyage(Number.isFinite(seed) ? Math.trunc(seed) : 42);

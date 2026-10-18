@@ -169,54 +169,14 @@
     color: var(--muted);
     font-weight: 600;
   }
-  #ship-svg { width: 100%; height: auto; display: block; }
-  #ship-svg .edge { stroke: #33465f; stroke-width: 2; }
-  #ship-svg .room-rect {
-    fill: var(--panel-2);
-    stroke: var(--line);
-    stroke-width: 1.5;
-  }
-  #ship-svg .room.damaged .room-rect {
-    stroke: var(--bad);
-    stroke-width: 2.5;
-  }
-  @media (prefers-reduced-motion: no-preference) {
-    #ship-svg .room.damaged .room-rect { animation: pulse 1.6s ease-in-out infinite; }
-    @keyframes pulse { 50% { stroke-opacity: 0.45; } }
-  }
-  #ship-svg .room-name {
-    fill: var(--text);
-    font-size: 12.5px;
-    font-weight: 600;
-    text-anchor: middle;
-    pointer-events: none;
-  }
-  #ship-svg .room-sys {
-    fill: var(--muted);
-    font-size: 10.5px;
-    text-anchor: middle;
-    pointer-events: none;
-  }
-  #ship-svg .condbar-bg { fill: #0d1420; }
-  #ship-svg .crew-dot { cursor: pointer; }
-  #ship-svg .crew-dot .marker-ring {
-    stroke: #0b0f16;
-    stroke-width: 1.5;
-  }
-  #ship-svg .crew-dot circle.core {
-    stroke: #0b0f16;
-    stroke-width: 1.5;
-  }
-  #ship-svg .crew-dot text {
-    font-size: 9px;
-    font-weight: 700;
-    text-anchor: middle;
-    pointer-events: none;
-  }
-  #ship-svg .crew-dot.selected .marker-ring,
-  #ship-svg .crew-dot.selected circle.core {
-    stroke: #ffffff;
-    stroke-width: 3;
+  #ship-canvas {
+    width: 100%;
+    height: auto;
+    display: block;
+    image-rendering: pixelated;
+    background: #04060a;
+    border-radius: 8px;
+    cursor: pointer;
   }
   #side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
   .crew-row {
@@ -386,7 +346,7 @@
 <main>
   <section aria-label="Ship schematic">
     <h2>Ship</h2>
-    <svg id="ship-svg" role="img" aria-label="Schematic of the ship and crew positions"></svg>
+    <canvas id="ship-canvas" role="img" aria-label="Top-down deck plan of the ship: rooms, equipment, and crew at work"></canvas>
   </section>
   <div id="side">
     <section aria-label="Crew">

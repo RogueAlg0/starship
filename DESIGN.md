@@ -263,6 +263,41 @@ typical 90-day voyage sees zero to two deaths, each one traceable in
 the chronicle to a chain a witness could recount. If a death cannot be
 explained from the log, the model is wrong, not the luck.
 
+## Construction and refit (future, engine system)
+
+**Status: future design, post-v0. Not built.** Recorded Oct 18, 2026.
+
+In the reference civ sim, the villagers build their village: the
+place visibly grows because the people in it do the work. The ship
+needs its long-form analog, because a witnessed ship should also
+change under its crew's hands over a long voyage.
+
+The shape of it: a hull is generated with some raw frame sections
+aboard, unfinished volume inside the silhouette. On long voyage
+legs, engineers can build a raw section out into a finished room
+over days of witnessed work: first the frame is closed, then walls
+and a door go in, then the fit-out (floor, fixtures, the room's
+defining equipment), and only then is it a room the sim can use, an
+entry in the room graph like any other. Each stage is work like any
+other work: crew walk to the section, labour ticks accumulate, and
+the build consumes stores (bulkhead material, fixtures, power
+budget), so a ship that builds is a ship that must have stocked for
+it at the last port. The chronicle narrates the stages the way it
+narrates everything else; a finished room is a small ceremony.
+
+Ports offer the other half: refits. Docked time and port stores can
+swap a room's kind (a cargo bay becomes a second hydroponics),
+install a system the ship generated without, or strip a room back
+to frame to make space. Refits are paperwork and labour, witnessed
+the same way.
+
+Open questions for when this is scheduled: which rooms a given hull
+may grow (adjacency and hull stress as quiet constraints), whether
+construction accidents join the harm model, and how the deck
+derivation in the viewer grows a room mid-run (the floor plan is
+derived per ship today; a growing ship needs it derived per era of
+the ship). None of this touches v0.
+
 ## Version zero slice
 
 One ship. Twelve crew. Needs and relationships. One incident generator:

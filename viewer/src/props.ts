@@ -1,0 +1,363 @@
+// Props: the ship's furniture and equipment as string-grid pixel art.
+//
+// Same tradition as the faces: no image assets, everything painted in
+// code from small character grids with a palette, once, into canvases
+// that the deck's static layer blits where the layout puts them. One
+// character is one pixel. A "." is transparent. Props are drawn at the
+// deck's tile scale: a sprite pixel is one canvas pixel, and a tile is
+// TILE_PX canvas pixels, so a 6x4 console sits inside a room tile grid
+// as furniture against a wall, not as a full tile of machinery.
+//
+// Floors are painted per tile by floorTile(): a base treatment per room
+// kind (grating, pale tile, soil, checker, carpet, concrete) with a
+// hash-driven per-tile variation, so no two tiles are quite alike and
+// no run can shuffle them: the hash key is the ship seed and the tile's
+// own coordinates.
+
+import { hash01 } from "./faces.ts";
+
+export interface SpriteDef {
+  rows: readonly string[];
+  pal: Record<string, string>;
+}
+
+export function spriteCanvas(def: SpriteDef): HTMLCanvasElement {
+  const h = def.rows.length;
+  const w = Math.max(...def.rows.map((r) => r.length));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (ctx === null) return canvas;
+  def.rows.forEach((row, y) => {
+    for (let x = 0; x < row.length; x++) {
+      const ch = row.charAt(x);
+      if (ch === "." || ch === " ") continue;
+      const colour = def.pal[ch];
+      if (colour === undefined) continue;
+      ctx.fillStyle = colour;
+      ctx.fillRect(x, y, 1, 1);
+    }
+  });
+  return canvas;
+}
+
+const cache = new Map<string, HTMLCanvasElement>();
+export function propCanvas(name: string): HTMLCanvasElement {
+  const hit = cache.get(name);
+  if (hit !== undefined) return hit;
+  const def = PROPS[name];
+  if (def === undefined) throw new Error(`props: no sprite named ${name}`);
+  const canvas = spriteCanvas(def);
+  cache.set(name, canvas);
+  return canvas;
+}
+
+/** Pixel width and height of a named sprite. */
+export function propSize(name: string): { w: number; h: number } {
+  const def = PROPS[name];
+  if (def === undefined) throw new Error(`props: no sprite named ${name}`);
+  return {
+    w: Math.max(...def.rows.map((r) => r.length)),
+    h: def.rows.length,
+  };
+}
+
+const METAL = "#39465c";
+const METAL_D = "#232c3d";
+const METAL_L = "#55678a";
+
+// ------------------------------------------------------------- sprites
+
+export const PROPS: Record<string, SpriteDef> = {
+  // A work console: dark desk, teal screen with a bright trace line.
+  console: {
+    rows: [
+      "mmmmmm",
+      "mTTTTm",
+      "mTttTm",
+      "mmmmmm",
+      "m.kk.m",
+      "bbbbbb",
+    ],
+    pal: {
+      m: METAL,
+      T: "#0d3b3a",
+      t: "#2ec4b6",
+      k: "#e8a33d",
+      b: METAL_D,
+    },
+  },
+  // Comms console: screen plus a little dish glyph on top.
+  comms: {
+    rows: [
+      "...d..",
+      "..d.d.",
+      "mmmmmm",
+      "mBBBBm",
+      "mBbbBm",
+      "mmmmmm",
+      "bbbbbb",
+    ],
+    pal: {
+      d: "#9fb4cc",
+      m: METAL,
+      B: "#10304f",
+      b: "#57a8e8",
+    },
+  },
+  // The bridge main screen frame. The interior is drawn dark here; the
+  // deck's dynamic layer paints the radar sweep inside it.
+  mainscreen: {
+    rows: [
+      "mmmmmmmm",
+      "m......m",
+      "m......m",
+      "m......m",
+      "mmmmmmmm",
+    ],
+    pal: { m: METAL_L },
+  },
+  // Captain's chair: high back, armrests.
+  chair: {
+    rows: [
+      ".cc.",
+      "cccc",
+      "cccc",
+      ".cc.",
+      "s..s",
+    ],
+    pal: { c: "#7a3b3b", s: METAL_D },
+  },
+  // Reactor core housing: a vertical cylinder; the bright core column
+  // (cols 1-2) is left dark in the static layer and lit dynamically.
+  reactor: {
+    rows: [
+      ".mmmm.",
+      "mMMMMm",
+      "mM..Mm",
+      "mM..Mm",
+      "mM..Mm",
+      "mM..Mm",
+      "mMMMMm",
+      ".mmmm.",
+    ],
+    pal: { m: METAL_D, M: METAL },
+  },
+  // A machine block: vents, a gauge, a status jewel (lit dynamically).
+  machine: {
+    rows: [
+      "mmmmmm",
+      "mvvvvm",
+      "mvGv.m",
+      "mmmmmm",
+      "bbbbbb",
+    ],
+    pal: { m: METAL, v: METAL_D, G: "#c8d4e4", b: "#161d29" },
+  },
+  // A standing tank: life support, water, lab gas.
+  tank: {
+    rows: [
+      ".tt.",
+      "tTTt",
+      "tTTt",
+      "tTTt",
+      "tTTt",
+      ".tt.",
+    ],
+    pal: { t: "#6d7f96", T: "#93a7c2" },
+  },
+  // Medbay bed: frame, white sheet, red cross on the pillow end.
+  bed: {
+    rows: [
+      "fwwf",
+      "fwwf",
+      "frrf",
+      "fwwf",
+      "fwwf",
+      "ffff",
+    ],
+    pal: { f: "#5a6a82", w: "#e8edf2", r: "#d84a4a" },
+  },
+  // A wall cabinet: doors and handles.
+  cabinet: {
+    rows: [
+      "cccccc",
+      "c.kk.c",
+      "cccccc",
+    ],
+    pal: { c: "#7d8ea8", k: METAL_D },
+  },
+  // A monitor post: screen on a stand.
+  monitor: {
+    rows: [
+      "mmmm",
+      "mGGm",
+      "mmmm",
+      ".m..",
+      ".m..",
+    ],
+    pal: { m: METAL, G: "#8fe388" },
+  },
+  // Mess table with place settings.
+  table: {
+    rows: [
+      "tttttt",
+      "tpttpt",
+      "tttttt",
+      "tttttt",
+      ".t..t.",
+    ],
+    pal: { t: "#6e5136", p: "#cfd8e6" },
+  },
+  // A small chair, seen from above-ish: seat and back.
+  stool: {
+    rows: ["ss", "SS"],
+    pal: { s: "#54432c", S: "#77603e" },
+  },
+  // Serving counter: steel top, warm lamps (lit dynamically too).
+  counter: {
+    rows: [
+      "ssssssss",
+      "slllllls",
+      "ssssssss",
+      "bbbbbbbb",
+    ],
+    pal: { s: "#8b98ac", l: "#e8c98a", b: METAL_D },
+  },
+  // Bunk bed: two levels, pillow at the head.
+  bunk: {
+    rows: [
+      "fppf",
+      "fbbf",
+      "fbbf",
+      "fppf",
+      "fbbf",
+      "ffff",
+    ],
+    pal: { f: "#46536b", p: "#d9dee8", b: "#5d7ea6" },
+  },
+  // A locker: tall door, vent slits.
+  locker: {
+    rows: ["ll", "ll", "l.", "ll", "ll", "ll"],
+    pal: { l: "#66788f" },
+  },
+  // Hydroponics rack: frame, soil, crop rows in two greens.
+  rack: {
+    rows: [
+      "fffffff",
+      "fgggggf",
+      "fgsgsgf",
+      "fffffff",
+    ],
+    pal: { f: "#4c4237", g: "#3f9e4d", s: "#79c94f" },
+  },
+  // A cargo crate: planks and a stencil band.
+  crate: {
+    rows: [
+      "cccc",
+      "ckkc",
+      "cccc",
+      "cccc",
+    ],
+    pal: { c: "#8a6b3f", k: "#5f4825" },
+  },
+  // A barrel.
+  barrel: {
+    rows: [".bb.", "bBBb", "bBBb", ".bb."],
+    pal: { b: "#5d7186", B: "#7690ab" },
+  },
+  // Lab bench: pale top, bottles.
+  bench: {
+    rows: [
+      "bbbbbbbb",
+      "b.g.g..b",
+      "bbbbbbbb",
+      "d......d",
+    ],
+    pal: { b: "#9aa7ba", g: "#7fd4c1", d: METAL_D },
+  },
+  // Gym mat: a floor decal (walkable, drawn underfoot).
+  mat: {
+    rows: ["mmmm", "mmmm", "mmmm", "mmmm"],
+    pal: { m: "#31435f" },
+  },
+  // Weight rack: bar and plates.
+  weights: {
+    rows: [
+      "p....p",
+      "prrrp.",
+      "p....p",
+    ],
+    pal: { p: "#202733", r: "#8b98ac" },
+  },
+  // Suit hook row for the airlock: two suit silhouettes.
+  suits: {
+    rows: [
+      "s..s",
+      "ssss",
+      "s..s",
+      "s..s",
+    ],
+    pal: { s: "#c8ccd4" },
+  },
+};
+
+// -------------------------------------------------------------- floors
+
+interface FloorSpec {
+  base: string;
+  alt: string;
+  /** Checkerboard alternation instead of hash noise. */
+  checker?: boolean;
+  /** Edge line colour drawn on the tile's bottom/right, or null. */
+  edge: string | null;
+}
+
+const FLOORS: Record<string, FloorSpec> = {
+  bridge: { base: "#232d3f", alt: "#263248", edge: "#1a2231" },
+  engineering: { base: "#2b3038", alt: "#272c33", edge: "#1e2229" },
+  medbay: { base: "#aebfd0", alt: "#a3b4c7", edge: "#93a7bb", checker: true },
+  mess: { base: "#4a3b2c", alt: "#54422f", edge: "#3a2e22", checker: true },
+  quarters: { base: "#33364f", alt: "#363a54", edge: null },
+  hydroponics: { base: "#2e3a26", alt: "#323e29", edge: "#232c1d" },
+  cargo: { base: "#3d4148", alt: "#393d44", edge: "#2e3238" },
+  airlock: { base: "#434a55", alt: "#3f4650", edge: "#31363f" },
+  lab: { base: "#8e9cae", alt: "#8796a8", edge: "#78879b", checker: true },
+  gym: { base: "#2c3140", alt: "#2f3444", edge: "#232733" },
+};
+
+const DEFAULT_FLOOR: FloorSpec = {
+  base: "#2a3242",
+  alt: "#2d3648",
+  edge: "#212938",
+};
+
+/** The colour of one floor tile, set by the room kind and its hash. */
+export function floorTile(
+  kind: string,
+  seedKey: number,
+  gx: number,
+  gy: number,
+): string {
+  const spec = FLOORS[kind] ?? DEFAULT_FLOOR;
+  if (spec.checker === true) {
+    return (gx + gy) % 2 === 0 ? spec.base : spec.alt;
+  }
+  return hash01(seedKey, gx * 131 + gy * 197) < 0.5 ? spec.base : spec.alt;
+}
+
+/** The edge line colour for a floor tile, or null for none. */
+export function floorEdge(kind: string): string | null {
+  return (FLOORS[kind] ?? DEFAULT_FLOOR).edge;
+}
+
+/** Corridor plating: metal plates with a hash-worn tone. */
+export function corridorTile(seedKey: number, gx: number, gy: number): string {
+  return hash01(seedKey, gx * 131 + gy * 197) < 0.5 ? "#252e3d" : "#232b39";
+}
+
+/** Structure (unroomed interior) plating: darker than corridor. */
+export function structureTile(seedKey: number, gx: number, gy: number): string {
+  return hash01(seedKey, gx * 131 + gy * 197) < 0.5 ? "#171d29" : "#151a24";
+}

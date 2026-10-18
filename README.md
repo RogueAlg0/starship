@@ -116,11 +116,12 @@ npm run viewer
 Then open http://localhost:5176. The seed rides in the URL —
 http://localhost:5176/?seed=42 opens that voyage directly, and the URL
 updates when a new voyage starts — so a link can carry a specific ship
-to a phone. The page is mobile-first and touch-friendly: a schematic of
-the ship with the crew as dots gliding between rooms, a live crew panel
-with need bars (tap a name to highlight that person on the schematic
-and in the chronicle), the space-weather banner, and the chronicle
-streaming in ship time with a highlights-only filter on by default.
+to a phone. The page is mobile-first and touch-friendly: a top-down
+deck plan of the ship with the crew walking its rooms (see "The ship"
+below), a live crew panel with need bars (tap a name to highlight that
+person on the deck and in the chronicle), the space-weather banner,
+and the chronicle streaming in ship time with a highlights-only filter
+on by default.
 
 Playback mirrors the reference viewer's controls: a Play/Pause button,
 the Space key, and speed keys 1 to 6 (with matching on-screen buttons).
@@ -151,6 +152,53 @@ self-contained page at `viewer/dist-static/index.html` with the bundle
 inlined. Build outputs (`viewer/dist/`, `viewer/dist-static/`) are not
 committed.
 
+## The ship
+
+The schematic of boxes is gone. The viewer now draws the ship as a
+top-down deck you can walk through with your eyes: an elongated hull
+(tapered bow, engine block at the stern, blinking navigation lights,
+a starfield behind it) holding two bands of rooms along a central
+corridor. The floor plan is a deterministic derivation from the
+ship the engine generated: room sizes come from room kinds,
+engineering pins the stern and the bridge the bow, the remaining
+rooms chain by adjacency in the ship's own room graph, and doors
+pierce shared walls between neighbouring rooms and open onto the
+corridor. The same ship always yields the same deck; the engine
+knows nothing about it.
+
+Every room is dressed as itself, in code: consoles and the captain's
+chair on the bridge, a reactor core and machine blocks in
+engineering, beds in the medbay, tables and a serving counter in the
+mess, bunks in quarters, plant racks in hydroponics, crates and
+barrels in cargo, benches and tanks in the lab, mats in the gym,
+hazard stripes in the airlock. Floors differ by kind (grating, pale
+tile, soil green, checker, carpet, concrete). A room that hosts a
+ship system shows that system's equipment, with its name and live
+condition at the room's edge. All of it is painted from string-grid
+sprites and hash arithmetic in `viewer/src/props.ts` and
+`viewer/src/deck.ts`; there are no image assets.
+
+The crew are little 8x12 bodies in department colours, their heads
+carrying the same skin and hair as their panel portraits. They walk
+door to door between rooms at a pace matched to the tick, stand at
+the equipment when they work (the botanist at the racks, the cook at
+the counter, an engineer at the system their last work event names),
+and repairs throw small blue-white welding sparks from the worker's
+hands. The ship feels alive and shows its hurts: console lights
+blink, the reactor core and the stern engines glow with a brightness
+scaled by system condition, hydroponics racks shimmer under a light
+sweep, the bridge screen runs a slow radar sweep, and a room whose
+system drops below 60% flickers and throws orange damage sparks
+(below 30%: faster sparks and a blinking red warning lamp) until it
+is repaired. Thought and speech bubbles appear over crew, Sims-style,
+always from real state: a critical need, an active grudge, a strong
+suspicion, an accusation spoken aloud, or crewmates in conversation.
+
+Performance follows the faces pattern: the whole deck (hull, floors,
+walls, props) is pre-rendered once per ship to an offscreen canvas,
+and each frame draws that image, the dynamic light and spark layer
+(particles capped at 200), the bodies, and the labels.
+
 ## Faces
 
 The crew are not dots. Following the reference viewer's pattern, each
@@ -173,10 +221,11 @@ eyes, and holding an active grudge furrows the brow. The overlay hook
 is where future state (bandages, scars, a grey cast for the dead) will
 plug in when the simulation grows injuries.
 
-The schematic shows head-crop minis of the portraits in
-department-coloured rings (falling back to an initial dot only if a
-face cannot render). Tapping a crew member, in the panel or on the
-schematic, opens a person card: the large portrait, a prose bio
+On the deck, each person is a small body whose head carries the
+portrait's skin and hair and whose torso carries the department
+colour, so a figure across the ship matches the face in the panel.
+Tapping a crew member, in the panel or on the deck,
+opens a person card: the large portrait, a prose bio
 composed from the same hash-derived appearance plus the clauses live
 state has earned (tired, hungry, lonely, holding a grudge, suspected),
 a dossier (need bars, closest relationships with bond and trust, held

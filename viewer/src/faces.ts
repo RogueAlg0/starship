@@ -20,7 +20,7 @@ import type { CrewMember } from "../../src/entities/crew.ts";
  * a per-feature salt; no state, no RNG stream, so a look can never
  * diverge between viewers or runs.
  */
-function hash01(id: number, salt: number): number {
+export function hash01(id: number, salt: number): number {
   let h =
     Math.imul(id + 0x9e37, 0x85ebca6b) ^ Math.imul(salt + 0x27d4, 0x27d4eb2f);
   h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d);

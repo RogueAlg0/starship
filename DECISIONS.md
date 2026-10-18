@@ -174,6 +174,39 @@ seed 17 is the stormy day, an accusation-rich feud that stays
 bounded. For 2026-10-18 UTC, epoch day 20,744 gives index 3, so
 today's voyage is seed 30, the Vela Theorem.
 
+## The deck is a viewer-layer derivation (Oct 18, 2026)
+
+The viewer draws the ship as a top-down deck (rooms along a central
+corridor inside a tapered hull), replacing the SVG box schematic.
+The floor plan is derived in the viewer from the ship data the
+engine already exposes (rooms, kinds, adjacency, systems with
+condition), by deterministic hash arithmetic keyed on the ship's
+own signature: the same ship always yields the same deck, and the
+engine is unchanged (the seed-42 hash gate still reads
+cf1dffaeb4796f91). All art is code, in the faces tradition: string
+grids and palettes for props and crew bodies, hash arithmetic for
+floors, lights, and placement; no image assets. Damage is shown,
+not just numbered: a room whose worst system falls below 60%
+flickers and throws orange sparks from the system's equipment, and
+below 30% adds a blinking red warning lamp, keyed live to system
+condition. Working crew stand at the relevant equipment (a work
+event names the system; a repair reads the member's live
+repairTarget) and repairs throw blue-white welding sparks, a
+different colour from damage. Thought and speech bubbles are drawn
+only from real state and events (critical needs, grudges,
+suspicions, accusations, co-located socializing). Static interiors
+are pre-rendered once per ship; per-frame work is the dynamic
+layer, bodies, and labels, with particles capped at 200.
+
+## Construction and refit recorded (Oct 18, 2026)
+
+At the user's direction on Oct 18, 2026: DESIGN.md gains a
+"Construction and refit (future, engine system)" section. The civ
+sim's villagers build their village; our long-form analog is
+engineers building raw frame sections into finished rooms over
+long legs, and refits at ports. Future/post-v0 design only; no
+code was written for it.
+
 ## Chronicle truth mode
 
 The chronicle renders the event log as a ship's log. The config flag

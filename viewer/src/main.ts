@@ -129,6 +129,7 @@ const alertStackEl = must<HTMLElement>("alert-stack");
 const deckCanvas = must<HTMLCanvasElement>("ship-canvas");
 const deck1Btn = must<HTMLButtonElement>("deck1-btn");
 const deck2Btn = must<HTMLButtonElement>("deck2-btn");
+const exteriorBtn = must<HTMLButtonElement>("exterior-btn");
 const minimapCanvas = must<HTMLCanvasElement>("minimap-canvas");
 const crewPanel = must<HTMLElement>("crew-panel");
 const chronicleEl = must<HTMLElement>("chronicle");
@@ -243,17 +244,35 @@ function buildDeck(): void {
 /**
  * Show one deck on the main canvas. The other deck keeps living: its
  * wear accrues, its crew ride the lifts, and the minimap watches it.
+ * Coming in from outside, this is also the way back: the deck focus
+ * was never moved by stepping out.
  */
 function setViewDeck(next: number): void {
   if (deck === null) return;
+  deck.setExterior(false);
   deck.setDeck(next);
   refreshDeckButtons();
 }
 
+/** Step outside: the ship from the hull, windows lit by the life inside. */
+function setViewExterior(): void {
+  if (deck === null) return;
+  deck.setExterior(true);
+  refreshDeckButtons();
+}
+
 function refreshDeckButtons(): void {
+  const outside = deck?.exteriorActive ?? false;
   const active = deck?.visibleDeck ?? 0;
-  deck1Btn.classList.toggle("active", active === 0);
-  deck2Btn.classList.toggle("active", active === 1);
+  deck1Btn.classList.toggle("active", !outside && active === 0);
+  deck2Btn.classList.toggle("active", !outside && active === 1);
+  exteriorBtn.classList.toggle("active", outside);
+  deckCanvas.setAttribute(
+    "aria-label",
+    outside
+      ? "The ship from outside: her hull in profile, windows lit by the crew inside. Tap a part of the hull to go to its deck."
+      : "Top-down deck plan of the ship: rooms, equipment, and crew at work",
+  );
 }
 
 // ---------------------------------------------------------------- alerts
@@ -1354,6 +1373,8 @@ function frame(nowMs: number): void {
       carry: carryByMember,
       dayMinutes:
         (run.tick % CONFIG.time.ticksPerDay) * CONFIG.time.minutesPerTick,
+      storm: weatherName === "radiation storm",
+      meal: mealWindowAt(run.tick),
       tick: run.tick,
       speedTps: playing
         ? (SPEEDS[speedIndex] as (typeof SPEEDS)[number]).ticksPerSecond
@@ -1414,6 +1435,7 @@ playBtn.addEventListener("click", () => setPlaying(!playing));
 dailyBtn.addEventListener("click", () => startDailyVoyage());
 deck1Btn.addEventListener("click", () => setViewDeck(0));
 deck2Btn.addEventListener("click", () => setViewDeck(1));
+exteriorBtn.addEventListener("click", () => setViewExterior());
 minimapCanvas.addEventListener("click", (event) => {
   if (minimap === null) return;
   const rect = minimapCanvas.getBoundingClientRect();
@@ -1428,6 +1450,12 @@ deckCanvas.addEventListener("click", (event) => {
   if (rect.width === 0 || rect.height === 0) return;
   const x = (event.clientX - rect.left) * (deckCanvas.width / rect.width);
   const y = (event.clientY - rect.top) * (deckCanvas.height / rect.height);
+  if (deck !== null && deck.exteriorActive) {
+    // Outside, a tap names a part of the hull and goes to its deck.
+    const target = deck.pickSection(x, y);
+    if (target !== null) setViewDeck(target);
+    return;
+  }
   const id = deck?.pick(x, y);
   if (id !== null && id !== undefined) tapCrew(id);
 });
@@ -1466,6 +1494,8 @@ window.addEventListener("keydown", (event) => {
     setViewDeck(0);
   } else if (event.key === "8" || event.key === "]") {
     setViewDeck(1);
+  } else if (event.key === "9") {
+    setViewExterior();
   }
 });
 

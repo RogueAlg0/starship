@@ -721,3 +721,69 @@ from the deck layout's own props) or from the event stream it
 already drains (leisure_game rosters, move destinations). No
 engine field was added and no sim behaviour changed. Bundle grew
 266,997 -> 279,136 B (dist) for the new staging code and sprites.
+
+## Hull exterior view, built (Oct 18, 2026)
+
+The second half of the user's "Both, decks first" arrived: the
+decks shipped, the exterior followed. New module
+`viewer/src/exterior.ts`, driven by the DeckView, which owns the
+sky, the shake transform, and the staging feed both views share.
+
+Derivation: the silhouette is computed from the ship signature
+the viewer already holds, in the deck plan's own pixel footprint
+(the same stern, bow tip, and mid-height, turned sideways). Hull
+length and the two window bands come from the deck plan's width
+and deck count; each compartment's windows spread across its own
+room rect's span, rowed by deck and nudged by which plan band the
+room sits in; the bridge blister rides the spine over the bridge's
+span, the sensor mast stands over the lab, the airlock hatch sits
+at the airlock, and the engine bells reuse the wear layer's stern
+block geometry. Archetypes are designed but not yet in shipgen,
+so character is read off the ship that exists: a wide cargo bay
+bellies the hull and hangs pods under the keel, a small ship draws
+sleeker, and the bow (needle or blunt), livery stripe, spine, and
+keel are the seed's hash picks. Same seed, same ship: a headless
+harness compares the full paint-call stream of two constructions
+and finds them identical, and seed 7's ship different.
+
+What is live: the windows (the interior made visible: a room with
+crew awake in it is lit in its kind's colour, a room of sleepers
+sits at a dim night-light, an empty room keeps the day's ambient
+or the night's standby, hydroponics always burns green, and at a
+meal window the mess goes warm with a halo); the engine plume and
+exhaust shimmer (length and brightness from the engines'
+condition and whether the ship is underway, guttering when the
+engines have failed); the running lights (the staging layer's
+storm-arrival strobe feeds them, and in storm weather they burn
+doubled with halos); the shake, inherited whole from the staging
+layer, storm kicks included; and damage on the skin (a system
+below 30% sparks at its hull station, a failed system vents
+vapour until it is mended, and the staged moments (sabotage,
+failure, repair) fire at the station from the same feeds the deck
+uses). What is static: the silhouette, painted once per ship; the
+window lights and the hull wear (the wear layer's own tracks:
+the engines' worst day scorched and pitted at the stern, the age
+stain, per-system scorch and repair plates) live on their own
+canvases and repaint only on bucketed signature changes, verified
+by harness (no repaint on an unchanged frame; a repaint when the
+ship's light or a damage bucket moves). A frame outside is three
+blits, the plume sprite, the lights, and a particle pool capped
+at 160 whose positions are pure functions of age; both gradient
+sprites are built once, beside the silhouette.
+
+Interaction: the view switcher gains an Exterior button and key
+9; the deck keys and the minimap come back inside (stepping out
+never moves the deck focus, so returning restores it); a tap on
+the hull goes to its deck (engine block and lower hull to Deck 2,
+blister and upper hull to Deck 1, sky to nothing). The chronicle,
+alerts, roster, and ribbon are untouched, and crew keep walking
+while the witness is outside, so the minimap stays live.
+
+Viewer-only: nothing under `src/` or `test/` changed. Gates:
+tests 40/40, purity green, typecheck clean, seed 42 at 4,320
+ticks holds 34,478 events and hash `b4f952711cb7ec7e`, replay
+exact. Bundle grew 279,136 -> 315,032 B (dist) for the new module.
+Descoped: a hover readout on the hull (not required; taps carry
+the interaction), and archetype-named silhouettes (archetypes are
+not in shipgen yet; the grammar above is the stand-in the design
+chapter prescribes until they are).

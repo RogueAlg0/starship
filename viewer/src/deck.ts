@@ -25,10 +25,13 @@
 // shafts at fixed fractions of the corridor are the only route
 // between decks: crew ride them, fading out on one deck and in on
 // the other. The viewer shows one deck at a time; the minimap
-// (minimap.ts) watches both. Doors pierce shared walls between
-// neighbouring rooms placed side by side, and every room opens onto
-// its deck's corridor. Crew paths route through those doors over a
-// walkable tile grid, smoothed by line of sight. The engine has no
+// (minimap.ts) watches both. A third view steps outside entirely:
+// the hull exterior (exterior.ts), the same ship in side profile
+// against the same sky, her windows lit by the life inside. Doors
+// pierce shared walls between neighbouring rooms placed side by
+// side, and every room opens onto its deck's corridor. Crew paths
+// route through those doors over a walkable tile grid, smoothed by
+// line of sight. The engine has no
 // floors: this is presentation of the room graph, nothing more.
 
 import type { CrewMember } from "../../src/entities/crew.ts";
@@ -45,6 +48,7 @@ import {
   type StageAnchor,
   type StageSystemState,
 } from "./staging.ts";
+import { ExteriorView } from "./exterior.ts";
 import {
   corridorTile,
   floorEdge,
@@ -57,7 +61,7 @@ import {
 export const TILE_PX = 8;
 
 const BAND_H = 9; // room band height, tiles
-const CORR_Y = 9; // corridor top row
+export const CORR_Y = 9; // corridor top row
 const CORR_H = 3; // corridor height
 const DECK_H = BAND_H * 2 + CORR_H; // 21
 export const OX = 5; // canvas tiles left of the hull stern (engine block zone)
@@ -1168,6 +1172,10 @@ export interface DeckFrameOpts {
   tick: number;
   /** Playback rate in ticks per second; 0 when paused (sky drift). */
   speedTps: number;
+  /** The ship is riding out a radiation storm (the exterior's lights). */
+  storm?: boolean;
+  /** The meal window open at this tick, if any (the exterior's mess glow). */
+  meal?: "breakfast" | "evening" | null;
 }
 
 /**
@@ -1247,6 +1255,10 @@ export class DeckView {
   private readonly bubbles = new BubbleLayer();
   /** The feel pass (./staging.ts): events staged in the world. */
   private readonly staging: StagingLayer;
+  /** The hull exterior (./exterior.ts): the ship from outside. */
+  private readonly exterior: ExteriorView;
+  /** True while the main canvas shows the exterior, not a deck. */
+  private viewExterior = false;
   /** Static deck with the wear layer composited in: one blit a frame. */
   private readonly composites: [HTMLCanvasElement, HTMLCanvasElement];
   /** The staging sync's input rows, mutated in place every frame. */
@@ -1373,6 +1385,13 @@ export class DeckView {
     this.staging = new StagingLayer(
       () => this.reducedMotionMq?.matches ?? false,
     );
+    this.exterior = new ExteriorView(ship, this.shipLayout, {
+      tile: TILE_PX,
+      ox: OX,
+      oy: OY,
+      deckH: DECK_H,
+      corrY: CORR_Y,
+    });
   }
 
   /** The deck the main canvas is showing: 0 upper, 1 lower. */
@@ -1393,6 +1412,27 @@ export class DeckView {
   /** Show a deck. Crew, wear, and light all follow the one ship. */
   setDeck(deck: number): void {
     this.viewDeck = deck === 1 ? 1 : 0;
+  }
+
+  /** True while the main canvas shows the hull exterior. */
+  get exteriorActive(): boolean {
+    return this.viewExterior;
+  }
+
+  /**
+   * Step outside, or come back in. The deck focus is untouched by
+   * stepping out: coming back restores the deck that was showing.
+   */
+  setExterior(on: boolean): void {
+    this.viewExterior = on;
+  }
+
+  /**
+   * The deck a tap on the hull belongs to (the exterior's own
+   * sections), or null outside the ship or while inside.
+   */
+  pickSection(xPx: number, yPx: number): number | null {
+    return this.viewExterior ? this.exterior.pickSection(xPx, yPx) : null;
   }
 
   /** The deck a room lives on. */
@@ -1442,6 +1482,9 @@ export class DeckView {
       this.anchorForSystem(systemId, deck),
       performance.now(),
     );
+    // The same moment, told on the hull: the exterior keeps its
+    // own staging at the system's hull station.
+    this.exterior.noteEvent(kind, systemId, performance.now());
   }
 
   /**
@@ -1971,7 +2014,12 @@ export class DeckView {
         row.deck = shipLayout.deckOfRoom[s.room] ?? 0;
       }
     }
-    this.staging.syncSystems(this.stageStates, now, this.anchorFor);
+    const crossed = this.staging.syncSystems(this.stageStates, now, this.anchorFor);
+    // A crossing into failure is staged on the hull too, at the
+    // system's station, whether or not anyone is outside to see it.
+    for (const id of crossed) {
+      this.exterior.noteEvent("failure", id, now);
+    }
     this.staging.updateTelegraphs(now, dt * 1000, this.viewDeck, this.anchorFor);
     const shake = this.staging.shakeOffset(now, this.viewDeck);
     ctx.save();
@@ -2227,6 +2275,30 @@ export class DeckView {
           if (st.atStation && st.workFx !== 0) st.facing = st.workFx;
         }
       }
+    }
+
+    // ---- outside, the same ship is drawn from the hull
+    // The movement above ran as usual (the minimap stays live, and
+    // the crew are where they should be when the witness comes back
+    // in); only the painting differs. The sky and the shake are
+    // already in place, shared with the deck view.
+    if (this.viewExterior) {
+      this.exterior.draw(ctx, {
+        now,
+        dtSec: dt,
+        speedTps: opts.speedTps,
+        dayMinutes: opts.dayMinutes,
+        tick: opts.tick,
+        crew,
+        storm: opts.storm === true,
+        meal: opts.meal ?? null,
+        navStrobe: this.staging.navStrobe(now),
+        trackOf: (id: string) => (this.wears[0] as WearLayer).trackOf(id),
+      });
+      // Near stars stay crisp above the hull: they are outside her.
+      this.backdrop.drawNear(ctx, now);
+      ctx.restore();
+      return;
     }
 
     // ---- the ship's light for the hour: a tint over the deck, and

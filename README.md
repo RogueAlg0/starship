@@ -205,6 +205,12 @@ wear layer is composited into the static deck so a frame blits
 one base canvas, scratch structures are reused rather than
 allocated, and a paused voyage redraws the deck at about 15 fps.
 
+**The hull exterior.** A third view (the Exterior button, or key
+9) steps outside to a side profile of the same ship against the
+same sky, her compartment windows lit by who is awake inside, the
+mess glowing warm at table, damage scorching the hull at the hurt
+system's station, and a tap on the hull returning to its deck.
+
 For link publishing, `npm run viewer:static` writes a single
 self-contained page at `viewer/dist-static/index.html` with the bundle
 inlined. Build outputs (`viewer/dist/`, `viewer/dist-static/`) are not

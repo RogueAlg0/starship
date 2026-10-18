@@ -799,6 +799,7 @@ function frame(nowMs: number): void {
       workSystem: workSystemByMember,
       dayMinutes:
         (run.tick % CONFIG.time.ticksPerDay) * CONFIG.time.minutesPerTick,
+      tick: run.tick,
       speedTps: playing
         ? (SPEEDS[speedIndex] as (typeof SPEEDS)[number]).ticksPerSecond
         : 0,

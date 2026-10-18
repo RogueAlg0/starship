@@ -252,6 +252,39 @@ night watch should thin the presence evidence behind suspicion:
 fewer awake witnesses, emptier corridors, weaker almost-seeing.
 DESIGN.md carries the note (Ship's night, in the world list).
 
+## The ship keeps its scars (Oct 18, 2026)
+
+The faces set the doctrine: a portrait is a wound report, identity
+painted once and live state painted over it. The ship follows the
+same rule (`viewer/src/wear.ts`). Viewer-only; the engine is
+untouched (the seed-42 gate still reads cf1dffaeb4796f91).
+
+Wear keys off the worst condition observed this run, not only the
+current one. Effective damage is the worse of current damage and
+80% of worst-ever damage, read in four bands: invisible above about
+85% condition, faint down to 60%, clear down to 30%, heavy below.
+The decals are procedural, seeded by the ship signature and the
+system id, placed at the system's anchor equipment: scorch
+blotches, floor scuffs, grime streaks down a wall, and a panel
+knocked askew at clear damage and worse, with debris at heavy. A
+repair does not launder history: when a system that fell below 60%
+climbs back above 80%, a repair patch is stamped beside its anchor
+(a lighter plate with rivet dots and a weld-bead edge, on floor
+scrubbed clean), one patch per damage and repair cycle, permanent
+for the run. The hull carries the engines' record: scorch and
+pitting at the engine block scale with the engines' worst observed
+condition, and exhaust staining on the stern plating grows slowly
+with elapsed ticks, capped faint, so age shows without ever
+shouting.
+
+Nothing is invented and nothing is stored in the engine. The
+tracks (current and worst condition, hurt flag, patch count, per
+system) live in the viewer, derived from the frame stream, and
+die with the page. Rendering holds the perf rule: an offscreen
+layer repainted only when a bucketed input changes, drawn as one
+image with the static deck under the day/night tint, while sparks
+and glows stay above both.
+
 ## Future systems recorded (Oct 18, 2026)
 
 At the user's direction on Oct 18, 2026, DESIGN.md gains a

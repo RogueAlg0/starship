@@ -4,10 +4,12 @@
 // engine never hears about any of it. All art is code: floors, walls,
 // and props are painted once into a static offscreen canvas; each
 // frame draws the moving space backdrop (space.ts), that image, the
-// ship's light for the hour (daynight.ts: a tint over the deck, with
-// everything that emits light drawn above it), then the dynamic layer
-// (glows, blinking lights, damage sparks, welding sparks), then crew
-// bodies with door-to-door waypoint movement, working crew at their
+// wear layer (wear.ts: the ship's accumulated scars, repainted only
+// when a wear input crosses a bucket boundary), the ship's light for
+// the hour (daynight.ts: a tint over the deck, with everything that
+// emits light drawn above it), then the dynamic layer (glows,
+// blinking lights, damage sparks, welding sparks), then crew bodies
+// with door-to-door waypoint movement, working crew at their
 // stations, system labels, and bubbles.
 //
 // Layout: two room bands (dorsal and ventral) flank a central
@@ -28,6 +30,7 @@ import { getBodySprites } from "./bodies.ts";
 import { BubbleLayer } from "./bubbles.ts";
 import { SpaceBackdrop } from "./space.ts";
 import { lightAt, NIGHT_DARK } from "./daynight.ts";
+import { WearLayer, type WearGeom } from "./wear.ts";
 import {
   corridorTile,
   floorEdge,
@@ -881,6 +884,8 @@ export interface DeckFrameOpts {
   workSystem: ReadonlyMap<string, string | null>;
   /** Minutes into the ship's day (0-1439): the day/night light. */
   dayMinutes: number;
+  /** Elapsed sim ticks this run: the wear layer's clock for ship age. */
+  tick: number;
   /** Playback rate in ticks per second; 0 when paused (sky drift). */
   speedTps: number;
 }
@@ -922,6 +927,8 @@ export class DeckView {
   private readonly layout: DeckLayout;
   private readonly staticCanvas: HTMLCanvasElement;
   private readonly backdrop: SpaceBackdrop;
+  /** The ship's accumulated scars, tracked from the frame stream. */
+  readonly wear: WearLayer;
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D | null;
   private readonly people = new Map<string, PersonState>();
@@ -942,6 +949,31 @@ export class DeckView {
       this.layout.widthPx,
       this.layout.heightPx,
     );
+    // Hull exterior geometry for the wear layer, in the same pixels
+    // renderStatic paints: the engine block at the stern, its three
+    // exhaust slots, and the hull's top and bottom edges.
+    const midY = (OY + DECK_H / 2) * TILE_PX;
+    const wearGeom: WearGeom = {
+      tile: TILE_PX,
+      ox: OX,
+      oy: OY,
+      engineBlock: {
+        x: (OX - 4) * TILE_PX,
+        y: midY - 18,
+        w: TILE_PX * 3 + 4,
+        h: 36,
+      },
+      exhaustSlots: [-13, -4, 5].map((dy) => ({
+        x: (OX - 4) * TILE_PX,
+        y: midY + dy,
+        w: 3,
+        h: 6,
+      })),
+      hullTop: (OY - 1) * TILE_PX,
+      hullBottom: (OY + DECK_H + 1) * TILE_PX,
+      sternX: (OX - 1) * TILE_PX,
+    };
+    this.wear = new WearLayer(this.layout, wearGeom);
     this.ctx = canvas.getContext("2d");
   }
 
@@ -1165,6 +1197,10 @@ export class DeckView {
     // The moving sky behind the hull, then the ship herself.
     this.backdrop.drawFar(ctx, dt, opts.speedTps);
     ctx.drawImage(this.staticCanvas, 0, 0);
+    // The ship's scars sit on the deck with the static layer, under
+    // the night tint; the update repaints them only on bucket change.
+    this.wear.update(ship, opts.tick);
+    this.wear.draw(ctx);
 
     // Occupant slots, for spreading stand positions inside a room.
     const slots = new Map<string, number>();

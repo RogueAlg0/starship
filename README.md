@@ -194,6 +194,24 @@ is repaired. Thought and speech bubbles appear over crew, Sims-style,
 always from real state: a critical need, an active grudge, a strong
 suspicion, an accusation spoken aloud, or crewmates in conversation.
 
+The ship also keeps its scars (`viewer/src/wear.ts`). Each system
+wears its history on the deck around its equipment: scorch blotches,
+floor scuffs, grime streaks, and, at clear damage, a panel knocked
+askew. The marks scale with both the system's current condition and
+the worst condition it has reached this run, so a system repaired
+back to health keeps most of its scorch: getting hurt leaves a mark
+that getting fixed does not erase. When a system that fell below 60%
+is brought back above 80%, the repair leaves a permanent patch beside
+the equipment, a lighter plate with rivets and a weld-bead edge on
+scrubbed floor, one per damage and repair cycle. The hull wears too:
+scorch and pitting at the engine block scale with the engines' worst
+condition, and a faint exhaust stain grows slowly with elapsed ticks
+and caps low, so the ship ages under way. Wear is tracked in the
+viewer from the frame stream, painted into an offscreen layer that
+repaints only when a wear input crosses a bucket boundary (condition
+in 5% bands, a new worst low, a new patch, a five-day age step), and
+drawn with the static deck, under the day/night tint.
+
 Performance follows the faces pattern: the whole deck (hull, floors,
 walls, props) is pre-rendered once per ship to an offscreen canvas,
 and each frame draws that image, the dynamic light and spark layer

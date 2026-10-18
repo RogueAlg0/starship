@@ -161,6 +161,19 @@ scale mildly with playback speed (see DECISIONS.md), the stack holds
 at most four with one alert per subject, and tapping a chip goes to
 what it names: the person, or the room, which flashes on its deck.
 
+**The feel pass.** Borrowing the reference squad viewer's central
+trick — every event is re-staged in the world at the moment it is
+shown — the deck now acts out its news (`viewer/src/staging.ts`). A
+sabotage flashes wrong at the culprit's system for the witness (in
+fiction, nobody saw it); a system that fails bursts sparks and
+vents vapour; a finished repair rings green; a radiation storm
+strobes the navigation lights as it arrives. A system in its worst
+band telegraphs its end first: irregular coughing spark bursts, a
+fast-strobing warning lamp, a wisp of smoke. And the frame itself
+flinches: staged blows shake the deck, harder for a failure than a
+sabotage, muffled when the trouble is on the other deck, and never
+at all under prefers-reduced-motion.
+
 For link publishing, `npm run viewer:static` writes a single
 self-contained page at `viewer/dist-static/index.html` with the bundle
 inlined. Build outputs (`viewer/dist/`, `viewer/dist-static/`) are not

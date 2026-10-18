@@ -8,9 +8,12 @@
 // when a wear input crosses a bucket boundary), the ship's light for
 // the hour (daynight.ts: a tint over the deck, with everything that
 // emits light drawn above it), then the dynamic layer (glows,
-// blinking lights, damage sparks, welding sparks), then crew bodies
-// with door-to-door waypoint movement, working crew at their
-// stations, system labels, and bubbles.
+// blinking lights, damage sparks, welding sparks), then the staged
+// event effects and failure telegraphs of the feel pass
+// (staging.ts), then crew bodies with door-to-door waypoint
+// movement, working crew at their stations, system labels, and
+// bubbles. The whole scene rides inside the staging layer's shake
+// transform, so a blow anywhere aboard moves the frame itself.
 //
 // Layout: the ship has two decks, as the squad sim's buildings have
 // floors. Rooms split by kind: bridge, quarters, mess, medbay, and
@@ -37,6 +40,7 @@ import { BubbleLayer } from "./bubbles.ts";
 import { SpaceBackdrop } from "./space.ts";
 import { lightAt, NIGHT_DARK } from "./daynight.ts";
 import { WearLayer, type WearGeom } from "./wear.ts";
+import { StagingLayer, type StageAnchor } from "./staging.ts";
 import {
   corridorTile,
   floorEdge,
@@ -1203,6 +1207,13 @@ export class DeckView {
   private readonly damageAcc = new Map<number, number>();
   private readonly weldAcc = new Map<string, number>();
   private readonly bubbles = new BubbleLayer();
+  /** The feel pass (./staging.ts): events staged in the world. */
+  private readonly staging: StagingLayer;
+  private readonly reducedMotionMq: MediaQueryList | null =
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function"
+      ? window.matchMedia("(prefers-reduced-motion: reduce)")
+      : null;
   private viewDeck = 0;
 
   constructor(ship: Ship, canvas: HTMLCanvasElement) {
@@ -1249,6 +1260,9 @@ export class DeckView {
       new WearLayer(this.shipLayout.decks[1], wearGeom),
     ];
     this.ctx = canvas.getContext("2d");
+    this.staging = new StagingLayer(
+      () => this.reducedMotionMq?.matches ?? false,
+    );
   }
 
   /** The deck the main canvas is showing: 0 upper, 1 lower. */
@@ -1274,6 +1288,58 @@ export class DeckView {
   /** An accusation was just spoken: bubble over the accuser. */
   speech(id: string): void {
     this.bubbles.speech(id, "bang");
+  }
+
+  // ------------------------------------------------------- feel pass
+  //
+  // The staging layer's feed points, called from main.ts's event
+  // drain at the tick each event is displayed, the way the reference
+  // viewer's effectsFor() consumes its event stream. Condition
+  // crossings need no feed: the frame loop syncs live conditions
+  // into the layer itself.
+
+  /** A system's anchor on its own deck, for staging and telegraphs. */
+  private anchorForSystem(
+    systemId: string,
+    deck: number,
+  ): StageAnchor | null {
+    const anchor = this.shipLayout.decks[deck]?.systemAnchor.get(systemId);
+    return anchor === undefined ? null : { px: anchor.px, py: anchor.py };
+  }
+
+  /** Stage an event that belongs to one system, at its equipment. */
+  private stageSystem(
+    kind: "sabotage" | "repaired",
+    systemId: string,
+  ): void {
+    const system = this.ship.systemById(systemId);
+    if (system === undefined) return;
+    const deck = this.shipLayout.deckOfRoom[system.room] ?? 0;
+    this.staging.stage(
+      kind,
+      systemId,
+      deck,
+      this.anchorForSystem(systemId, deck),
+      performance.now(),
+    );
+  }
+
+  /**
+   * A sabotage was just committed: flash the act at the system for
+   * the god-witness. In-fiction, nothing has been seen yet.
+   */
+  stageSabotage(systemId: string): void {
+    this.stageSystem("sabotage", systemId);
+  }
+
+  /** A repair just completed: the green ring at the system. */
+  stageRepaired(systemId: string): void {
+    this.stageSystem("repaired", systemId);
+  }
+
+  /** A radiation storm just arrived: the nav lights strobe. */
+  stageStorm(): void {
+    this.staging.stage("storm", null, -1, null, performance.now());
   }
 
   /** A room outline that pulses briefly (an alert named this room). */
@@ -1685,6 +1751,29 @@ export class DeckView {
     const now = opts.now;
     const dt = Math.min(0.1, Math.max(0, opts.dtMs / 1000));
     ctx.imageSmoothingEnabled = false;
+
+    // ---- the feel pass (./staging.ts): live conditions sync in
+    // (a crossing into the critical band stages a failure where it
+    // happened), telegraphs cough and smoke on the visible deck, and
+    // the accumulated shake kicks offset the whole scene: the deck
+    // and the sky move, the page around the canvas does not.
+    const anchorFor = (id: string, deck: number): StageAnchor | null =>
+      this.anchorForSystem(id, deck);
+    this.staging.syncSystems(
+      ship.systems.map((s) => ({
+        id: s.id,
+        condition: s.condition,
+        failed: s.failed,
+        deck: shipLayout.deckOfRoom[s.room] ?? 0,
+      })),
+      now,
+      anchorFor,
+    );
+    this.staging.updateTelegraphs(now, dt * 1000, this.viewDeck, anchorFor);
+    const shake = this.staging.shakeOffset(now, this.viewDeck);
+    ctx.save();
+    if (shake.x !== 0 || shake.y !== 0) ctx.translate(shake.x, shake.y);
+
     // The moving sky behind the hull, then the ship herself.
     this.backdrop.drawFar(ctx, dt, opts.speedTps);
     ctx.drawImage(this.statics[this.viewDeck] as HTMLCanvasElement, 0, 0);
@@ -1963,14 +2052,20 @@ export class DeckView {
       }
     }
 
-    // ---- navigation lights
+    // ---- navigation lights (a storm's arrival strobes them: the
+    // staging layer holds the strobe envelope from the storm event)
+    const strobe = this.staging.navStrobe(now);
     for (const light of layout.navLights) {
       const blink = 0.5 + 0.5 * Math.sin(now / 1300 + light.phase);
-      ctx.globalAlpha = 0.2 + 0.5 * blink;
+      ctx.globalAlpha = Math.min(1, 0.2 + 0.5 * blink + strobe);
       ctx.fillStyle = light.colour;
       ctx.fillRect(light.x - 1, light.y - 1, 3, 3);
-      ctx.globalAlpha = blink > 0.55 ? 1 : 0.35;
+      ctx.globalAlpha = blink > 0.55 || strobe > 0.3 ? 1 : 0.35;
       ctx.fillRect(light.x, light.y, 1, 1);
+      if (strobe > 0.3) {
+        ctx.globalAlpha = strobe * 0.5;
+        ctx.fillRect(light.x - 2, light.y - 2, 5, 5);
+      }
     }
     ctx.globalAlpha = 1;
 
@@ -2033,8 +2128,9 @@ export class DeckView {
         this.damageAcc.set(rect.index, acc);
       }
       if (worst.condition < 0.3) {
-        // A red warning lamp blinks over the room.
-        if (Math.floor(now / 450 + rect.index) % 2 === 0) {
+        // A red warning lamp over the room: a system in its worst
+        // band strobes it fast (the staging layer owns the tempo).
+        if (this.staging.lampOn(worst.id, now)) {
           const lx = rx + rect.w * 4;
           ctx.fillStyle = "#ff4a3c";
           ctx.fillRect(lx - 1, ry + 2, 3, 3);
@@ -2126,6 +2222,11 @@ export class DeckView {
       ctx.fillRect(p.x, p.y, 1, 1);
     }
     ctx.globalAlpha = 1;
+
+    // ---- staged events (./staging.ts): the act, the blow, and the
+    // mend, drawn over the deck's own sparks and under the crew: a
+    // body can stand in front of the thing it just did.
+    this.staging.draw(ctx, now, this.viewDeck);
 
     // ---- crew bodies
     // Bodies dim less than the deck at night (0.82 of full at the
@@ -2233,5 +2334,8 @@ export class DeckView {
         ctx.fillRect(rx + 1, ry + 1, rw - 2, rh - 2);
       }
     }
+
+    // Balance the shake transform opened at the top of the frame.
+    ctx.restore();
   }
 }

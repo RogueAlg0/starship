@@ -450,3 +450,34 @@ healthy drama. Offered a re-vet; the user chose to leave the
 Voyage of the Day list unchanged: [11, 16, 17, 30, 39, 40, 42].
 The rotation now includes one calm day and one storm day by
 accident. So be it; a week with weather in it is honest.
+
+## Playtest Note #3: the presentation was flat (Oct 18, 2026)
+
+The user's verdict, from play: the presentation is text heavy,
+"just boring text and lots of scrolling". What he likes in the
+squad sim is the opposite register: long-range gunfire made
+visible as tracers, slight screen shake, soldiers panicking on
+the body. A research pass over the squad viewer's rendering code
+(~/workspace/research/squad-feel-starship-translation.md) found
+the grammar: every engine event is re-staged in the world at the
+tick it is displayed, states are worn on bodies in acts, the
+feed is curated to near-silence, and shake is positional
+information, not noise.
+
+The response shipped in this build, viewer only: an event
+staging layer (viewer/src/staging.ts) that flashes a sabotage
+wrong at the culprit's system for the god-witness, bursts sparks
+and vented vapour when a system crosses into failure, rings a
+finished repair green, and strobes the navigation lights when a
+radiation storm arrives; failure telegraphs, so a system in its
+worst band coughs irregular spark bursts, strobes its warning
+lamp, and breathes a smoke wisp before it dies; and deck shake,
+staged blows offsetting the whole scene with (1 - T/span)^2
+decay, halved across decks, capped, and gated off entirely
+under prefers-reduced-motion. The engine did not move: the
+seed-42 gate hash stands at ec4e0d23aa3bfde5.
+
+Queued follow-ups from the same research, in its order: the
+accusation made visible (words crossing the room, bodies
+recoiling), synthesized sound, and skip-to-next-incident with a
+demoted chronicle.

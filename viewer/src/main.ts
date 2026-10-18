@@ -786,6 +786,9 @@ function drainEvents(): void {
     if (event.type === "weather") {
       const to = event.data.to;
       if (typeof to === "string") weatherName = to;
+      // The feel pass: a storm's arrival is staged (nav lights
+      // strobe, the deck flinches) at the tick it is displayed.
+      if (to === "radiation storm") deck?.stageStorm();
     }
     if (event.type === "work") {
       const actor = event.actors[0];
@@ -801,6 +804,19 @@ function drainEvents(): void {
       // Accusations are spoken aloud in-fiction: a speech bubble.
       const actor = event.actors[0];
       if (actor !== undefined) deck?.speech(actor);
+    }
+    // The feel pass (./staging.ts): the act and the mend are staged
+    // in the world at the tick they are displayed, not only written
+    // in the chronicle. Condition crossings stage themselves from
+    // the deck's per-frame condition sync; these two are moments
+    // only the event stream knows.
+    if (event.type === "sabotage_committed") {
+      const systemId = eventStr(event, "system");
+      if (systemId !== "") deck?.stageSabotage(systemId);
+    }
+    if (event.type === "system_repaired") {
+      const systemId = eventStr(event, "system");
+      if (systemId !== "") deck?.stageRepaired(systemId);
     }
     feedAlert(event);
     for (const line of renderer.push(event)) {

@@ -179,8 +179,8 @@ function slotTarget(
   const rows = Math.max(1, Math.ceil(count / cols));
   const col = slot % cols;
   const row = Math.floor(slot / cols);
-  const areaTop = 26;
-  const areaH = ROOM_H - areaTop - 8;
+  const areaTop = 22;
+  const areaH = ROOM_H - areaTop - 24;
   return {
     x: base.x + ((col + 1) * ROOM_W) / (cols + 1),
     y: base.y + areaTop + ((row + 1) * areaH) / (rows + 1),

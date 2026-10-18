@@ -29,8 +29,11 @@ roles, traits, needs, and private beliefs about each other, and the
 first incident generator: grudges incite sabotage, suspicion forms from
 who was seen nearby, and accusations are spoken as beliefs, not
 findings. Every run renders a chronicle, the event log as a readable
-ship's log. The galaxy around the ship is not built yet. See DESIGN.md
-for the full design and DECISIONS.md for the standing choices.
+ship's log. The galaxy's first layer is built: each seed generates a
+sector of named ports and factions, and the voyage is a leg between
+two of them, with a departure, a travel clock, and an arrival. See
+DESIGN.md for the full design and DECISIONS.md for the standing
+choices.
 
 ## Requirements
 
@@ -77,12 +80,15 @@ The suite covers determinism (same seed, same hash; RNG stream
 independence), purity (a static scan that bans wall-clock and ambient
 randomness calls from the engine sources), replay (a recorded
 decision log reproduces the hash; a tampered or truncated log raises a
-divergence error), and the slice itself: ship and crew generation
+divergence error), the slice itself: ship and crew generation
 determinism, needs and beliefs staying in bounds over long runs, the
 sabotage mechanics (a strong grudge acted on; a bystander wrongly
 suspected), a full-slice replay over 2,000 ticks, and a 30-day
-performance sanity run. `npm run check` runs the type check and the
-tests.
+performance sanity run, and the galaxy: sector generation
+determinism and bounds (port counts, separations, faction home
+ports), the leg's distance-and-speed arithmetic, a monotonic route,
+and an arrival that fires exactly once on its named tick for every
+daily seed. `npm run check` runs the type check and the tests.
 
 ## Layout
 
@@ -101,7 +107,8 @@ tests.
 - `src/scenario/`: configuration. Every tunable number and table lives
   in `config.ts`.
 - `src/world/`: the procedural ship, its systems (condition, wear,
-  strain, repair), and shipboard weather.
+  strain, repair), shipboard weather, and the galaxy: the procedural
+  sector (ports and factions) and the voyage leg across it.
 - `src/entities/`: the crew of twelve and their per-tick behaviour.
 - `src/perception/`: beliefs: directed trust and bond, suspicion,
   grudges, and the society step that forms grudges and speaks
@@ -210,6 +217,17 @@ allocated, and a paused voyage redraws the deck at about 15 fps.
 same sky, her compartment windows lit by who is awake inside, the
 mess glowing warm at table, damage scorching the hull at the hurt
 system's station, and a tap on the hull returning to its deck.
+
+**The star map.** A fourth view (the Map button, or key 0 or M)
+opens the sector chart: the seed's ports as named points in their
+factions' colours (a ring for a faction home port, plain grey for
+an independent), the chartered route dashed across the grid, and
+the ship as a marker walking it, the sailed part drawn solid. The
+header names the leg (origin → destination, days out, days to go,
+and in port after arrival), and tapping a port opens its card:
+faction, character, and its distance from the ship right now, in
+light-days and in days at cruise. The chart's static layer paints
+once per voyage; per frame only the marker and pulses move.
 
 For link publishing, `npm run viewer:static` writes a single
 self-contained page at `viewer/dist-static/index.html` with the bundle

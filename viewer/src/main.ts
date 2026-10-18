@@ -43,6 +43,8 @@ import {
 import { dailySeed } from "./daily.ts";
 import { DeckView } from "./deck.ts";
 import { Minimap } from "./minimap.ts";
+import { StarMapView } from "./starmap.ts";
+import type { Port } from "../../src/world/galaxy.ts";
 import { watchName, type WatchName } from "./daynight.ts";
 import { spriteCanvas, type SpriteDef } from "./props.ts";
 
@@ -130,6 +132,8 @@ const deckCanvas = must<HTMLCanvasElement>("ship-canvas");
 const deck1Btn = must<HTMLButtonElement>("deck1-btn");
 const deck2Btn = must<HTMLButtonElement>("deck2-btn");
 const exteriorBtn = must<HTMLButtonElement>("exterior-btn");
+const mapBtn = must<HTMLButtonElement>("map-btn");
+const routeEl = must<HTMLElement>("route-readout");
 const minimapCanvas = must<HTMLCanvasElement>("minimap-canvas");
 const crewPanel = must<HTMLElement>("crew-panel");
 const chronicleEl = must<HTMLElement>("chronicle");
@@ -235,9 +239,23 @@ function updateCarry(memberId: string, event: SimEvent): void {
 let minimap: Minimap | null = null;
 let lastMinimapMs = 0;
 
+/** The star map for the current run's sector, on the same canvas. */
+let starMap: StarMapView | null = null;
+/** True while the main canvas shows the sector chart, not the ship. */
+let mapActive = false;
+
 function buildDeck(): void {
   deck = new DeckView(run.ship, deckCanvas);
   minimap = new Minimap(deck.shipLayout, minimapCanvas);
+  starMap = new StarMapView(
+    deckCanvas,
+    run.galaxy.sector,
+    run.galaxy.voyage,
+    run.ship.name,
+    currentSeed,
+  );
+  mapActive = false;
+  closePortCard();
   refreshDeckButtons();
 }
 
@@ -249,6 +267,8 @@ function buildDeck(): void {
  */
 function setViewDeck(next: number): void {
   if (deck === null) return;
+  mapActive = false;
+  closePortCard();
   deck.setExterior(false);
   deck.setDeck(next);
   refreshDeckButtons();
@@ -257,21 +277,34 @@ function setViewDeck(next: number): void {
 /** Step outside: the ship from the hull, windows lit by the life inside. */
 function setViewExterior(): void {
   if (deck === null) return;
+  mapActive = false;
+  closePortCard();
   deck.setExterior(true);
   refreshDeckButtons();
 }
 
+/** Open the chart: the sector, its ports, and the route being sailed. */
+function setViewMap(): void {
+  if (deck === null) return;
+  deck.setExterior(false);
+  mapActive = true;
+  refreshDeckButtons();
+}
+
 function refreshDeckButtons(): void {
-  const outside = deck?.exteriorActive ?? false;
+  const outside = (deck?.exteriorActive ?? false) && !mapActive;
   const active = deck?.visibleDeck ?? 0;
-  deck1Btn.classList.toggle("active", !outside && active === 0);
-  deck2Btn.classList.toggle("active", !outside && active === 1);
+  deck1Btn.classList.toggle("active", !outside && !mapActive && active === 0);
+  deck2Btn.classList.toggle("active", !outside && !mapActive && active === 1);
   exteriorBtn.classList.toggle("active", outside);
+  mapBtn.classList.toggle("active", mapActive);
   deckCanvas.setAttribute(
     "aria-label",
-    outside
-      ? "The ship from outside: her hull in profile, windows lit by the crew inside. Tap a part of the hull to go to its deck."
-      : "Top-down deck plan of the ship: rooms, equipment, and crew at work",
+    mapActive
+      ? "Star map of the sector: ports in their factions' colours, the chartered route, and the ship under way. Tap a port for its card."
+      : outside
+        ? "The ship from outside: her hull in profile, windows lit by the crew inside. Tap a part of the hull to go to its deck."
+        : "Top-down deck plan of the ship: rooms, equipment, and crew at work",
   );
 }
 
@@ -296,14 +329,14 @@ function focusAlert(item: AlertItem): void {
     const member = crewById(focus.personId);
     if (member === undefined || deck === null) return;
     const where = deck.deckOfRoom(member.room);
-    if (where !== deck.visibleDeck) setViewDeck(where);
+    if (mapActive || where !== deck.visibleDeck) setViewDeck(where);
     selectCrew(member.id);
     openPersonCard(member.id);
     return;
   }
   if (focus.room !== undefined && deck !== null) {
     const where = deck.deckOfRoom(focus.room);
-    if (where !== deck.visibleDeck) setViewDeck(where);
+    if (mapActive || where !== deck.visibleDeck) setViewDeck(where);
     deck.flashRoom(focus.room);
   }
 }
@@ -535,7 +568,7 @@ function tapCrew(id: string): void {
   const member = crewById(id);
   if (member !== undefined && deck !== null) {
     const where = deck.deckOfRoom(member.room);
-    if (where !== deck.visibleDeck) setViewDeck(where);
+    if (mapActive || where !== deck.visibleDeck) setViewDeck(where);
   }
   if (selectedCrew === id) {
     selectCrew(null);
@@ -597,6 +630,7 @@ function personName(id: string): string {
 
 function openPersonCard(id: string): void {
   cardCrewId = id;
+  closePortCard();
   personCard.hidden = false;
   lastCardRenderMs = 0;
   renderPersonCard();
@@ -867,6 +901,73 @@ function renderPersonCard(): void {
   }
 }
 
+// ----------------------------------------------------------- port card
+
+const portCard = must<HTMLElement>("port-card");
+const portNameEl = must<HTMLElement>("port-name");
+const portFactionEl = must<HTMLElement>("port-faction");
+const portWhereEl = must<HTMLElement>("port-where");
+const portBioEl = must<HTMLElement>("port-bio");
+let cardPortIndex: number | null = null;
+let lastPortRenderMs = 0;
+
+function oneDecimal(value: number): string {
+  return String(Math.round(value * 10) / 10);
+}
+
+function openPortCard(port: Port): void {
+  cardPortIndex = port.index;
+  closePersonCard();
+  portCard.hidden = false;
+  lastPortRenderMs = 0;
+  renderPortCard();
+}
+
+function closePortCard(): void {
+  cardPortIndex = null;
+  portCard.hidden = true;
+}
+
+must<HTMLButtonElement>("port-close").addEventListener("click", () => {
+  closePortCard();
+});
+
+/**
+ * The port card: the port's name, who holds it, what it is, and how
+ * far it lies from the ship right now. Every fact is sector or
+ * voyage state; the viewer writes only the glue, as with the crew.
+ */
+function renderPortCard(): void {
+  if (cardPortIndex === null || starMap === null) return;
+  const sector = run.galaxy.sector;
+  const voyage = run.galaxy.voyage;
+  const port = sector.portAt(cardPortIndex);
+  const faction = sector.factionOf(port);
+  portNameEl.textContent = port.name;
+  const isHome = faction !== null && faction.homePort === port.index;
+  portFactionEl.textContent =
+    (faction === null ? "Independent" : faction.name) +
+    (isHome ? " · faction home port" : "");
+  const lightDays = starMap.distanceFromShip(port, run.tick);
+  const days = starMap.distanceDaysFromShip(port, run.tick);
+  portWhereEl.textContent =
+    `${oneDecimal(lightDays)} light-days from the ${run.ship.name} · ` +
+    `${oneDecimal(days)} days at cruise`;
+  let bio =
+    `${port.name} is a ${port.character} port, ` +
+    (faction === null
+      ? "answering to no faction."
+      : `held by the ${faction.name}.`);
+  if (port.index === voyage.origin) {
+    bio += ` This voyage began here, ${oneDecimal(voyage.legDays)} days under charter for ${voyage.destinationPort.name}.`;
+  } else if (port.index === voyage.destination) {
+    bio += voyage.inPortAt(run.tick)
+      ? " This voyage ended here; the ship is in port."
+      : ` This voyage ends here, ${oneDecimal(voyage.daysOutAt(run.tick))} days out of ${oneDecimal(voyage.legDays)}.`;
+  }
+  portBioEl.textContent = bio;
+}
+
 // -------------------------------------------------------------- chronicle
 
 /**
@@ -883,6 +984,7 @@ const HIGHLIGHT_TYPES: ReadonlySet<string> = new Set([
   "ship_generated", // firsts: the ship and her crew, named
   "crew_generated",
   "departure",
+  "arrival", // the leg's end is a first-class moment, like its start
   "weather", // weather turns
   "meal_service", // the shared sittings
   "leisure_game",
@@ -1276,11 +1378,50 @@ function updateRibbon(): void {
   }
 }
 
+let lastRouteText = "";
+
+/**
+ * The header's route readout: where the voyage runs, how much of
+ * it is sailed, and what remains (or that the ship is in port).
+ * Written only when it changes, on the slow-UI cadence.
+ */
+function updateRoute(): void {
+  const voyage = run.galaxy.voyage;
+  const days = oneDecimal(voyage.legDays);
+  let text: string;
+  if (voyage.inPortAt(run.tick)) {
+    const arrivalDay =
+      Math.floor(voyage.legTicks / CONFIG.time.ticksPerDay) + 1;
+    text =
+      `${voyage.originPort.name} → ${voyage.destinationPort.name} · ` +
+      `in port at ${voyage.destinationPort.name} since day ${arrivalDay} ` +
+      `(${days} days under way)`;
+  } else {
+    const out = oneDecimal(voyage.daysOutAt(run.tick));
+    const toGo = oneDecimal(
+      (voyage.legTicks - run.tick) / CONFIG.time.ticksPerDay,
+    );
+    text =
+      `${voyage.originPort.name} → ${voyage.destinationPort.name} · ` +
+      `${out} of ${days} days out · ${toGo} to go`;
+  }
+  if (text !== lastRouteText) {
+    lastRouteText = text;
+    routeEl.textContent = text;
+  }
+}
+
 function updateSlowUi(): void {
   weatherNameEl.textContent = weatherName;
   weatherBanner.classList.toggle("storm", weatherName === "radiation storm");
   updateRibbon();
+  updateRoute();
   syncAlerts();
+
+  if (cardPortIndex !== null && performance.now() - lastPortRenderMs > 1000) {
+    lastPortRenderMs = performance.now();
+    renderPortCard();
+  }
 
   for (const member of run.crew) {
     const ui = crewUi.get(member.id);
@@ -1355,7 +1496,17 @@ function frame(nowMs: number): void {
   // time since its last paint, so nothing animates slower, only
   // less often. Playing rates are untouched.
   const deckDue = playing || nowMs - lastDeckMs >= 66;
-  if (deck !== null && deckDue) {
+  if (mapActive && starMap !== null) {
+    // The chart: one blit and the ship's marker per paint, on the
+    // same cadence as the deck (full rate playing, ~15 fps paused,
+    // since all that moves then is a pulse). lastDeckMs advances so
+    // the deck resumes without a stale clock when the witness
+    // steps back inside.
+    if (deckDue) {
+      lastDeckMs = nowMs;
+      starMap.frame(run.tick, nowMs);
+    }
+  } else if (deck !== null && deckDue) {
     pruneGames();
     const deckDtMs = lastDeckMs === 0 ? dtMs : nowMs - lastDeckMs;
     lastDeckMs = nowMs;
@@ -1394,6 +1545,7 @@ function frame(nowMs: number): void {
   if (
     minimap !== null &&
     deck !== null &&
+    !mapActive &&
     nowMs - lastMinimapMs > 250
   ) {
     lastMinimapMs = nowMs;
@@ -1436,6 +1588,7 @@ dailyBtn.addEventListener("click", () => startDailyVoyage());
 deck1Btn.addEventListener("click", () => setViewDeck(0));
 deck2Btn.addEventListener("click", () => setViewDeck(1));
 exteriorBtn.addEventListener("click", () => setViewExterior());
+mapBtn.addEventListener("click", () => setViewMap());
 minimapCanvas.addEventListener("click", (event) => {
   if (minimap === null) return;
   const rect = minimapCanvas.getBoundingClientRect();
@@ -1450,6 +1603,14 @@ deckCanvas.addEventListener("click", (event) => {
   if (rect.width === 0 || rect.height === 0) return;
   const x = (event.clientX - rect.left) * (deckCanvas.width / rect.width);
   const y = (event.clientY - rect.top) * (deckCanvas.height / rect.height);
+  if (mapActive && starMap !== null) {
+    // On the chart, a tap names a port (its card), the ship (nothing
+    // to open: the header carries her state), or empty space (close).
+    const hit = starMap.pick(x, y, run.tick);
+    if (hit !== null && hit.kind === "port") openPortCard(hit.port);
+    else closePortCard();
+    return;
+  }
   if (deck !== null && deck.exteriorActive) {
     // Outside, a tap names a part of the hull and goes to its deck.
     const target = deck.pickSection(x, y);
@@ -1488,6 +1649,7 @@ window.addEventListener("keydown", (event) => {
   } else if (event.key === "Escape") {
     selectCrew(null);
     closePersonCard();
+    closePortCard();
   } else if (event.key >= "1" && event.key <= "6") {
     setSpeed(Number(event.key) - 1);
   } else if (event.key === "7" || event.key === "[") {
@@ -1496,6 +1658,8 @@ window.addEventListener("keydown", (event) => {
     setViewDeck(1);
   } else if (event.key === "9") {
     setViewExterior();
+  } else if (event.key === "0" || event.key === "m" || event.key === "M") {
+    setViewMap();
   }
 });
 

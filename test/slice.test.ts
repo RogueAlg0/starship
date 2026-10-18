@@ -244,7 +244,7 @@ describe("the living ship", () => {
     const run = runSimulation({ seed: 42 }, 60);
     const chronicle = renderChronicle(run.world.events.events);
     expect(chronicle).toContain("Ship's log of the");
-    expect(chronicle).toContain("departs. The voyage begins.");
+    expect(chronicle).toContain("light-days out. The voyage begins.");
     expect(chronicle).toContain("End of log.");
   });
 });

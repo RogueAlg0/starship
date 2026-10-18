@@ -787,3 +787,69 @@ Descoped: a hover readout on the hull (not required; taps carry
 the interaction), and archetype-named silhouettes (archetypes are
 not in shipgen yet; the grammar above is the stand-in the design
 chapter prescribes until they are).
+
+## Galaxy step 1: sector, ports, and the leg, built (Oct 18, 2026)
+
+The first layer of the galaxy chapter: the universe stops being a
+backdrop. New module `src/world/galaxy.ts`, drawn only from the
+"galaxy" stream, generated at build like the ship and the crew,
+and registered as the "voyage" system between weather and crew.
+
+The sector: 6 to 9 ports and 3 to 5 factions per seed, all named
+from syllable tables in config (Kestrel Reach, the Vostok
+Combine). Positions sit on a jittered 3x3 grid over a 60
+light-day square: one port per cell, offset 6 to 14 light-days
+inside it, so the 12 light-day minimum separation holds by
+construction rather than by rejection luck. Each faction holds a
+home port; the remaining ports declare for a faction by roll or
+stay independent (25 percent). Each port carries a character
+from a small table (industrial, agrarian, free port, refinery,
+shrine, company town, shipyard, listening post): flavour in
+step 1, machinery later.
+
+The leg: the origin is a stream pick; the destination is drawn
+from the ports inside a chartered band, 12 to 26 days out at the
+config cruise speed of 2 light-days per day, with the
+nearest-to-band port as fallback when a sector offers none.
+Distance is the real grid distance; leg ticks are that distance
+over cruise, rounded. The ship's position is a pure function of
+the tick count (elapsed over leg ticks, interpolated), so
+replay has nothing to reproduce but arithmetic. Departure at
+tick 0 now names both ports and the distance; arrival fires
+exactly once, on the leg tick, and from that tick the world
+flag reads in port. The shipboard sim does not stop at the
+dock: the remaining ticks run aboard a ship in port, her
+routine and drama unchanged. Across the daily seeds and 99,
+legs run 12.5 to 23.3 days and every seed arrives inside the
+30-day run; the G/S/A drama table is identical to the
+Routine-era table on every seed, because the galaxy layer
+touches no shipboard system. Event count rises by exactly
+one per run: the arrival.
+
+The viewer gains the fourth view: the star map (Map button,
+key 0 or M), a chart of the sector with ports in faction
+colours, the route dashed and the sailed part solid, the ship
+walking it, and a port card on tap (faction, character,
+home-port flag, and the distance from the ship right now). The
+header carries the leg: origin, destination, days out, days
+to go, in port after arrival. The chart's static layer paints
+once per voyage into an offscreen canvas; per frame only the
+marker and two pulses draw, and a headless stub-canvas harness
+verified the painting, the picking, and the distance
+arithmetic. Departure and arrival are highlight-class in the
+chronicle filter.
+
+Stubbed for later steps, deliberately: traffic and contacts,
+convoys, patrols, bounties, the Conquest tick, everything a
+port call will mean (resupply, hiring, docking), and any Stores
+integration. Weather keeps rolling in port; nothing
+special-cases it yet.
+
+Gates: tests 51/51 (11 new in test/galaxy.test.ts; the slice
+suite's departure-line assertion updated to the routed
+sentence), purity green, typecheck clean, replay exact via the
+CLI against the regenerated runs/seed42 recording. New
+seed-42 fingerprint: 4,320 ticks, 34,479 events, hash
+173a304792141f39, about 4,300 ticks/sec; decisions unchanged
+at 51,840, because the voyage draws none. Bundle grew 315,032
+-> 339,331 B (dist) for the sector in the engine and the chart.

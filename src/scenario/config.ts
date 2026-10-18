@@ -453,6 +453,106 @@ export const CONFIG = {
     freeQuartersDesire: 0.25,
   },
 
+  /**
+   * The galaxy, step 1: a procedural sector of named ports and the
+   * factions that hold them, and the voyage as one leg between two
+   * ports. Generation draws only from the "galaxy" stream, so the
+   * sector can grow (traffic, convoys, port calls) without shifting
+   * the ship, the crew, or the weather.
+   */
+  galaxy: {
+    /** Ports per sector: enough to feel like a place, few enough
+     *  that the witness can learn their names in one voyage. */
+    minPorts: 6,
+    maxPorts: 9,
+    /** Factions per sector; every faction holds a home port. */
+    minFactions: 3,
+    maxFactions: 5,
+    /**
+     * The sector is a square this many light-days on a side. Ports
+     * sit on a jittered grid of sectorCellsPerAxis cells per axis:
+     * one port per cell, its position offset inside the cell by
+     * between separationJitterMin and cell-minus-that light-days.
+     * Two ports in neighbouring cells are then never closer than
+     * minSeparationLightDays, by construction, not by luck.
+     */
+    sectorSpanLightDays: 60,
+    sectorCellsPerAxis: 3,
+    minSeparationLightDays: 12,
+    /** Chance a non-home port answers to no faction. */
+    independentChance: 0.25,
+    /**
+     * Cruise speed, light-days per ship day. With the sector scale
+     * above, a leg in the chartered band below runs about two to
+     * four weeks: long enough for a shipboard month to have a
+     * shape, short enough to end inside a standard 30-day run.
+     */
+    cruiseLightDaysPerDay: 2,
+    /** A voyage is chartered to a port this many days out, when the
+     *  sector offers one; otherwise the nearest thing to the band. */
+    minLegDays: 12,
+    maxLegDays: 26,
+    /** What a port is, in the sector's economy and imagination. */
+    portCharacters: [
+      "industrial",
+      "agrarian",
+      "free port",
+      "refinery",
+      "shrine",
+      "company town",
+      "shipyard",
+      "listening post",
+    ],
+    portNameFirst: [
+      "Kestrel",
+      "Vostok",
+      "Alden",
+      "Maren",
+      "Sorrel",
+      "Ilyin",
+      "Tamar",
+      "Ostra",
+      "Belka",
+      "Corvin",
+      "Halle",
+      "Niska",
+    ],
+    portNameSecond: [
+      "Reach",
+      "Anchorage",
+      "Shoal",
+      "Exchange",
+      "Haven",
+      "Docks",
+      "Terminus",
+      "Crossing",
+      "Market",
+      "Rest",
+      "Gate",
+      "Spur",
+    ],
+    factionNameFirst: [
+      "Vostok",
+      "Helion",
+      "Marengo",
+      "Ostara",
+      "Tallinn",
+      "Umbral",
+      "Verge",
+      "Kestrel",
+    ],
+    factionNameSecond: [
+      "Combine",
+      "Accord",
+      "Syndicate",
+      "League",
+      "Compact",
+      "Trust",
+      "Concord",
+      "Cartel",
+    ],
+  },
+
   weather: {
     /** Weather state names, in index order. */
     states: ["calm", "solar wind", "radiation storm"],

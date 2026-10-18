@@ -75,6 +75,11 @@ function dayOf(tick: number): number {
   return Math.floor(tick / CONFIG.time.ticksPerDay) + 1;
 }
 
+/** Distances and day counts read at one decimal in the log's voice. */
+function oneDecimal(value: number): string {
+  return String(Math.round(value * 10) / 10);
+}
+
 class Renderer implements ChronicleRenderer {
   private readonly knowsTruth: boolean;
   private shipName = "the ship";
@@ -158,7 +163,25 @@ class Renderer implements ChronicleRenderer {
         break;
       }
       case "departure": {
-        line(`${ts} — The ${this.shipName} departs. The voyage begins.`, true);
+        const from = str(data, "from");
+        const to = str(data, "to");
+        if (from !== "" && to !== "") {
+          line(
+            `${ts} — The ${this.shipName} departs ${from} for ${to}, ` +
+              `${oneDecimal(num(data, "distance"))} light-days out. The voyage begins.`,
+            true,
+          );
+        } else {
+          line(`${ts} — The ${this.shipName} departs. The voyage begins.`, true);
+        }
+        break;
+      }
+      case "arrival": {
+        line(
+          `${ts} — The ${this.shipName} arrives at ${str(data, "port")}, ` +
+            `${oneDecimal(num(data, "days"))} days under way.`,
+          true,
+        );
         break;
       }
       case "weather": {

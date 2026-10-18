@@ -377,7 +377,7 @@
     image-rendering: pixelated;
     grid-row: span 2;
   }
-  #person-card {
+  #person-card, #port-card {
     position: fixed;
     z-index: 20;
     background: var(--panel);
@@ -392,7 +392,7 @@
     overflow-y: auto;
   }
   @media (min-width: 980px) {
-    #person-card {
+    #person-card, #port-card {
       left: auto;
       bottom: auto;
       top: 76px;
@@ -401,7 +401,7 @@
       max-height: calc(100dvh - 100px);
     }
   }
-  #person-close {
+  #person-close, #port-close {
     position: absolute;
     top: 6px;
     right: 6px;
@@ -411,6 +411,7 @@
     font-size: 18px;
     line-height: 1;
   }
+  #port-bio { font-size: 14px; line-height: 1.5; margin: 10px 0 4px; }
   .person-head { display: flex; gap: 12px; align-items: center; }
   .person-head .face {
     width: 64px; height: 64px;
@@ -513,6 +514,7 @@
     <span class="meta">speed <b id="speed-readout">3x</b></span>
     <span class="meta">stream <b id="hash">…</b></span>
     <span class="meta"><b id="event-count">0</b> events</span>
+    <span class="meta" id="route-readout"></span>
   </div>
   <div class="controls">
     <button id="play-btn" type="button">Pause</button>
@@ -538,6 +540,7 @@
       <button id="deck1-btn" type="button">Deck 1 · Upper</button>
       <button id="deck2-btn" type="button">Deck 2 · Lower</button>
       <button id="exterior-btn" type="button">Exterior</button>
+      <button id="map-btn" type="button">Map</button>
     </div>
     <div class="ship-stage">
       <div id="alert-stack" aria-live="polite" aria-label="Ship alerts"></div>
@@ -545,7 +548,7 @@
     </div>
     <div class="deck-foot">
       <canvas id="minimap-canvas" role="img" aria-label="Minimap of both decks: tap a deck to view it"></canvas>
-      <p class="deck-hint">Two decks, one ship. The minimap shows both: coloured dots are crew, gold ticks are the lifts, and a pulsing room needs help. Keys 7 and 8 switch decks; key 9 steps outside to the hull, where the windows are lit by the life inside. Out there, tap the hull to go to that part of the ship.</p>
+      <p class="deck-hint">Two decks, one ship. The minimap shows both: coloured dots are crew, gold ticks are the lifts, and a pulsing room needs help. Keys 7 and 8 switch decks; key 9 steps outside to the hull, where the windows are lit by the life inside. Out there, tap the hull to go to that part of the ship. Key 0 (or M) opens the star map: the sector, its ports in their factions' colours, and the route the ship is sailing. On the map, tap a port for its card.</p>
     </div>
   </section>
   <div id="side">
@@ -579,6 +582,17 @@
   <div id="person-dossier"></div>
   <h3>Recently</h3>
   <div id="person-recent"></div>
+</div>
+<div id="port-card" hidden>
+  <button id="port-close" type="button" aria-label="Close port card">×</button>
+  <div class="person-head">
+    <div>
+      <div class="pname" id="port-name"></div>
+      <div class="prole" id="port-faction"></div>
+      <div class="pwhere" id="port-where"></div>
+    </div>
+  </div>
+  <p id="port-bio"></p>
 </div>
 <div id="toast" role="status" hidden></div>
 <script src="./dist/bundle.js"></script>

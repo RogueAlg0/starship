@@ -647,3 +647,22 @@ rounded percent or band changes.
 Not done: Finding 7 (minimap silhouette caching). The minimap
 is a 176x56 canvas already throttled to 250 ms; the caching
 restructure was not free, and the research ranked its win low.
+
+## The mundane is the game (Oct 18, 2026)
+
+Direction ruling by the user. After the feel and routine work he
+reported the game still felt like a scroll fest, and a proposed
+fix (cold open at the first incident, a skip-to-next-incident
+control, a daily digest as the main reading surface) was put to
+him. He declined it plainly: "Nah dont think that's what I want
+frankly. I like the routine mundane stuff." The ordinary days -
+watches, meals, work, sleep, the small life of the ship - are
+the content, not the dead air between incidents. No future
+design may cut, skip, or summarize away the routine as its
+primary move. The standing direction is the opposite: stage the
+mundane so it can be watched (the deck carries the day), demote
+the chronicle to a minor channel, and fix performance so that
+watching is pleasant. This retires translation-table items #12
+(skip-to-next-incident) and the digest-first reading of #9 from
+the squad-feel research; both may exist later only as minor
+conveniences, never as the game's shape.

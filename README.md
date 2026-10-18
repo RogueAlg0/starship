@@ -135,8 +135,16 @@ to a phone. The page is mobile-first and touch-friendly: a top-down
 deck plan of the ship with the crew walking its rooms (see "The ship"
 below), a live crew panel with need bars (tap a name to highlight that
 person on the deck and in the chronicle), the space-weather banner,
-and the chronicle streaming in ship time with a highlights-only filter
-on by default.
+and the chronicle streaming in ship time. The chronicle opens in
+Highlights mode (meals, games, bonds, grudges, accusations,
+incidents, weather turns) with the full log one toggle away; the
+choice rides in the URL (`?log=full`) and is remembered. A thin
+ship's day ribbon under the header names the watch phase, the
+block most of the crew are in, and the next beat of the day, and
+the deck stages the routine itself: crew sit at the mess tables to
+eat and to play, travellers on errands carry a tool case or a
+stores crate, the gym's mats fill at exercise time, and a reader
+sits with a book open.
 
 Playback mirrors the reference viewer's controls: a Play/Pause button,
 the Space key, and speed keys 1 to 6 (with matching on-screen buttons).

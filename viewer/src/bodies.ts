@@ -85,10 +85,30 @@ const WORK_ROWS = [
   "...BB...",
 ] as const;
 
+// Seated: the same figure one row lower (the head starts at row 1),
+// legs folded under the torso into a wide base: at a meal table, over
+// a game board, or in a chair with a book. The deck decides who sits;
+// the dictionary only knows the shape.
+const SEATED_ROWS = [
+  "........",
+  ".HHHHHH.",
+  "HSSSSSSH",
+  "HSESSESH",
+  ".SSSSSS.",
+  ".TTTTTT.",
+  "ATTTTTTA",
+  "hTTTTTTh",
+  ".TTTTTT.",
+  ".PPPPPP.",
+  "PPPPPPPP",
+  ".BB..BB.",
+] as const;
+
 export interface BodySprites {
   idle: HTMLCanvasElement;
   walk: HTMLCanvasElement;
   work: HTMLCanvasElement;
+  seated: HTMLCanvasElement;
 }
 
 /** Multiply a hex colour's channels by a factor (a paint-time tint). */
@@ -102,6 +122,7 @@ function paintBody(
   look: FaceDescriptor,
   pants: string,
   dim = 1,
+  headDy = 0,
 ): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = 8;
@@ -136,39 +157,41 @@ function paintBody(
     }
   });
 
-  // Hair style, over the shared cap.
+  // Hair style, over the shared cap. The overlays sit on the head's
+  // rows, so a posture whose head rides lower (seated) passes its
+  // offset and every mark follows the head.
   if (look.hairStyle === "shaved") {
     const tint = mix(look.skinTone, look.hairTone, 0.45);
-    for (let x = 1; x <= 6; x++) set(x, 0, tint);
-    set(0, 1, tint);
-    set(7, 1, tint);
+    for (let x = 1; x <= 6; x++) set(x, headDy, tint);
+    set(0, headDy + 1, tint);
+    set(7, headDy + 1, tint);
   } else if (look.hairStyle === "long") {
-    for (let y = 2; y <= 6; y++) {
+    for (let y = headDy + 2; y <= headDy + 6; y++) {
       set(0, y, look.hairTone);
       set(7, y, look.hairTone);
     }
   } else if (look.hairStyle === "bun") {
-    set(3, 0, shade(look.hairTone, 0.7));
-    set(4, 0, shade(look.hairTone, 0.7));
+    set(3, headDy, shade(look.hairTone, 0.7));
+    set(4, headDy, shade(look.hairTone, 0.7));
   } else if (look.hairStyle === "wavy") {
-    set(1, 2, look.hairTone);
-    set(6, 2, look.hairTone);
+    set(1, headDy + 2, look.hairTone);
+    set(6, headDy + 2, look.hairTone);
   } else if (look.hairStyle === "swept") {
     if (look.pupilSide > 0) {
-      set(5, 1, look.hairTone);
-      set(6, 1, look.hairTone);
+      set(5, headDy + 1, look.hairTone);
+      set(6, headDy + 1, look.hairTone);
     } else {
-      set(1, 1, look.hairTone);
-      set(2, 1, look.hairTone);
+      set(1, headDy + 1, look.hairTone);
+      set(2, headDy + 1, look.hairTone);
     }
   }
 
   // Facial hair sits on the jaw row.
   if (look.facialHair === "beard") {
-    for (const x of [1, 2, 5, 6]) set(x, 3, look.hairTone);
+    for (const x of [1, 2, 5, 6]) set(x, headDy + 3, look.hairTone);
   } else if (look.facialHair === "stubble") {
     const tone = mix(look.skinTone, look.hairTone, 0.35);
-    for (const x of [1, 2, 5, 6]) set(x, 3, tone);
+    for (const x of [1, 2, 5, 6]) set(x, headDy + 3, tone);
   }
   return canvas;
 }
@@ -176,11 +199,12 @@ function paintBody(
 const bodyCache = new Map<string, BodySprites>();
 
 /**
- * The person's three body frames, painted at most once per run role
- * per dim bucket. The dim bucket (1 by day, lower at night, in 0.05
+ * The person's body frames, painted at most once per run role per
+ * dim bucket. The dim bucket (1 by day, lower at night, in 0.05
  * steps from the deck) keys pre-tinted variants, so a night body
  * costs the same single drawImage as a day body and no per-frame
- * canvas filter is ever paid for the crew pass.
+ * canvas filter is ever paid for the crew pass. Every posture the
+ * deck can ask for lives in the one record, keyed like the rest.
  */
 export function getBodySprites(member: CrewMember, dim = 1): BodySprites {
   const key =
@@ -197,6 +221,7 @@ export function getBodySprites(member: CrewMember, dim = 1): BodySprites {
     idle: paintBody(IDLE_ROWS, look, pants, dim),
     walk: paintBody(WALK_ROWS, look, pants, dim),
     work: paintBody(WORK_ROWS, look, pants, dim),
+    seated: paintBody(SEATED_ROWS, look, pants, dim, 1),
   };
   bodyCache.set(key, sprites);
   return sprites;

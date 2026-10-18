@@ -135,6 +135,38 @@
     text-align: center;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
   }
+  /* The ship's day ribbon: a quiet strip under the header naming
+     the rhythm the deck is keeping. It teaches; it does not shout. */
+  #day-ribbon {
+    padding: 5px 12px;
+    font-size: 13px;
+    color: var(--muted);
+    background: #0d1320;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .section-head h2 { margin: 0; }
+  .log-toggle { display: flex; gap: 4px; }
+  .log-toggle button {
+    min-height: 30px;
+    padding: 3px 10px;
+    font-size: 12.5px;
+    border-radius: 6px;
+  }
+  .log-toggle button.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 700;
+  }
   #weather-banner {
     padding: 6px 12px;
     font-size: 14px;
@@ -491,16 +523,13 @@
       <button id="new-voyage-btn" type="button">New voyage</button>
       <button id="random-btn" type="button">Random seed</button>
     </div>
-    <label class="toggle">
-      <input id="highlights-toggle" type="checkbox" checked>
-      Highlights only
-    </label>
   </div>
   <div id="daily-banner">
     <span id="daily-text"></span>
     <button id="daily-btn" type="button" hidden>★ Today's voyage</button>
   </div>
 </header>
+<div id="day-ribbon" aria-label="The ship's day: watch phase, current block, and the next routine beat"></div>
 <div id="weather-banner">Space weather: <b id="weather-name">calm</b></div>
 <main>
   <section aria-label="Ship schematic">
@@ -524,7 +553,13 @@
       <div id="crew-panel"></div>
     </section>
     <section aria-label="Chronicle">
-      <h2>Chronicle</h2>
+      <div class="section-head">
+        <h2>Chronicle</h2>
+        <div class="log-toggle" role="group" aria-label="Chronicle detail">
+          <button id="log-highlights-btn" type="button" aria-pressed="true">Highlights</button>
+          <button id="log-full-btn" type="button" aria-pressed="false">Full log</button>
+        </div>
+      </div>
       <div id="chronicle"></div>
     </section>
   </div>

@@ -301,6 +301,38 @@ export const PROPS: Record<string, SpriteDef> = {
     ],
     pal: { s: "#c8ccd4" },
   },
+  // A tool case, drawn in a traveller's hands (deck.ts): handle on
+  // top, warm case body, two bright latches. Full hands mean an
+  // errand; the deck decides whose hands are full.
+  toolcase: {
+    rows: [
+      "..hh..",
+      "tttttt",
+      "tTllTt",
+      "tttttt",
+    ],
+    pal: { h: "#8a94a6", t: "#8c4a32", T: "#a85a3c", l: "#e8c98a" },
+  },
+  // A book, drawn open in a seated reader's hands (deck.ts).
+  book: {
+    rows: [
+      "bbbbb",
+      "bwwwb",
+      "bwwwb",
+      "bbbbb",
+    ],
+    pal: { b: "#7a3b3b", w: "#e8e2d0" },
+  },
+  // A table game board, drawn on the mess table between two seated
+  // players while a game lasts (deck.ts): green felt, cards down.
+  board: {
+    rows: [
+      "gggggg",
+      "gwrrwg",
+      "gggggg",
+    ],
+    pal: { g: "#2e5d43", w: "#e8e2d0", r: "#d84a4a" },
+  },
 };
 
 // -------------------------------------------------------------- floors

@@ -138,6 +138,15 @@ interface RoomLayout {
   systemIds: string[];
   /** Bunk and medbay-bed tile centres: where resting crew lie down. */
   bunks: Array<{ x: number; y: number }>;
+  /**
+   * Chair positions at the mess tables, in table order: for each
+   * table, the tile above it then the tile below it, so seats 2t
+   * and 2t+1 face each other across table t. Where eating crew sit
+   * and where a table game is played.
+   */
+  seats: Array<{ x: number; y: number; table: number }>;
+  /** Gym mat tile centres: where exercising crew stand to work. */
+  mats: Array<{ x: number; y: number }>;
 }
 
 interface SideDoor {
@@ -812,6 +821,16 @@ function buildDeckPlan(
       bunks: build.props
         .filter((p) => p.name === "bunk" || p.name === "bed")
         .map((p) => ({ x: p.tx + 0.5, y: p.ty + 0.5 })),
+      seats: build.props
+        .filter((p) => p.name === "table")
+        .sort((a, b) => a.tx - b.tx || a.ty - b.ty)
+        .flatMap((p, table) => [
+          { x: p.tx + 0.5, y: p.ty - 0.5, table },
+          { x: p.tx + 0.5, y: p.ty + 1.5, table },
+        ]),
+      mats: build.props
+        .filter((p) => p.name === "mat")
+        .map((p) => ({ x: p.tx + 0.5, y: p.ty + 0.5 })),
     };
     if (build.screenRect !== null) layout.bridgeScreen = build.screenRect;
   }
@@ -1130,6 +1149,19 @@ export interface DeckFrameOpts {
   selectedId: string | null;
   /** Last system each member worked, from work events (main.ts). */
   workSystem: ReadonlyMap<string, string | null>;
+  /**
+   * Members seated at a table game, from leisure_game events
+   * (main.ts): their seat index within the game, in the game's own
+   * room. Presentation only: the deck seats them facing each other
+   * while the game lasts.
+   */
+  gameSeat: ReadonlyMap<string, { room: number; seat: number }>;
+  /**
+   * Members carrying a prop in transit, derived in main.ts from
+   * move events: "tool" toward a damaged system's room, "crate"
+   * out of the cargo bay. Empty hands draw nothing.
+   */
+  carry: ReadonlyMap<string, "tool" | "crate">;
   /** Minutes into the ship's day (0-1439): the day/night light. */
   dayMinutes: number;
   /** Elapsed sim ticks this run: the wear layer's clock for ship age. */
@@ -1181,6 +1213,8 @@ interface PersonState {
   vel: number;
   /** The destination is a bunk or bed: draw horizontal on arrival. */
   lying: boolean;
+  /** The destination is a chair: draw the seated posture on arrival. */
+  seated: boolean;
 }
 
 interface Particle {
@@ -1225,6 +1259,12 @@ export class DeckView {
   private readonly perRoomScratch = new Map<number, number>();
   private readonly restSlotScratch = new Map<string, number>();
   private readonly restPerRoomScratch = new Map<number, number>();
+  private readonly seatSlotScratch = new Map<string, number>();
+  private readonly seatPerRoomScratch = new Map<number, number>();
+  private readonly exSlotScratch = new Map<string, number>();
+  private readonly exPerRoomScratch = new Map<number, number>();
+  /** room * 100 + table keys with a game board to draw this frame. */
+  private readonly boardScratch = new Set<number>();
   private readonly positionsScratch = new Map<
     string,
     { x: number; y: number }
@@ -1696,11 +1736,15 @@ export class DeckView {
     slot: number,
     workSystem: ReadonlyMap<string, string | null>,
     bunkIndex: number,
+    seatIndex: number,
+    gameSeat: { room: number; seat: number } | undefined,
+    exIndex: number,
   ): {
     point: { x: number; y: number };
     key: string;
     fx: number;
     lying: boolean;
+    seated: boolean;
   } {
     const plan = this.shipLayout.decks[
       this.shipLayout.deckOfRoom[member.room] ?? 0
@@ -1714,6 +1758,7 @@ export class DeckView {
         key: "void",
         fx: 0,
         lying: false,
+        seated: false,
       };
     }
     if (member.activity === "rest" && room.bunks.length > 0) {
@@ -1727,6 +1772,63 @@ export class DeckView {
         key: `b:${member.room}:${idx}`,
         fx: 0,
         lying: true,
+        seated: false,
+      };
+    }
+    if (
+      gameSeat !== undefined &&
+      gameSeat.room === member.room &&
+      room.seats.length > 0
+    ) {
+      // A table game in progress (main.ts holds the game's roster
+      // from its event): the players sit at one table, consecutive
+      // seats facing each other across it, for as long as the game
+      // lasts and they stay in the room.
+      const idx = gameSeat.seat % room.seats.length;
+      const seat = room.seats[idx] as { x: number; y: number };
+      return {
+        point: { x: seat.x, y: seat.y },
+        key: `g:${member.room}:${gameSeat.seat}`,
+        fx: 0,
+        lying: false,
+        seated: true,
+      };
+    }
+    if (
+      member.activity === "eat" &&
+      room.rect.kind === "mess" &&
+      seatIndex >= 0 &&
+      seatIndex < room.seats.length
+    ) {
+      // Eating in the mess is eating at table: the member takes the
+      // next chair in table order for their seat index among the
+      // room's eaters. More eaters than chairs stand, as they do
+      // now; the snapshot signal is the activity and the room, the
+      // chair itself is presentation.
+      const seat = room.seats[seatIndex] as { x: number; y: number };
+      return {
+        point: { x: seat.x, y: seat.y },
+        key: `s:${member.room}:${seatIndex}`,
+        fx: 0,
+        lying: false,
+        seated: true,
+      };
+    }
+    if (
+      member.activity === "exercise" &&
+      room.rect.kind === "gym" &&
+      room.mats.length > 0
+    ) {
+      // Exercise happens on the equipment: one member per mat, in
+      // roster order, the way resting crew take bunks.
+      const idx = (exIndex >= 0 ? exIndex : 0) % room.mats.length;
+      const mat = room.mats[idx] as { x: number; y: number };
+      return {
+        point: { x: mat.x, y: mat.y },
+        key: `x:${member.room}:${idx}`,
+        fx: 0,
+        lying: false,
+        seated: false,
       };
     }
     if (member.activity === "work" || member.activity === "repair") {
@@ -1763,12 +1865,22 @@ export class DeckView {
           key: `w:${member.room}:${target.systemId ?? target.tag}`,
           fx: target.fx,
           lying: false,
+          seated: false,
         };
       }
     }
+    // A reader sits where they stand: same tile, seated posture,
+    // and the body pass puts a book in their hands.
+    const seated = member.activity === "read";
     const tiles = room.standTiles;
     if (tiles.length === 0) {
-      return { point: room.center, key: `i:${member.room}:c`, fx: 0, lying: false };
+      return {
+        point: room.center,
+        key: `i:${member.room}:c`,
+        fx: 0,
+        lying: false,
+        seated,
+      };
     }
     const base = Math.floor(hash01(seedKey, num * 29 + member.room * 7) * tiles.length);
     const tile = tiles[(base + slot) % tiles.length] as { x: number; y: number };
@@ -1779,6 +1891,7 @@ export class DeckView {
       key: `i:${member.room}:${(base + slot) % tiles.length}`,
       fx: 0,
       lying: false,
+      seated,
     };
   }
 
@@ -1897,6 +2010,30 @@ export class DeckView {
       restSlot.set(member.id, idx);
       restPerRoom.set(member.room, idx + 1);
     }
+    // Eaters in the mess in roster order per room: who takes which
+    // chair. Only the mess has chairs, so only its eaters are seated.
+    const seatSlot = this.seatSlotScratch;
+    const seatPerRoom = this.seatPerRoomScratch;
+    seatSlot.clear();
+    seatPerRoom.clear();
+    for (const member of crew) {
+      if (member.activity !== "eat") continue;
+      if (ship.roomKind(member.room) !== "mess") continue;
+      const idx = seatPerRoom.get(member.room) ?? 0;
+      seatSlot.set(member.id, idx);
+      seatPerRoom.set(member.room, idx + 1);
+    }
+    // Exercisers in roster order per room: who takes which mat.
+    const exSlot = this.exSlotScratch;
+    const exPerRoom = this.exPerRoomScratch;
+    exSlot.clear();
+    exPerRoom.clear();
+    for (const member of crew) {
+      if (member.activity !== "exercise") continue;
+      const idx = exPerRoom.get(member.room) ?? 0;
+      exSlot.set(member.id, idx);
+      exPerRoom.set(member.room, idx + 1);
+    }
 
     // ---- movement and stations
     for (const member of crew) {
@@ -1907,6 +2044,9 @@ export class DeckView {
         slots.get(member.id) ?? 0,
         opts.workSystem,
         restSlot.get(member.id) ?? -1,
+        seatSlot.get(member.id) ?? -1,
+        opts.gameSeat.get(member.id),
+        exSlot.get(member.id) ?? -1,
       );
       const homeDeck = shipLayout.deckOfRoom[member.room] ?? 0;
       if (st === undefined) {
@@ -1930,6 +2070,7 @@ export class DeckView {
           phase: hash01(shipLayout.seedKey, num * 67) * Math.PI * 2,
           vel: 0,
           lying: want.lying,
+          seated: want.seated,
         };
         this.people.set(member.id, st);
       }
@@ -1951,6 +2092,7 @@ export class DeckView {
           st.anchorRoom = member.room;
           st.atLift = false;
           st.lying = want.lying;
+          st.seated = want.seated;
         } else if (roomChanged || st.legs.length > 0) {
           // A real journey: legs from where the body physically is.
           // Cross-deck, that is walk, lift, walk; same deck, one walk.
@@ -1958,6 +2100,7 @@ export class DeckView {
           st.path = [];
           st.vel = 0;
           st.lying = false;
+          st.seated = false;
           this.advanceLegs(st);
         } else {
           // A new station in the same room, from a standstill.
@@ -1971,6 +2114,7 @@ export class DeckView {
           );
           st.vel = 0;
           st.lying = false;
+          st.seated = false;
         }
         st.lastRoom = member.room;
         st.stationKey = want.key;
@@ -2068,6 +2212,7 @@ export class DeckView {
             st.anchorRoom = member.room;
             st.atLift = false;
             st.lying = want.lying;
+            st.seated = want.seated;
           }
         }
       } else if (st.transit === null) {
@@ -2078,6 +2223,7 @@ export class DeckView {
           st.anchorRoom = member.room;
           st.atLift = false;
           st.lying = want.lying;
+          st.seated = want.seated;
           if (st.atStation && st.workFx !== 0) st.facing = st.workFx;
         }
       }
@@ -2398,11 +2544,20 @@ export class DeckView {
       const working =
         (member.activity === "work" || member.activity === "repair") &&
         st.atStation;
+      const seated = st.seated && !st.moving;
+      const exercising =
+        member.activity === "exercise" && !st.moving && !seated;
       let sprite = sprites.idle;
       if (st.moving) {
         sprite = Math.floor(st.walkPhase * 1.6) % 2 === 0 ? sprites.walk : sprites.idle;
+      } else if (seated) {
+        sprite = sprites.seated;
       } else if (working) {
         sprite = Math.floor(now / 170) % 2 === 0 ? sprites.work : sprites.idle;
+      } else if (exercising) {
+        // On the machine: the two walk frames at the working tempo
+        // are the machine's motion; no new clock is invented for it.
+        sprite = Math.floor(now / 170) % 2 === 0 ? sprites.walk : sprites.idle;
       }
       const lying = st.lying && !st.moving;
       if (lying) sprite = sprites.idle;
@@ -2410,6 +2565,8 @@ export class DeckView {
       let swayX = 0;
       if (st.moving) bob = -Math.abs(Math.sin(st.walkPhase * 2.2)) * 1;
       else if (working) bob = Math.sin(now / 95 + st.phase) * 0.4;
+      else if (exercising) bob = Math.sin(now / 95 + st.phase) * 0.5;
+      else if (seated) bob = Math.sin(now / 1700 + st.phase) * 0.15;
       else {
         bob = Math.sin(now / 1700 + st.phase) * 0.3;
         swayX = Math.sin(now / 2100 + st.phase) * 0.3;
@@ -2452,6 +2609,58 @@ export class DeckView {
         ctx.drawImage(sprite, px - 4, py - 12 + bob);
       }
       ctx.restore();
+      // Full hands, drawn over the body: a traveller on an errand
+      // carries the thing (main.ts derives whose hands are full and
+      // with what; empty hands draw nothing).
+      if (st.moving) {
+        const carry = opts.carry.get(member.id);
+        if (carry !== undefined) {
+          const prop = propCanvas(carry === "tool" ? "toolcase" : "crate");
+          ctx.drawImage(
+            prop,
+            Math.round(px + st.facing * 4 - prop.width / 2),
+            Math.round(py - 9),
+          );
+        }
+      }
+      // A seated reader's book, open in front of the torso.
+      if (seated && member.activity === "read") {
+        const book = propCanvas("book");
+        ctx.drawImage(
+          book,
+          Math.round(px + st.facing * 2 - book.width / 2),
+          Math.round(py - 7),
+        );
+      }
+    }
+
+    // ---- game boards: on each table where a game is seated, for
+    // as long as the game lasts. The pair across the table is in
+    // the bodies above; the board is what they are looking at.
+    const boards = this.boardScratch;
+    boards.clear();
+    for (const [id, seatInfo] of opts.gameSeat) {
+      const st = this.people.get(id);
+      if (st === undefined || st.deck !== this.viewDeck) continue;
+      boards.add(seatInfo.room * 100 + Math.floor(seatInfo.seat / 2));
+    }
+    if (boards.size > 0) {
+      const board = propCanvas("board");
+      for (const boardKey of boards) {
+        const room = layout.rooms[Math.floor(boardKey / 100)];
+        if (room === undefined) continue;
+        const table = boardKey % 100;
+        const above = room.seats[table * 2];
+        const below = room.seats[table * 2 + 1];
+        if (above === undefined || below === undefined) continue;
+        const cx = (above.x + OX) * TILE_PX;
+        const cy = ((above.y + below.y) / 2 + OY) * TILE_PX;
+        ctx.drawImage(
+          board,
+          Math.round(cx - board.width / 2),
+          Math.round(cy - board.height / 2),
+        );
+      }
     }
 
     // ---- bubbles, above everything

@@ -25,6 +25,7 @@ import { createRun, type RunContext } from "../../src/sim.ts";
 import type { CrewMember } from "../../src/entities/crew.ts";
 import {
   blockAt,
+  mealWindowAt,
   type BlockKind,
 } from "../../src/entities/routine.ts";
 import {
@@ -75,12 +76,18 @@ function must<T extends Element>(id: string): T {
 
 // ---------------------------------------------------------------- state
 
+/** One chronicle line with the event type that produced it. */
+interface LogLine {
+  line: ChronicleLine;
+  type: string;
+}
+
 let run: RunContext;
 let renderer: ChronicleRenderer;
 let currentSeed = 42;
 let toastTimer = 0;
 let seenEvents = 0;
-let allLines: ChronicleLine[] = [];
+let allLines: LogLine[] = [];
 let playing = true;
 let speedIndex = 2; // 3x
 let accumulator = 0;
@@ -89,7 +96,14 @@ let lastSlowUiMs = 0;
 /** When the deck was last painted (the paused throttle's clock). */
 let lastDeckMs = 0;
 let selectedCrew: string | null = null;
-let highlightsOnly = true;
+/**
+ * The chronicle's detail: "highlights" (the default; the log as a
+ * minor channel) or "full" (every line, exactly as rendered). The
+ * choice lives in the URL (?log=full) and in localStorage, and
+ * switching rebuilds the visible log from allLines without ever
+ * touching the sim.
+ */
+let logMode: "highlights" | "full" = "highlights";
 let weatherName = "calm";
 let stickToBottom = true;
 
@@ -118,7 +132,9 @@ const deck2Btn = must<HTMLButtonElement>("deck2-btn");
 const minimapCanvas = must<HTMLCanvasElement>("minimap-canvas");
 const crewPanel = must<HTMLElement>("crew-panel");
 const chronicleEl = must<HTMLElement>("chronicle");
-const highlightsToggle = must<HTMLInputElement>("highlights-toggle");
+const logHighlightsBtn = must<HTMLButtonElement>("log-highlights-btn");
+const logFullBtn = must<HTMLButtonElement>("log-full-btn");
+const ribbonEl = must<HTMLElement>("day-ribbon");
 
 // ------------------------------------------------------------------ deck
 
@@ -132,6 +148,87 @@ let deck: DeckView | null = null;
  * live repairTarget names the system.
  */
 const workSystemByMember = new Map<string, string | null>();
+
+// ------------------------------------------------- staging the mundane
+//
+// Presentation state the deck needs that the member snapshot alone
+// does not carry, all of it read off the event stream the viewer
+// already drains. The engine is never asked for any of it.
+
+/** A table game in progress, from its leisure_game event. */
+interface ActiveGame {
+  room: number;
+  participants: string[];
+  untilTick: number;
+}
+
+/**
+ * A game lasts about an hour of ship time (the engine's own flavour
+ * for one: "an hour of cards"), six ticks at ten minutes each. The
+ * deck seats the players for exactly that span from the event.
+ */
+const GAME_TICKS = CONFIG.time.ticksPerDay / 24;
+const activeGames: ActiveGame[] = [];
+/** Player id to their seat at the game's table, rebuilt on change. */
+const gameSeatByMember = new Map<string, { room: number; seat: number }>();
+
+function rebuildGameSeats(): void {
+  gameSeatByMember.clear();
+  for (const game of activeGames) {
+    game.participants.forEach((id, seat) => {
+      gameSeatByMember.set(id, { room: game.room, seat });
+    });
+  }
+}
+
+/** Retire finished games; called on the frame clock. */
+function pruneGames(): void {
+  if (activeGames.length === 0) return;
+  let changed = false;
+  for (let i = activeGames.length - 1; i >= 0; i--) {
+    if (run.tick >= (activeGames[i] as ActiveGame).untilTick) {
+      activeGames.splice(i, 1);
+      changed = true;
+    }
+  }
+  if (changed) rebuildGameSeats();
+}
+
+/**
+ * Members carrying a prop in transit, derived from move events:
+ * "tool" toward a room holding a damaged or failed system the
+ * member can repair, "crate" out of the cargo bay. The derivation
+ * is deliberately conservative: when in doubt, empty hands.
+ */
+const carryByMember = new Map<string, "tool" | "crate">();
+
+function updateCarry(memberId: string, event: SimEvent): void {
+  const member = crewById(memberId);
+  if (member === undefined) return;
+  const towards = eventNum(event, "towards");
+  const from = eventNum(event, "from");
+  // The engine's own repair test (affinity plus skill), applied to
+  // the move's destination: an engineer heading to a failed system
+  // carries the tools for it.
+  const errand = run.ship.systems.find(
+    (s) =>
+      s.room === towards &&
+      (s.damaged || s.failed) &&
+      member.affinity.includes(s.kind) &&
+      member.repairSkill >= 0.2,
+  );
+  if (errand !== undefined) {
+    carryByMember.set(memberId, "tool");
+    return;
+  }
+  // Leaving the cargo bay means carrying stores out of it. Heading
+  // in is a fetch not yet fetched: empty hands.
+  if (run.ship.rooms[from]?.kind === "cargo") {
+    carryByMember.set(memberId, "crate");
+    return;
+  }
+  carryByMember.delete(memberId);
+}
 
 /** The minimap: both decks at a glance, beside the main canvas. */
 let minimap: Minimap | null = null;
@@ -753,8 +850,64 @@ function renderPersonCard(): void {
 
 // -------------------------------------------------------------- chronicle
 
-function linePasses(line: ChronicleLine): boolean {
-  return !highlightsOnly || line.highlight;
+/**
+ * The event types whose lines always print in highlights mode, on
+ * top of every line the chronicle renderer itself flags as drama
+ * (its highlight flag: bonds and grudges are in both sets, plus the
+ * renderer's trust breaks, snubs, system damage and strain, and
+ * tipping gossip). The sittings are named here because the renderer
+ * files meal_service as routine aggregation; in the highlights
+ * view a shared meal is an event, not bookkeeping. Full mode
+ * prints everything, byte-identical, exactly as rendered.
+ */
+const HIGHLIGHT_TYPES: ReadonlySet<string> = new Set([
+  "ship_generated", // firsts: the ship and her crew, named
+  "crew_generated",
+  "departure",
+  "weather", // weather turns
+  "meal_service", // the shared sittings
+  "leisure_game",
+  "bond_formed",
+  "grudge_formed",
+  "accusation",
+  "sabotage_committed",
+  "system_failed", // the crossing into failure
+  "system_repaired",
+]);
+
+function linePasses(entry: LogLine): boolean {
+  if (logMode === "full") return true;
+  return entry.line.highlight || HIGHLIGHT_TYPES.has(entry.type);
+}
+
+function setLogMode(mode: "highlights" | "full", rebuild = true): void {
+  logMode = mode;
+  logHighlightsBtn.classList.toggle("active", mode === "highlights");
+  logFullBtn.classList.toggle("active", mode === "full");
+  logHighlightsBtn.setAttribute("aria-pressed", String(mode === "highlights"));
+  logFullBtn.setAttribute("aria-pressed", String(mode === "full"));
+  try {
+    window.localStorage.setItem("starship.log", mode);
+  } catch {
+    // Storage can refuse (private windows); the URL still carries it.
+  }
+  const url = new URL(window.location.href);
+  url.searchParams.set("log", mode);
+  window.history.replaceState(null, "", url);
+  if (rebuild) rebuildChronicleDom();
+}
+
+/** The boot-time mode: the URL first, then the stored choice. */
+function initialLogMode(params: URLSearchParams): "highlights" | "full" {
+  const fromUrl = params.get("log");
+  if (fromUrl === "full" || fromUrl === "highlights") return fromUrl;
+  try {
+    const stored = window.localStorage.getItem("starship.log");
+    if (stored === "full" || stored === "highlights") return stored;
+  } catch {
+    // No storage: the default stands.
+  }
+  return "highlights";
 }
 
 function buildLineDiv(line: ChronicleLine): HTMLDivElement {
@@ -776,12 +929,12 @@ function buildLineDiv(line: ChronicleLine): HTMLDivElement {
  * goes in once, the cap trims once, and the scroll settles once.
  * The end state is identical to appending line by line.
  */
-function appendLinesToDom(lines: readonly ChronicleLine[]): void {
+function appendLinesToDom(lines: readonly LogLine[]): void {
   const fragment = document.createDocumentFragment();
   let added = 0;
-  for (const line of lines) {
-    if (!linePasses(line)) continue;
-    fragment.appendChild(buildLineDiv(line));
+  for (const entry of lines) {
+    if (!linePasses(entry)) continue;
+    fragment.appendChild(buildLineDiv(entry.line));
     added++;
   }
   if (added === 0) return;
@@ -797,7 +950,7 @@ function appendLinesToDom(lines: readonly ChronicleLine[]): void {
 
 function rebuildChronicleDom(): void {
   chronicleEl.replaceChildren();
-  const visible = allLines.filter(linePasses);
+  const visible = allLines.filter((entry) => linePasses(entry));
   appendLinesToDom(visible.slice(-MAX_CHRONICLE_DOM_LINES));
   chronicleEl.scrollTop = chronicleEl.scrollHeight;
 }
@@ -817,7 +970,7 @@ function drainEvents(): void {
   const events = run.world.events.events;
   // Chronicle lines from the whole drain are appended as one batch:
   // the DOM pays for one layout per drain, not one per line.
-  const batch: ChronicleLine[] = [];
+  const batch: LogLine[] = [];
   while (seenEvents < events.length) {
     const event = events[seenEvents] as (typeof events)[number];
     seenEvents++;
@@ -856,10 +1009,31 @@ function drainEvents(): void {
       const systemId = eventStr(event, "system");
       if (systemId !== "") deck?.stageRepaired(systemId);
     }
+    // Staging the mundane: a table game seats its players on the
+    // deck for the game's span, and a traveller's hands are read
+    // off their move events (the derivations live above).
+    if (event.type === "leisure_game") {
+      const participants = event.data.participants;
+      if (Array.isArray(participants)) {
+        activeGames.push({
+          room: eventNum(event, "room"),
+          participants: participants.filter(
+            (p): p is string => typeof p === "string",
+          ),
+          untilTick: event.tick + GAME_TICKS,
+        });
+        rebuildGameSeats();
+      }
+    }
+    if (event.type === "move") {
+      const actor = event.actors[0];
+      if (actor !== undefined) updateCarry(actor, event);
+    }
     feedAlert(event);
     for (const line of renderer.push(event)) {
-      allLines.push(line);
-      batch.push(line);
+      const entry: LogLine = { line, type: event.type };
+      allLines.push(entry);
+      batch.push(entry);
     }
   }
   appendLinesToDom(batch);
@@ -913,6 +1087,9 @@ function startVoyage(seed: number, opts?: { daily?: boolean }): void {
   accumulator = 0;
   weatherName = CONFIG.weather.states[0] ?? "calm";
   workSystemByMember.clear();
+  activeGames.length = 0;
+  gameSeatByMember.clear();
+  carryByMember.clear();
   alertStack.reset();
   chronicleEl.replaceChildren();
   shipNameEl.textContent = run.ship.name;
@@ -1001,9 +1178,89 @@ function updateHeader(): void {
   }
 }
 
+// ------------------------------------------------------- ship's day
+
+/**
+ * The printed beats of the ship's day, for the ribbon's next-beat
+ * reading: the day watch's schedule, which is the ship's rhythm.
+ */
+const DAY_BEATS: ReadonlyArray<{ hour: number; label: string }> = [
+  { hour: 6, label: "Wake" },
+  { hour: 7, label: "Breakfast" },
+  { hour: 8, label: "Work" },
+  { hour: 12, label: "Midday break" },
+  { hour: 13, label: "Work" },
+  { hour: 18, label: "Evening meal" },
+  { hour: 19, label: "Free time" },
+  { hour: 22, label: "Lights-out" },
+];
+
+const BLOCK_LABELS: Record<BlockKind, string> = {
+  sleep: "Sleep",
+  work: "Work",
+  meal: "At table",
+  free: "Free time",
+};
+
+let lastRibbonText = "";
+
+/**
+ * The ship's day ribbon: the watch phase, the block most of the
+ * crew are in right now, and the next beat of the day with its
+ * time. It teaches the rhythm the deck is keeping; it is written
+ * only when the reading changes, on the slow-UI cadence.
+ */
+function updateRibbon(): void {
+  const tick = run.tick;
+  const dayMinutes =
+    (tick % CONFIG.time.ticksPerDay) * CONFIG.time.minutesPerTick;
+  const watch = watchName(dayMinutes);
+  const counts = new Map<BlockKind, number>();
+  let nightOnDuty = 0;
+  for (const member of run.crew) {
+    const block = blockAt(member.routine, tick);
+    counts.set(block, (counts.get(block) ?? 0) + 1);
+    if (member.watch === "night" && block === "work") nightOnDuty++;
+  }
+  let majority: BlockKind = "free";
+  let best = -1;
+  for (const kind of ["sleep", "meal", "work", "free"] as const) {
+    const n = counts.get(kind) ?? 0;
+    if (n > best) {
+      best = n;
+      majority = kind;
+    }
+  }
+  let nowLabel: string;
+  if (majority === "meal") {
+    nowLabel =
+      mealWindowAt(tick) === "breakfast" ? "Breakfast" : "Evening meal";
+  } else if (majority === "sleep" && nightOnDuty > 0) {
+    // Most hands are asleep and the night pair holds the ship: the
+    // ship's posture is the night watch, not merely sleep.
+    nowLabel = "Night watch";
+  } else {
+    nowLabel = BLOCK_LABELS[majority];
+  }
+  let beat = DAY_BEATS[0] as (typeof DAY_BEATS)[number];
+  for (const candidate of DAY_BEATS) {
+    if (candidate.hour * 60 > dayMinutes) {
+      beat = candidate;
+      break;
+    }
+  }
+  const beatTime = `${String(beat.hour).padStart(2, "0")}:00`;
+  const text = `${watch} · ${nowLabel} · Next: ${beat.label} ${beatTime}`;
+  if (text !== lastRibbonText) {
+    lastRibbonText = text;
+    ribbonEl.textContent = text;
+  }
+}
+
 function updateSlowUi(): void {
   weatherNameEl.textContent = weatherName;
   weatherBanner.classList.toggle("storm", weatherName === "radiation storm");
+  updateRibbon();
   syncAlerts();
 
   for (const member of run.crew) {
@@ -1080,6 +1337,7 @@ function frame(nowMs: number): void {
   // less often. Playing rates are untouched.
   const deckDue = playing || nowMs - lastDeckMs >= 66;
   if (deck !== null && deckDue) {
+    pruneGames();
     const deckDtMs = lastDeckMs === 0 ? dtMs : nowMs - lastDeckMs;
     lastDeckMs = nowMs;
     const tickMs = playing
@@ -1092,6 +1350,8 @@ function frame(nowMs: number): void {
       snap: speedIndex >= 4,
       selectedId: selectedCrew,
       workSystem: workSystemByMember,
+      gameSeat: gameSeatByMember,
+      carry: carryByMember,
       dayMinutes:
         (run.tick % CONFIG.time.ticksPerDay) * CONFIG.time.minutesPerTick,
       tick: run.tick,
@@ -1178,10 +1438,8 @@ must<HTMLButtonElement>("new-voyage-btn").addEventListener("click", () => {
 must<HTMLButtonElement>("random-btn").addEventListener("click", () => {
   startVoyage(Math.floor(Math.random() * 1_000_000));
 });
-highlightsToggle.addEventListener("change", () => {
-  highlightsOnly = highlightsToggle.checked;
-  rebuildChronicleDom();
-});
+logHighlightsBtn.addEventListener("click", () => setLogMode("highlights"));
+logFullBtn.addEventListener("click", () => setLogMode("full"));
 chronicleEl.addEventListener("scroll", () => {
   stickToBottom =
     chronicleEl.scrollHeight - chronicleEl.scrollTop - chronicleEl.clientHeight <
@@ -1214,6 +1472,7 @@ window.addEventListener("keydown", (event) => {
 // ------------------------------------------------------------------ boot
 
 const params = new URLSearchParams(window.location.search);
+setLogMode(initialLogMode(params), false);
 setSpeed(speedIndex);
 setPlaying(true);
 if (params.get("daily") === "1") {

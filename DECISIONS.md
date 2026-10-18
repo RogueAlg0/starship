@@ -675,3 +675,49 @@ posture and filled chairs; errands shown by carried items;
 free time given furniture (games seated, gym machines in use,
 readers with books); a ship's day ribbon naming the current
 block and the next beat. Viewer-only; the engine is untouched.
+
+## Staging the mundane, built (Oct 18, 2026)
+
+Viewer-only build of the DESIGN.md chapter above; nothing under
+src/ changed and the gate held exactly: seed 42, 4,320 ticks,
+34,478 events, hash b4f952711cb7ec7e, replay exact, 40/40 tests.
+
+What shipped:
+
+- Chronicle highlights mode: a Highlights / Full log toggle above
+  the chronicle, defaulting to Highlights, its state carried in
+  the URL (?log=full) and localStorage. Highlights prints the
+  renderer's own drama lines plus, by event type, the shared
+  meal sittings (meal_service, which the renderer files as
+  routine), games, bonds, grudges, accusations, sabotage,
+  failures, repairs, weather turns, and the firsts. Movement,
+  rest, work, and solo meal lines do not print. Switching modes
+  rebuilds the visible log from the retained buffer; the batched
+  append and the 300-line DOM cap are unchanged.
+- A seated posture in the body dictionary (one row lower, legs
+  folded, hair overlays offset to follow the head), painted
+  through the same sprite cache. Crew eating in the mess take
+  chairs at the tables in roster order; table-game players sit
+  facing each other across a table with a board glyph between
+  them; readers sit where they stand, book drawn in hand.
+- Carried items, derived conservatively in the viewer from move
+  events: a member heading to a room holding a damaged or failed
+  system they can repair (the engine's affinity-plus-skill test)
+  carries a tool case; a member leaving the cargo bay carries a
+  stores crate. Everything else is empty hands.
+- Free-time furniture: exercisers take gym mats in roster order
+  and animate on the existing two-frame working tempo; games are
+  tracked from their leisure_game event and seat their players
+  for one ship hour (six ticks), the engine's own span for one.
+- The ship's day ribbon under the header: watch phase, the block
+  most of the crew are in (the night hours read "Night watch"
+  when the pair is on duty and the ship asleep), and the next
+  beat of the printed day with its time. Written only on change,
+  on the 200 ms slow-UI cadence.
+
+Derivation discipline: every new state is read from the snapshot
+the viewer already receives (activity + room, table/mat anchors
+from the deck layout's own props) or from the event stream it
+already drains (leisure_game rosters, move destinations). No
+engine field was added and no sim behaviour changed. Bundle grew
+266,997 -> 279,136 B (dist) for the new staging code and sprites.

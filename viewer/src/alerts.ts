@@ -493,6 +493,8 @@ interface Chip {
   leaving: boolean;
   /** "x" for critical (dismiss button), "bar" for timed tiers. */
   shape: string;
+  /** The born|span the lifetime bar's CSS animation was armed with. */
+  barKey: string;
 }
 
 /**
@@ -500,7 +502,9 @@ interface Chip {
  * tier-coloured left bar, a pixel icon, one line of text, and a
  * thin lifetime bar on timed tiers. Chips are reconciled by key, so
  * a state alert that escalates keeps its element and just changes
- * colour. The view is driven by the frame loop for bars and expiry.
+ * colour. The frame loop drives expiry only: the lifetime bar is a
+ * CSS animation armed when a chip is built or its span is refreshed,
+ * never a per-frame style write.
  */
 export class AlertStackView {
   private readonly container: HTMLElement;
@@ -520,15 +524,27 @@ export class AlertStackView {
     this.render();
   }
 
-  /** Advance expiry and lifetime bars. Call once per frame. */
+  /** Advance expiry. Call once per frame. */
   frame(nowMs: number): void {
     this.stack.tick(nowMs);
-    for (const chip of this.chips.values()) {
-      if (chip.fill === null || chip.leaving) continue;
-      const { bornMs, spanMs } = chip.item;
-      const left = 1 - (nowMs - bornMs) / spanMs;
-      chip.fill.style.width = `${Math.max(0, Math.min(1, left)) * 100}%`;
-    }
+  }
+
+  /**
+   * (Re)start a timed chip's lifetime bar as a CSS animation over
+   * the item's span. Called when a chip is built and whenever its
+   * item's born/span pair changes (a refreshed state alert); a
+   * steady chip is never touched again.
+   */
+  private armBar(chip: Chip): void {
+    const { fill, item } = chip;
+    if (fill === null || !Number.isFinite(item.spanMs)) return;
+    const key = `${item.bornMs}|${item.spanMs}`;
+    if (chip.barKey === key) return;
+    chip.barKey = key;
+    fill.style.animationName = "none";
+    void fill.offsetWidth; // restart the animation from full width
+    fill.style.animationDuration = `${item.spanMs}ms`;
+    fill.style.animationName = "alert-burn";
   }
 
   private render(): void {
@@ -563,6 +579,7 @@ export class AlertStackView {
         chip.root.className = `alert tier-${item.tier}`;
         const text = chip.root.querySelector(".alert-text");
         if (text !== null) text.textContent = item.text;
+        this.armBar(chip);
       }
       this.container.appendChild(chip.root);
     }
@@ -611,12 +628,15 @@ export class AlertStackView {
     }
     // The enter flourish plays once; without it the chip just is.
     window.setTimeout(() => root.classList.remove("enter"), 30);
-    return {
+    const chip: Chip = {
       root,
       fill,
       item,
       leaving: false,
       shape: item.tier === "critical" ? "x" : "bar",
+      barKey: "",
     };
+    this.armBar(chip);
+    return chip;
   }
 }

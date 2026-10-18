@@ -259,8 +259,16 @@
     height: 2px;
     background: rgba(255, 255, 255, 0.08);
   }
-  .alert-life-fill { height: 100%; width: 100%; background: #8fa3bf; }
+  .alert-life-fill {
+    height: 100%;
+    width: 100%;
+    background: #8fa3bf;
+    animation-name: alert-burn;
+    animation-timing-function: linear;
+    animation-fill-mode: forwards;
+  }
   .alert.tier-major .alert-life-fill { background: var(--warn); }
+  @keyframes alert-burn { from { width: 100%; } to { width: 0%; } }
   @media (max-width: 640px) {
     #alert-stack {
       position: static;

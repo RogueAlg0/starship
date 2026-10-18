@@ -189,6 +189,14 @@ flinches: staged blows shake the deck, harder for a failure than a
 sabotage, muffled when the trouble is on the other deck, and never
 at all under prefers-reduced-motion.
 
+**Performance.** The frame loop follows the reference viewers'
+discipline: the chronicle appends as one batched DOM write per
+drain, the crew pass uses pre-tinted cached body sprites instead
+of a canvas filter, glow gradients are built once per layout, the
+wear layer is composited into the static deck so a frame blits
+one base canvas, scratch structures are reused rather than
+allocated, and a paused voyage redraws the deck at about 15 fps.
+
 For link publishing, `npm run viewer:static` writes a single
 self-contained page at `viewer/dist-static/index.html` with the bundle
 inlined. Build outputs (`viewer/dist/`, `viewer/dist-static/`) are not

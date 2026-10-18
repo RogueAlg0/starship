@@ -40,7 +40,11 @@ import { BubbleLayer } from "./bubbles.ts";
 import { SpaceBackdrop } from "./space.ts";
 import { lightAt, NIGHT_DARK } from "./daynight.ts";
 import { WearLayer, type WearGeom } from "./wear.ts";
-import { StagingLayer, type StageAnchor } from "./staging.ts";
+import {
+  StagingLayer,
+  type StageAnchor,
+  type StageSystemState,
+} from "./staging.ts";
 import {
   corridorTile,
   floorEdge,
@@ -1209,6 +1213,39 @@ export class DeckView {
   private readonly bubbles = new BubbleLayer();
   /** The feel pass (./staging.ts): events staged in the world. */
   private readonly staging: StagingLayer;
+  /** Static deck with the wear layer composited in: one blit a frame. */
+  private readonly composites: [HTMLCanvasElement, HTMLCanvasElement];
+  /** The staging sync's input rows, mutated in place every frame. */
+  private readonly stageStates: StageSystemState[] = [];
+  /** Resolved systems per room index; fixed for the life of a ship. */
+  private readonly roomSystems = new Map<number, ShipSystem[]>();
+  // Frame scratch, cleared and reused in place: the frame loop
+  // allocates nothing it can avoid, per the performance pass.
+  private readonly slotScratch = new Map<string, number>();
+  private readonly perRoomScratch = new Map<number, number>();
+  private readonly restSlotScratch = new Map<string, number>();
+  private readonly restPerRoomScratch = new Map<number, number>();
+  private readonly positionsScratch = new Map<
+    string,
+    { x: number; y: number }
+  >();
+  private readonly orderedScratch: CrewMember[] = [];
+  /** Painted system labels, keyed per room by what the label says. */
+  private readonly labelCache = new Map<
+    number,
+    { key: string; canvas: HTMLCanvasElement }
+  >();
+  /** Glow gradients, built once (per deck) instead of every frame. */
+  private hydroGrad: CanvasGradient | null = null;
+  private readonly reactorGrads: [CanvasGradient | null, CanvasGradient | null] =
+    [null, null];
+  private readonly engineGrads: [CanvasGradient | null, CanvasGradient | null] =
+    [null, null];
+  /** The staging layer's anchor resolver, bound once. */
+  private readonly anchorFor = (
+    id: string,
+    deck: number,
+  ): StageAnchor | null => this.anchorForSystem(id, deck);
   private readonly reducedMotionMq: MediaQueryList | null =
     typeof window !== "undefined" &&
     typeof window.matchMedia === "function"
@@ -1259,6 +1296,39 @@ export class DeckView {
       new WearLayer(this.shipLayout.decks[0], wearGeom),
       new WearLayer(this.shipLayout.decks[1], wearGeom),
     ];
+    // The per-frame base image: the static deck with the wear layer
+    // composited over it. Wear repaints are rare (bucketed signature
+    // changes), so the composite is refreshed only then, and a frame
+    // blits one canvas where it used to blit two.
+    this.composites = [
+      document.createElement("canvas"),
+      document.createElement("canvas"),
+    ];
+    for (let d = 0; d < 2; d++) {
+      const plan = this.shipLayout.decks[d] as DeckLayout;
+      const composite = this.composites[d] as HTMLCanvasElement;
+      composite.width = plan.widthPx;
+      composite.height = plan.heightPx;
+      const cctx = composite.getContext("2d");
+      if (cctx !== null) {
+        cctx.drawImage(this.statics[d] as HTMLCanvasElement, 0, 0);
+      }
+    }
+    // Resolve each room's systems once: the list is fixed for the
+    // life of the ship; only the conditions on the objects move.
+    for (const plan of this.shipLayout.decks) {
+      for (const room of plan.rooms) {
+        if (room === undefined || room.systemIds.length === 0) continue;
+        const systems: ShipSystem[] = [];
+        for (const id of room.systemIds) {
+          const system = ship.systemById(id);
+          if (system !== undefined) systems.push(system);
+        }
+        if (systems.length > 0) {
+          this.roomSystems.set(room.rect.index, systems);
+        }
+      }
+    }
     this.ctx = canvas.getContext("2d");
     this.staging = new StagingLayer(
       () => this.reducedMotionMq?.matches ?? false,
@@ -1268,6 +1338,16 @@ export class DeckView {
   /** The deck the main canvas is showing: 0 upper, 1 lower. */
   get visibleDeck(): number {
     return this.viewDeck;
+  }
+
+  /** Rebuild one deck's composite after its wear layer repainted. */
+  private refreshComposite(deckIndex: number): void {
+    const composite = this.composites[deckIndex] as HTMLCanvasElement;
+    const cctx = composite.getContext("2d");
+    if (cctx === null) return;
+    cctx.clearRect(0, 0, composite.width, composite.height);
+    cctx.drawImage(this.statics[deckIndex] as HTMLCanvasElement, 0, 0);
+    cctx.drawImage((this.wears[deckIndex] as WearLayer).canvas, 0, 0);
   }
 
   /** Show a deck. Crew, wear, and light all follow the one ship. */
@@ -1757,45 +1837,60 @@ export class DeckView {
     // happened), telegraphs cough and smoke on the visible deck, and
     // the accumulated shake kicks offset the whole scene: the deck
     // and the sky move, the page around the canvas does not.
-    const anchorFor = (id: string, deck: number): StageAnchor | null =>
-      this.anchorForSystem(id, deck);
-    this.staging.syncSystems(
-      ship.systems.map((s) => ({
-        id: s.id,
-        condition: s.condition,
-        failed: s.failed,
-        deck: shipLayout.deckOfRoom[s.room] ?? 0,
-      })),
-      now,
-      anchorFor,
-    );
-    this.staging.updateTelegraphs(now, dt * 1000, this.viewDeck, anchorFor);
+    // The sync's input rows are persistent objects, mutated in
+    // place: a frame builds no fresh state for the staging layer.
+    if (this.stageStates.length !== ship.systems.length) {
+      this.stageStates.length = 0;
+      for (const s of ship.systems) {
+        this.stageStates.push({
+          id: s.id,
+          condition: s.condition,
+          failed: s.failed,
+          deck: shipLayout.deckOfRoom[s.room] ?? 0,
+        });
+      }
+    } else {
+      for (let i = 0; i < ship.systems.length; i++) {
+        const s = ship.systems[i] as ShipSystem;
+        const row = this.stageStates[i] as StageSystemState;
+        row.condition = s.condition;
+        row.failed = s.failed;
+        row.deck = shipLayout.deckOfRoom[s.room] ?? 0;
+      }
+    }
+    this.staging.syncSystems(this.stageStates, now, this.anchorFor);
+    this.staging.updateTelegraphs(now, dt * 1000, this.viewDeck, this.anchorFor);
     const shake = this.staging.shakeOffset(now, this.viewDeck);
     ctx.save();
     if (shake.x !== 0 || shake.y !== 0) ctx.translate(shake.x, shake.y);
 
     // The moving sky behind the hull, then the ship herself.
     this.backdrop.drawFar(ctx, dt, opts.speedTps);
-    ctx.drawImage(this.statics[this.viewDeck] as HTMLCanvasElement, 0, 0);
     // The ship's scars sit on the deck with the static layer, under
     // the night tint; the update repaints them only on bucket change.
     // Both decks' layers update every frame: a ship scars whether or
-    // not anyone is watching that deck. Only the visible one draws.
-    this.wears[0].update(ship, opts.tick);
-    this.wears[1].update(ship, opts.tick);
-    (this.wears[this.viewDeck] as WearLayer).draw(ctx);
+    // not anyone is watching that deck. A repaint refreshes that
+    // deck's composite; the frame then blits the one composite.
+    if (this.wears[0].update(ship, opts.tick)) this.refreshComposite(0);
+    if (this.wears[1].update(ship, opts.tick)) this.refreshComposite(1);
+    ctx.drawImage(this.composites[this.viewDeck] as HTMLCanvasElement, 0, 0);
 
     // Occupant slots, for spreading stand positions inside a room.
-    const slots = new Map<string, number>();
-    const perRoom = new Map<number, number>();
+    // Scratch maps, cleared and reused: no allocation per frame.
+    const slots = this.slotScratch;
+    const perRoom = this.perRoomScratch;
+    slots.clear();
+    perRoom.clear();
     for (const member of crew) {
       const slot = perRoom.get(member.room) ?? 0;
       slots.set(member.id, slot);
       perRoom.set(member.room, slot + 1);
     }
     // Resting members in roster order per room: who takes which bunk.
-    const restSlot = new Map<string, number>();
-    const restPerRoom = new Map<number, number>();
+    const restSlot = this.restSlotScratch;
+    const restPerRoom = this.restPerRoomScratch;
+    restSlot.clear();
+    restPerRoom.clear();
     for (const member of crew) {
       if (member.activity !== "rest") continue;
       const idx = restPerRoom.get(member.room) ?? 0;
@@ -2006,6 +2101,16 @@ export class DeckView {
     this.backdrop.drawNear(ctx, now);
 
     // ---- hydroponics light sweep
+    // The sweep gradient is built once in a canonical span and the
+    // fill is translated to the sweep's position each frame: the
+    // geometry moves, the gradient object does not get rebuilt.
+    if (this.hydroGrad === null) {
+      const grad = ctx.createLinearGradient(-12, 0, 12, 0);
+      grad.addColorStop(0, "rgba(190,255,190,0)");
+      grad.addColorStop(0.5, "rgba(190,255,190,0.10)");
+      grad.addColorStop(1, "rgba(190,255,190,0)");
+      this.hydroGrad = grad;
+    }
     for (const room of layout.rooms) {
       if (room === undefined || room.rect.kind !== "hydroponics") continue;
       const rx = (room.rect.x + 1 + OX) * TILE_PX;
@@ -2013,15 +2118,17 @@ export class DeckView {
       const rw = (room.rect.w - 2) * TILE_PX;
       const rh = (room.rect.h - 2) * TILE_PX;
       const sweepX = rx + ((now / 55) % (rw + 28)) - 14;
-      const grad = ctx.createLinearGradient(sweepX - 12, 0, sweepX + 12, 0);
-      grad.addColorStop(0, "rgba(190,255,190,0)");
-      grad.addColorStop(0.5, "rgba(190,255,190,0.10)");
-      grad.addColorStop(1, "rgba(190,255,190,0)");
-      ctx.fillStyle = grad;
-      ctx.fillRect(rx, ry, rw, rh);
+      ctx.save();
+      ctx.translate(sweepX, 0);
+      ctx.fillStyle = this.hydroGrad;
+      ctx.fillRect(rx - sweepX, ry, rw, rh);
+      ctx.restore();
     }
 
     // ---- reactor and engine glow, scaled by system condition
+    // The glow gradients are built once per deck at their fixed
+    // geometry, with the peak stop at full strength; the per-frame
+    // pulse and condition ride on globalAlpha instead of the stops.
     const reactor = ship.systems.find((s) => s.kind === "reactor");
     if (reactor !== undefined && layout.reactorCore !== null) {
       const core = layout.reactorCore;
@@ -2031,21 +2138,33 @@ export class DeckView {
       ctx.fillRect(core.x, core.y, core.w, core.h);
       const gx = core.x + core.w / 2;
       const gy = core.y + core.h / 2;
-      const grad = ctx.createRadialGradient(gx, gy, 1, gx, gy, 17);
-      grad.addColorStop(0, `rgba(255,150,50,${(0.22 * reactor.condition * pulse).toFixed(3)})`);
-      grad.addColorStop(1, "rgba(255,150,50,0)");
+      let grad = this.reactorGrads[this.viewDeck];
+      if (grad === null) {
+        grad = ctx.createRadialGradient(gx, gy, 1, gx, gy, 17);
+        grad.addColorStop(0, "rgba(255,150,50,0.22)");
+        grad.addColorStop(1, "rgba(255,150,50,0)");
+        this.reactorGrads[this.viewDeck] = grad;
+      }
+      ctx.globalAlpha = reactor.condition * pulse;
       ctx.fillStyle = grad;
       ctx.fillRect(gx - 17, gy - 17, 34, 34);
+      ctx.globalAlpha = 1;
     }
     const engines = ship.systems.find((s) => s.kind === "engines");
     if (engines !== undefined) {
       const g = layout.engineGlow;
       const pulse = 0.75 + 0.25 * Math.sin(now / 1000 + 1);
-      const grad = ctx.createRadialGradient(g.x, g.y, 1, g.x, g.y, 20);
-      grad.addColorStop(0, `rgba(140,200,255,${(0.30 * engines.condition * pulse).toFixed(3)})`);
-      grad.addColorStop(1, "rgba(140,200,255,0)");
+      let grad = this.engineGrads[this.viewDeck];
+      if (grad === null) {
+        grad = ctx.createRadialGradient(g.x, g.y, 1, g.x, g.y, 20);
+        grad.addColorStop(0, "rgba(140,200,255,0.30)");
+        grad.addColorStop(1, "rgba(140,200,255,0)");
+        this.engineGrads[this.viewDeck] = grad;
+      }
+      ctx.globalAlpha = engines.condition * pulse;
       ctx.fillStyle = grad;
       ctx.fillRect(g.x - 20, g.y - 20, 40, 40);
+      ctx.globalAlpha = 1;
       ctx.fillStyle = `rgba(190,225,255,${(0.25 + 0.6 * engines.condition).toFixed(3)})`;
       for (const dy of [-13, -4, 5]) {
         ctx.fillRect((OX - 4) * TILE_PX, g.y + dy - 4, 3, 6);
@@ -2092,10 +2211,8 @@ export class DeckView {
     // ---- damage overlays, labels, spark spawning
     for (const room of layout.rooms) {
       if (room === undefined) continue;
-      const systems = room.systemIds
-        .map((id) => ship.systemById(id))
-        .filter((s): s is ShipSystem => s !== undefined);
-      if (systems.length === 0) continue;
+      const systems = this.roomSystems.get(room.rect.index);
+      if (systems === undefined || systems.length === 0) continue;
       let worst = systems[0] as ShipSystem;
       for (const s of systems) if (s.condition < worst.condition) worst = s;
       const { rect } = room;
@@ -2139,11 +2256,13 @@ export class DeckView {
           ctx.globalAlpha = 1;
         }
       }
-      // System label and condition bar, live from the ship.
+      // System label and condition bar, live from the ship. The bar
+      // is two small fills per frame; the text is a painted sprite,
+      // repainted only when what it says changes (the worst system,
+      // its rounded percent, or its colour band): names and numbers
+      // are never re-typeset per frame.
       const pct = Math.round(worst.condition * 100);
       const extra = systems.length > 1 ? ` +${systems.length - 1}` : "";
-      ctx.font = "6px monospace";
-      ctx.textAlign = "left";
       ctx.fillStyle = "#141a26";
       ctx.fillRect(rx + 3, ry + rect.h * TILE_PX - 10, 30, 2);
       ctx.fillStyle =
@@ -2153,13 +2272,35 @@ export class DeckView {
             ? "#ffb35c"
             : "#7fd4a8";
       ctx.fillRect(rx + 3, ry + rect.h * TILE_PX - 10, 30 * worst.condition, 2);
-      ctx.fillStyle =
-        worst.condition < 0.6 ? "#ffb35c" : "rgba(207,216,230,0.85)";
-      if (worst.condition < 0.3) ctx.fillStyle = "#ff8a6a";
-      ctx.fillText(
-        `${worst.name} ${pct}%${extra}`,
+      const band =
+        worst.condition < 0.3 ? 2 : worst.condition < 0.6 ? 1 : 0;
+      const labelKey = `${worst.id}|${pct}|${band}`;
+      let label = this.labelCache.get(rect.index);
+      if (label === undefined || label.key !== labelKey) {
+        const text = `${worst.name} ${pct}%${extra}`;
+        const canvas = document.createElement("canvas");
+        const lctx = canvas.getContext("2d");
+        if (lctx !== null) {
+          lctx.font = "6px monospace";
+          canvas.width = Math.max(1, Math.ceil(lctx.measureText(text).width));
+          canvas.height = 8;
+          lctx.font = "6px monospace";
+          lctx.textAlign = "left";
+          lctx.fillStyle =
+            band === 2
+              ? "#ff8a6a"
+              : band === 1
+                ? "#ffb35c"
+                : "rgba(207,216,230,0.85)";
+          lctx.fillText(text, 0, 7);
+        }
+        label = { key: labelKey, canvas };
+        this.labelCache.set(rect.index, label);
+      }
+      ctx.drawImage(
+        label.canvas,
         rx + 3,
-        ry + rect.h * TILE_PX - 3,
+        ry + rect.h * TILE_PX - 10,
       );
     }
 
@@ -2231,12 +2372,18 @@ export class DeckView {
     // ---- crew bodies
     // Bodies dim less than the deck at night (0.82 of full at the
     // darkest): crew carry their own small light in-fiction, and a
-    // watch-stander must stay findable in a dark room.
+    // watch-stander must stay findable in a dark room. The dim is a
+    // pre-tinted sprite variant from the bodies cache, bucketed so
+    // a night costs the same drawImage as the day: no canvas filter
+    // ever wraps this pass.
     const bodyDim = 1 - 0.18 * (light.dark / NIGHT_DARK);
-    ctx.filter =
-      bodyDim < 0.999 ? `brightness(${bodyDim.toFixed(3)})` : "none";
-    const positions = new Map<string, { x: number; y: number }>();
-    const ordered = [...crew].sort(
+    const dimBucket = Math.round(bodyDim / 0.05) * 0.05;
+    const positions = this.positionsScratch;
+    positions.clear();
+    const ordered = this.orderedScratch;
+    ordered.length = 0;
+    for (const member of crew) ordered.push(member);
+    ordered.sort(
       (a, b) =>
         (this.people.get(a.id)?.y ?? 0) - (this.people.get(b.id)?.y ?? 0),
     );
@@ -2247,7 +2394,7 @@ export class DeckView {
       // dots, not ghosts on this plan. A body mid-fade in a lift is
       // drawn by the deck it is leaving, then by the deck it joins.
       if (st.deck !== this.viewDeck || st.alpha <= 0.01) continue;
-      const sprites = getBodySprites(member);
+      const sprites = getBodySprites(member, dimBucket);
       const working =
         (member.activity === "work" || member.activity === "repair") &&
         st.atStation;
@@ -2306,7 +2453,6 @@ export class DeckView {
       }
       ctx.restore();
     }
-    ctx.filter = "none";
 
     // ---- bubbles, above everything
     this.bubbles.update(now, crew);

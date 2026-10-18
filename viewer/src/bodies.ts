@@ -91,10 +91,17 @@ export interface BodySprites {
   work: HTMLCanvasElement;
 }
 
+/** Multiply a hex colour's channels by a factor (a paint-time tint). */
+function dimColour(hex: string, factor: number): string {
+  const [r, g, b] = hexToRgb(hex);
+  return rgbToHex(r * factor, g * factor, b * factor);
+}
+
 function paintBody(
   rows: readonly string[],
   look: FaceDescriptor,
   pants: string,
+  dim = 1,
 ): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = 8;
@@ -114,7 +121,10 @@ function paintBody(
     W: "#c8d4e4",
   };
   const set = (x: number, y: number, colour: string): void => {
-    ctx.fillStyle = colour;
+    // Every paint goes through here, so the night dim is applied
+    // once, at paint time, to the whole figure (the pre-tinted
+    // variant the deck draws instead of filtering the live canvas).
+    ctx.fillStyle = dim < 1 ? dimColour(colour, dim) : colour;
     ctx.fillRect(x, y, 1, 1);
   };
   rows.forEach((row, y) => {
@@ -165,9 +175,18 @@ function paintBody(
 
 const bodyCache = new Map<string, BodySprites>();
 
-/** The person's three body frames, painted at most once per run role. */
-export function getBodySprites(member: CrewMember): BodySprites {
-  const key = `${member.id}|${member.roleKey}`;
+/**
+ * The person's three body frames, painted at most once per run role
+ * per dim bucket. The dim bucket (1 by day, lower at night, in 0.05
+ * steps from the deck) keys pre-tinted variants, so a night body
+ * costs the same single drawImage as a day body and no per-frame
+ * canvas filter is ever paid for the crew pass.
+ */
+export function getBodySprites(member: CrewMember, dim = 1): BodySprites {
+  const key =
+    dim < 1
+      ? `${member.id}|${member.roleKey}|dim${dim.toFixed(2)}`
+      : `${member.id}|${member.roleKey}`;
   const hit = bodyCache.get(key);
   if (hit !== undefined) return hit;
   const look = appearanceOf(member);
@@ -175,9 +194,9 @@ export function getBodySprites(member: CrewMember): BodySprites {
     PANTS[Math.floor(hash01(crewNumber(member), 61) * PANTS.length)] ??
     PANTS[0];
   const sprites: BodySprites = {
-    idle: paintBody(IDLE_ROWS, look, pants),
-    walk: paintBody(WALK_ROWS, look, pants),
-    work: paintBody(WORK_ROWS, look, pants),
+    idle: paintBody(IDLE_ROWS, look, pants, dim),
+    walk: paintBody(WALK_ROWS, look, pants, dim),
+    work: paintBody(WORK_ROWS, look, pants, dim),
   };
   bodyCache.set(key, sprites);
   return sprites;

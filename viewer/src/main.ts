@@ -86,6 +86,8 @@ let speedIndex = 2; // 3x
 let accumulator = 0;
 let lastFrameMs = 0;
 let lastSlowUiMs = 0;
+/** When the deck was last painted (the paused throttle's clock). */
+let lastDeckMs = 0;
 let selectedCrew: string | null = null;
 let highlightsOnly = true;
 let weatherName = "calm";
@@ -755,8 +757,7 @@ function linePasses(line: ChronicleLine): boolean {
   return !highlightsOnly || line.highlight;
 }
 
-function appendLineToDom(line: ChronicleLine): void {
-  if (!linePasses(line)) return;
+function buildLineDiv(line: ChronicleLine): HTMLDivElement {
   const div = document.createElement("div");
   div.className =
     "line " + (line.highlight ? "hl" : "routine") + (line.text === "" ? " blank" : "");
@@ -765,7 +766,26 @@ function appendLineToDom(line: ChronicleLine): void {
     div.classList.add("dim");
   }
   div.textContent = line.text === "" ? " " : line.text;
-  chronicleEl.appendChild(div);
+  return div;
+}
+
+/**
+ * Append a batch of lines in one DOM write. Reading scrollHeight
+ * forces a synchronous layout of the whole scroll subtree, so the
+ * batch (not the line) is the unit that pays for it: the fragment
+ * goes in once, the cap trims once, and the scroll settles once.
+ * The end state is identical to appending line by line.
+ */
+function appendLinesToDom(lines: readonly ChronicleLine[]): void {
+  const fragment = document.createDocumentFragment();
+  let added = 0;
+  for (const line of lines) {
+    if (!linePasses(line)) continue;
+    fragment.appendChild(buildLineDiv(line));
+    added++;
+  }
+  if (added === 0) return;
+  chronicleEl.appendChild(fragment);
   // Cap the DOM: the full log stays in allLines, only the window is cut.
   while (chronicleEl.childElementCount > MAX_CHRONICLE_DOM_LINES) {
     const first = chronicleEl.firstElementChild;
@@ -778,9 +798,7 @@ function appendLineToDom(line: ChronicleLine): void {
 function rebuildChronicleDom(): void {
   chronicleEl.replaceChildren();
   const visible = allLines.filter(linePasses);
-  for (const line of visible.slice(-MAX_CHRONICLE_DOM_LINES)) {
-    appendLineToDom(line);
-  }
+  appendLinesToDom(visible.slice(-MAX_CHRONICLE_DOM_LINES));
   chronicleEl.scrollTop = chronicleEl.scrollHeight;
 }
 
@@ -797,6 +815,9 @@ function refreshLineDims(): void {
 
 function drainEvents(): void {
   const events = run.world.events.events;
+  // Chronicle lines from the whole drain are appended as one batch:
+  // the DOM pays for one layout per drain, not one per line.
+  const batch: ChronicleLine[] = [];
   while (seenEvents < events.length) {
     const event = events[seenEvents] as (typeof events)[number];
     seenEvents++;
@@ -838,9 +859,10 @@ function drainEvents(): void {
     feedAlert(event);
     for (const line of renderer.push(event)) {
       allLines.push(line);
-      appendLineToDom(line);
+      batch.push(line);
     }
   }
+  appendLinesToDom(batch);
 }
 
 // ---------------------------------------------------------------- voyage
@@ -991,8 +1013,17 @@ function updateSlowUi(): void {
       const fill = ui.bars.get(key);
       if (fill === undefined) continue;
       const value = member.needs[key];
-      fill.style.width = `${Math.round(value * 100)}%`;
-      fill.className = value < 0.25 ? "low" : value < 0.5 ? "mid" : "";
+      // The bars are written only when the rounded value or its
+      // band changes: the same discipline the faces already use,
+      // so a steady pass costs no style recalculation at all.
+      const pct = Math.round(value * 100);
+      const band = value < 0.25 ? "low" : value < 0.5 ? "mid" : "";
+      const sig = `${pct}|${band}`;
+      if (fill.dataset.sig !== sig) {
+        fill.dataset.sig = sig;
+        fill.style.width = `${pct}%`;
+        fill.className = band;
+      }
     }
     // Faces repaint only when the state that shows on them changes.
     const state = faceStateOf(member);
@@ -1042,13 +1073,21 @@ function frame(nowMs: number): void {
   alertView.frame(nowMs);
 
   // The deck: bodies glide, work, spark, and think, on canvas.
-  if (deck !== null) {
+  // While paused, everything left moving is a slow sine (drift,
+  // blink, sway), so the deck redraws at about 15 fps and the frame
+  // costs a quarter of itself; the deck is handed the true elapsed
+  // time since its last paint, so nothing animates slower, only
+  // less often. Playing rates are untouched.
+  const deckDue = playing || nowMs - lastDeckMs >= 66;
+  if (deck !== null && deckDue) {
+    const deckDtMs = lastDeckMs === 0 ? dtMs : nowMs - lastDeckMs;
+    lastDeckMs = nowMs;
     const tickMs = playing
       ? 1000 / (SPEEDS[speedIndex] as (typeof SPEEDS)[number]).ticksPerSecond
       : Number.POSITIVE_INFINITY;
     deck.frame(run.crew, {
       now: nowMs,
-      dtMs,
+      dtMs: deckDtMs,
       tickMs,
       snap: speedIndex >= 4,
       selectedId: selectedCrew,

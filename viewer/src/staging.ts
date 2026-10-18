@@ -255,14 +255,26 @@ export class StagingLayer {
     for (const state of states) {
       const band = bandOf(state.condition, state.failed);
       const prev = this.systems.get(state.id);
-      this.systems.set(state.id, {
-        condition: state.condition,
-        failed: state.failed,
-        deck: state.deck,
-        band,
-      });
+      const prevBand = prev?.band;
+      // The tracked state is mutated in place, not replaced: the
+      // deck syncs every frame and a frame allocates nothing here.
+      // The crossing test below reads the band from BEFORE this
+      // sync (prevBand), exactly as it read the replaced object.
+      if (prev === undefined) {
+        this.systems.set(state.id, {
+          condition: state.condition,
+          failed: state.failed,
+          deck: state.deck,
+          band,
+        });
+      } else {
+        prev.condition = state.condition;
+        prev.failed = state.failed;
+        prev.deck = state.deck;
+        prev.band = band;
+      }
       if (!this.seeded) continue;
-      if (band === "critical" && (prev === undefined || prev.band !== "critical")) {
+      if (band === "critical" && prevBand !== "critical") {
         crossed.push(state.id);
         this.stage(
           "failure",

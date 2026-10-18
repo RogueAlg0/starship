@@ -591,3 +591,59 @@ attaching slightly to a second person the teller distrusts) stays
 off and is noted as future work; the insomnia override was omitted,
 because a sleep block that reliably rests is what makes the night
 watch read as a watch.
+
+## Performance pass (Oct 18, 2026)
+
+The user reported the live ship view "a lil laggy". A research
+pass (~/workspace/research/starship-viewer-performance.md) read
+both dunya viewers for their frame discipline and ranked our
+costs against it; this build implements its top five fixes plus
+two small ones, all behaviour-preserving (the seed-42 hash is
+unchanged: b4f952711cb7ec7e; 40/40 tests green).
+
+1. Chronicle drain batching. The drain appended each line with
+   its own DOM insert and, when stuck to the bottom, its own
+   scrollHeight read: one forced layout per line, inside the
+   frame, growing with playback speed. Lines now collect during
+   the drain and append once through a DocumentFragment; the
+   300-line cap trims once and the scroll settles once per batch.
+2. No canvas filter on the crew pass. Night bodies were drawn
+   under ctx.filter = brightness(...) for the whole bodies loop,
+   an intermediate-surface pass every frame of the night watch.
+   Bodies now come from pre-tinted sprite variants in the bodies
+   cache, keyed by a dim bucket (0.05 steps): a night body costs
+   the same drawImage as a day body.
+3. Glow gradients built once. The hydroponics sweep gradient and
+   the reactor/engine radial glows were allocated every frame
+   with the pulse baked into their stops. The sweep gradient is
+   built once in a canonical span and translated into place; the
+   glows are built once per deck at fixed geometry with the peak
+   stop at full strength, and condition x pulse rides on
+   globalAlpha.
+4. Wear folded into the static deck, and a paused throttle.
+   Each deck's wear layer is composited over its static canvas
+   whenever the wear layer repaints (its bucketed signature
+   change), so a frame blits one base canvas instead of two; the
+   render order is unchanged (wear still under the tint, glows
+   and labels still above it). While paused, the deck redraws at
+   about 15 fps with the true elapsed dt handed over, so drift
+   and sway keep their speed and only their rate drops.
+5. The frame loop de-allocated. The staging sync's input rows
+   are persistent objects mutated in place, and the staging
+   layer mutates its tracked per-system state instead of setting
+   a fresh object per system per frame (its crossing test reads
+   the band captured before the sync). Slot/rest/positions maps
+   and the draw-order array are scratch fields, cleared and
+   reused; per-room system lists are resolved once per ship.
+
+Small ones: system label text is a painted sprite per room,
+repainted only when the worst system, its rounded percent, or
+its colour band changes (the condition bar still draws live);
+alert lifetime bars are CSS animations armed at chip build or
+span refresh instead of per-frame style.width writes, and the
+roster need bars in updateSlowUi are written only when the
+rounded percent or band changes.
+
+Not done: Finding 7 (minimap silhouette caching). The minimap
+is a 176x56 canvas already throttled to 250 ms; the caching
+restructure was not free, and the research ranked its win low.

@@ -166,6 +166,23 @@ pierce shared walls between neighbouring rooms and open onto the
 corridor. The same ship always yields the same deck; the engine
 knows nothing about it.
 
+The ship has two decks. Deck 1 (upper) holds the bridge, quarters,
+mess, medbay, and lab. Deck 2 (lower) holds engineering, cargo,
+hydroponics, the airlock, and the gym. Each deck keeps the same
+generator language: two bands of rooms along its own corridor,
+inside the one hull footprint, and a deck shorter than the hull
+pads the difference with tanks and pipe runs in the plating. Two
+lift shafts at fixed points along the corridor are the only way
+between decks: crew walk to a lift, fade into the car, and appear
+at the same shaft on the other deck. The main canvas shows one deck
+at a time (buttons or keys 7 and 8 switch), while a minimap under
+it shows both decks at once: room blocks, crew as department-colour
+dots, the lifts as gold ticks, and a pulsing outline on any room
+whose worst system is hurting. Tap a deck on the minimap, or tap a
+crew member who is on the other deck, and the view follows. The
+engine has no floors; the decks are presentation of the room graph,
+recorded in DECISIONS.md.
+
 Every room is dressed as itself, in code: consoles and the captain's
 chair on the bridge, a reactor core and machine blocks in
 engineering, beds in the medbay, tables and a serving counter in the

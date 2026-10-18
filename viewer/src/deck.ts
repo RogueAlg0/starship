@@ -12,15 +12,21 @@
 // with door-to-door waypoint movement, working crew at their
 // stations, system labels, and bubbles.
 //
-// Layout: two room bands (dorsal and ventral) flank a central
-// corridor inside an elongated hull, tapered at the bow, flat at the
-// stern where the engine block sits. Engineering pins the stern,
-// the bridge pins the bow, the airlock sits just aft of the bridge;
-// the remaining rooms chain by graph adjacency and fill whichever
-// band is currently narrower. Doors pierce shared walls between
+// Layout: the ship has two decks, as the squad sim's buildings have
+// floors. Rooms split by kind: bridge, quarters, mess, medbay, and
+// lab on Deck 1 (upper); engineering, cargo, hydroponics, airlock,
+// and gym on Deck 2 (lower). Each deck is two room bands flanking its
+// own corridor spine inside the same hull footprint: the bridge pins
+// the upper bow, engineering the lower stern, and a deck shorter
+// than the hull pads the difference with structure plating. Two lift
+// shafts at fixed fractions of the corridor are the only route
+// between decks: crew ride them, fading out on one deck and in on
+// the other. The viewer shows one deck at a time; the minimap
+// (minimap.ts) watches both. Doors pierce shared walls between
 // neighbouring rooms placed side by side, and every room opens onto
-// the corridor. Crew paths route through those doors over a walkable
-// tile grid, smoothed by line of sight.
+// its deck's corridor. Crew paths route through those doors over a
+// walkable tile grid, smoothed by line of sight. The engine has no
+// floors: this is presentation of the room graph, nothing more.
 
 import type { CrewMember } from "../../src/entities/crew.ts";
 import type { Ship } from "../../src/world/ship.ts";
@@ -46,8 +52,11 @@ const BAND_H = 9; // room band height, tiles
 const CORR_Y = 9; // corridor top row
 const CORR_H = 3; // corridor height
 const DECK_H = BAND_H * 2 + CORR_H; // 21
-const OX = 5; // canvas tiles left of the hull stern (engine block zone)
-const OY = 2; // canvas tiles above the hull
+export const OX = 5; // canvas tiles left of the hull stern (engine block zone)
+export const OY = 2; // canvas tiles above the hull
+const CORR_MID = CORR_Y + 1.5; // corridor centre row, tile-float coords
+/** Seconds of wall time for each half of a lift ride (out, then in). */
+const TRANSIT_PHASE_S = 0.3;
 
 const SIZES: Record<string, [number, number]> = {
   bridge: [11, 7],
@@ -131,10 +140,27 @@ interface SideDoor {
   mid: { x: number; y: number };
 }
 
+/** One lift shaft: a column pair on the corridor, shared by both decks. */
+export interface LiftShaft {
+  /** Left tile column of the two-wide shaft. */
+  x: number;
+  /** Boarding point, tile-float coords: the middle of the car. */
+  point: { x: number; y: number };
+}
+
+/**
+ * One deck's plan. Both decks share the tile coordinate frame and
+ * the hull footprint, so a tile position means the same place on
+ * either deck and only the deck tag tells them apart.
+ */
 export interface DeckLayout {
   seedKey: number;
+  deckIndex: number;
   rooms: RoomLayout[];
+  /** Shared hull width in tiles (both decks, padding included). */
   deckW: number;
+  /** This deck's own content width, before the padding to deckW. */
+  contentW: number;
   widthPx: number;
   heightPx: number;
   walkable: Uint8Array;
@@ -144,28 +170,95 @@ export interface DeckLayout {
   engineGlow: { x: number; y: number };
   navLights: Array<{ x: number; y: number; colour: string; phase: number }>;
   bridgeScreen: { x: number; y: number; w: number; h: number } | null;
+  lifts: LiftShaft[];
 }
 
-function orderRooms(ship: Ship, seedKey: number): number[] {
-  const byKind = (kind: string): number =>
-    ship.rooms.find((r) => r.kind === kind)?.index ?? -1;
-  const eng = byKind("engineering");
-  const bridge = byKind("bridge");
-  const airlock = byKind("airlock");
-  const pinned = new Set([eng, bridge, airlock]);
-  const pool = ship.rooms
-    .map((r) => r.index)
-    .filter((i) => !pinned.has(i));
+/** The whole ship's presentation: two deck plans in one hull. */
+export interface ShipLayout {
+  seedKey: number;
+  deckW: number;
+  widthPx: number;
+  heightPx: number;
+  decks: [DeckLayout, DeckLayout];
+  /** Deck index per room index: 0 upper, 1 lower. */
+  deckOfRoom: number[];
+  lifts: LiftShaft[];
+}
+
+/**
+ * Which deck a room kind lives on. A ship is a workplace over a
+ * machine: command, living, and care above; the plant below.
+ */
+const DECK_OF_KIND: Readonly<Record<string, 0 | 1>> = {
+  bridge: 0,
+  quarters: 0,
+  mess: 0,
+  medbay: 0,
+  lab: 0,
+  engineering: 1,
+  cargo: 1,
+  hydroponics: 1,
+  airlock: 1,
+  gym: 1,
+};
+
+/**
+ * Assign every room to a deck. Listed kinds follow the table; a kind
+ * the table does not name goes to the deck with more spare width
+ * (the smaller summed room width so far), ties broken by hash.
+ */
+export function assignDecks(ship: Ship, seedKey: number): number[] {
+  const deckOf = new Array<number>(ship.rooms.length).fill(-1);
+  const load = [0, 0];
+  const widthOf = (kind: string): number => (SIZES[kind]?.[0] ?? 9) + 1;
+  for (const room of ship.rooms) {
+    const d = DECK_OF_KIND[room.kind];
+    if (d !== undefined) {
+      deckOf[room.index] = d;
+      load[d] += widthOf(room.kind);
+    }
+  }
+  for (const room of ship.rooms) {
+    if (deckOf[room.index] !== -1) continue;
+    let d: 0 | 1;
+    if (load[0] !== load[1]) d = load[0] < load[1] ? 0 : 1;
+    else d = hash01(seedKey, room.index * 7 + 1) < 0.5 ? 0 : 1;
+    deckOf[room.index] = d;
+    load[d] += widthOf(room.kind);
+  }
+  return deckOf;
+}
+
+/**
+ * Order one deck's rooms for placement: head first (the stern pin),
+ * then a greedy adjacency chain, then the tail pins (the bow). Rooms
+ * are scored by how many already-placed neighbours they touch, with
+ * a hash jitter, so graph neighbours tend to sit side by side.
+ */
+function orderDeckRooms(
+  ship: Ship,
+  seedKey: number,
+  indices: number[],
+  head: number,
+  tail: number[],
+): number[] {
+  const inDeck = new Set(indices);
+  const pinned = new Set(
+    [head, ...tail].filter((i) => i >= 0 && inDeck.has(i)),
+  );
+  const pool = indices.filter((i) => !pinned.has(i));
+  const anchor =
+    head >= 0 ? head : (tail.find((i) => i >= 0 && inDeck.has(i)) ?? -1);
   const chain: number[] = [];
-  let last = eng;
+  let last = anchor;
   while (pool.length > 0) {
     let best = -1;
     let bestScore = -1;
     for (const cand of pool) {
       const neighbours = ship.rooms[cand]?.neighbors ?? [];
-      let score = neighbours.includes(last) ? 4 : 0;
-      for (const placed of [eng, ...chain]) {
-        if (neighbours.includes(placed)) score += 1;
+      let score = last >= 0 && neighbours.includes(last) ? 4 : 0;
+      for (const placed of [anchor, ...chain]) {
+        if (placed >= 0 && neighbours.includes(placed)) score += 1;
       }
       score += hash01(seedKey, cand * 13 + 3) * 0.5;
       if (score > bestScore) {
@@ -178,10 +271,13 @@ function orderRooms(ship: Ship, seedKey: number): number[] {
     pool.splice(pool.indexOf(best), 1);
     last = best;
   }
-  const order = [eng, ...chain];
-  if (airlock >= 0) order.push(airlock);
-  if (bridge >= 0) order.push(bridge);
-  return order.filter((i) => i >= 0);
+  const order: number[] = [];
+  if (head >= 0 && inDeck.has(head)) order.push(head);
+  order.push(...chain);
+  for (const t of tail) {
+    if (t >= 0 && inDeck.has(t)) order.push(t);
+  }
+  return order;
 }
 
 class RoomBuild {
@@ -497,34 +593,64 @@ function dressRoom(build: RoomBuild, layout: DeckLayout): void {
   }
 }
 
-export function buildLayout(ship: Ship): DeckLayout {
-  const seedKey = strHash(ship.signature());
-  const order = orderRooms(ship, seedKey);
-  const engFirst = hash01(seedKey, 501) < 0.5;
+interface BandRows {
+  rows: Array<{ rooms: number[]; width: number }>;
+  /** The deck's own content width in tiles, before hull padding. */
+  contentW: number;
+}
+
+/**
+ * Split one deck's ordered rooms into the two bands flanking its
+ * corridor: each room goes to the currently narrower band, except
+ * the pinned room (engineering), whose band is the hash's choice.
+ */
+function splitBands(
+  ship: Ship,
+  seedKey: number,
+  order: number[],
+  pinnedIndex: number,
+): BandRows {
   const rows: Array<{ rooms: number[]; width: number }> = [
     { rooms: [], width: 1 },
     { rooms: [], width: 1 },
   ];
-  const homeRow = new Map<number, number>();
   for (const index of order) {
     const kind = ship.rooms[index]?.kind ?? "quarters";
     const [w] = SIZES[kind] ?? [9, 7];
     let row: number;
-    if (index === ship.rooms.find((r) => r.kind === "engineering")?.index) {
-      row = engFirst ? 0 : 1;
+    if (index === pinnedIndex) {
+      row = hash01(seedKey, 501) < 0.5 ? 0 : 1;
     } else {
       row = rows[0].width <= rows[1].width ? 0 : 1;
     }
-    homeRow.set(index, row);
     rows[row].rooms.push(index);
     rows[row].width += w + 1;
   }
-  const deckW = Math.max(rows[0].width, rows[1].width) + 2;
+  return {
+    rows,
+    contentW: Math.max(rows[0].width, rows[1].width) + 2,
+  };
+}
 
+/**
+ * Build one deck's plan: rects, doors, furniture, walkable grid.
+ * Only this deck's rooms exist here; the coordinate frame and the
+ * hull width are shared with the other deck, so the two plans stack.
+ */
+function buildDeckPlan(
+  ship: Ship,
+  seedKey: number,
+  deckIndex: number,
+  bands: BandRows,
+  deckW: number,
+  lifts: LiftShaft[],
+): DeckLayout {
   const layout: DeckLayout = {
     seedKey,
+    deckIndex,
     rooms: [],
     deckW,
+    contentW: bands.contentW,
     widthPx: (OX + deckW + 9) * TILE_PX,
     heightPx: (OY * 2 + DECK_H) * TILE_PX,
     walkable: new Uint8Array(deckW * DECK_H),
@@ -537,10 +663,11 @@ export function buildLayout(ship: Ship): DeckLayout {
     },
     navLights: [],
     bridgeScreen: null,
+    lifts,
   };
 
   const rects = new Map<number, RoomRect>();
-  rows.forEach((rowData, rowIdx) => {
+  bands.rows.forEach((rowData, rowIdx) => {
     let cursor = 1;
     for (const index of rowData.rooms) {
       const room = ship.rooms[index];
@@ -703,6 +830,51 @@ export function buildLayout(ship: Ship): DeckLayout {
   return layout;
 }
 
+/**
+ * The ship's presentation: assign decks, order and lay out each one
+ * in the shared hull footprint, and place the two lift shafts at
+ * fixed fractions of the corridor, aligned on both decks.
+ */
+export function buildShipLayout(ship: Ship): ShipLayout {
+  const seedKey = strHash(ship.signature());
+  const deckOfRoom = assignDecks(ship, seedKey);
+  const byKind = (kind: string): number =>
+    ship.rooms.find((r) => r.kind === kind)?.index ?? -1;
+  const eng = byKind("engineering");
+  const bridge = byKind("bridge");
+  const airlock = byKind("airlock");
+  const indicesOf = (d: number): number[] =>
+    ship.rooms
+      .filter((r) => deckOfRoom[r.index] === d)
+      .map((r) => r.index);
+  // Upper deck: the chain grows toward the bridge, pinned at the bow.
+  // Lower deck: engineering pins the stern, the airlock rides aft.
+  const order0 = orderDeckRooms(ship, seedKey, indicesOf(0), -1, [bridge]);
+  const order1 = orderDeckRooms(ship, seedKey, indicesOf(1), eng, [airlock]);
+  const bands0 = splitBands(ship, seedKey, order0, eng);
+  const bands1 = splitBands(ship, seedKey, order1, eng);
+  const deckW = Math.max(bands0.contentW, bands1.contentW);
+  const liftA = Math.max(3, Math.round(deckW / 3));
+  const liftB = Math.max(liftA + 6, Math.round((2 * deckW) / 3));
+  const lifts: LiftShaft[] = [liftA, liftB].map((x) => ({
+    x,
+    point: { x: x + 1, y: CORR_MID },
+  }));
+  const decks: [DeckLayout, DeckLayout] = [
+    buildDeckPlan(ship, seedKey, 0, bands0, deckW, lifts),
+    buildDeckPlan(ship, seedKey, 1, bands1, deckW, lifts),
+  ];
+  return {
+    seedKey,
+    deckW,
+    widthPx: (OX + deckW + 9) * TILE_PX,
+    heightPx: (OY * 2 + DECK_H) * TILE_PX,
+    decks,
+    deckOfRoom,
+    lifts,
+  };
+}
+
 // ------------------------------------------------------- static render
 
 function renderStatic(layout: DeckLayout, ship: Ship): HTMLCanvasElement {
@@ -777,6 +949,74 @@ function renderStatic(layout: DeckLayout, ship: Ship): HTMLCanvasElement {
   ctx.fillStyle = "#39465c";
   for (let tx = 2; tx < deckW - 2; tx += 3) {
     ctx.fillRect((tx + OX) * TILE_PX + 2, (CORR_Y + OY) * TILE_PX + 12, 3, 1);
+  }
+
+  // The void where this deck runs shorter than the hull: tank farm
+  // and pipe runs in the plating, so the padding reads as ship, not
+  // as missing rooms. Only the band rows dress; the corridor runs
+  // the hull's full length on both decks.
+  if (layout.contentW < deckW - 3) {
+    const x0 = layout.contentW - 1;
+    const x1 = deckW - 1;
+    ctx.strokeStyle = "#20293a";
+    ctx.lineWidth = 1;
+    for (const bandY of [CORR_Y - 4, CORR_Y + CORR_H + 3]) {
+      const py = (bandY + OY) * TILE_PX;
+      ctx.beginPath();
+      ctx.moveTo((x0 + OX) * TILE_PX, py);
+      ctx.lineTo((x1 + OX) * TILE_PX, py);
+      ctx.moveTo((x0 + OX) * TILE_PX, py + 3);
+      ctx.lineTo((x1 + OX) * TILE_PX, py + 3);
+      ctx.stroke();
+    }
+    const tank = propCanvas("tank");
+    for (let tx = x0 + 1; tx < x1 - 1; tx += 3) {
+      const h1 = hash01(seedKey, tx * 17 + layout.deckIndex * 101);
+      if (h1 >= 0.6) continue;
+      const top = hash01(seedKey, tx * 19 + layout.deckIndex * 103) < 0.5;
+      const ty = top ? CORR_Y - 7 : CORR_Y + CORR_H + 1;
+      ctx.drawImage(tank, (tx + OX) * TILE_PX + 2, (ty + OY) * TILE_PX + 1);
+    }
+  }
+
+  // Lift shafts: a car block across the corridor's middle row, with
+  // frame posts on the rows above and below and up/down arrows on
+  // the doors. The same columns on both decks, so the eye learns
+  // where the lifts are and the minimap can mark them.
+  for (const lift of layout.lifts) {
+    const lx = (lift.x + OX) * TILE_PX;
+    const lyTop = (CORR_Y + OY) * TILE_PX;
+    const lyMid = lyTop + TILE_PX;
+    // Frame posts where the shaft pierces the corridor walls.
+    ctx.fillStyle = "#39465c";
+    ctx.fillRect(lx, lyTop, 2, TILE_PX);
+    ctx.fillRect(lx + TILE_PX * 2 - 2, lyTop, 2, TILE_PX);
+    ctx.fillRect(lx, lyTop + TILE_PX * 2, 2, TILE_PX);
+    ctx.fillRect(lx + TILE_PX * 2 - 2, lyTop + TILE_PX * 2, 2, TILE_PX);
+    // The car: darker plate, a door split, a lit header strip.
+    ctx.fillStyle = "#141b28";
+    ctx.fillRect(lx, lyMid, TILE_PX * 2, TILE_PX);
+    ctx.fillStyle = "#46536b";
+    ctx.fillRect(lx, lyMid, TILE_PX * 2, 1);
+    ctx.fillRect(lx, lyMid + TILE_PX - 1, TILE_PX * 2, 1);
+    ctx.fillStyle = "#0a0e14";
+    ctx.fillRect(lx + TILE_PX, lyMid + 1, 1, TILE_PX - 2);
+    ctx.fillStyle = "#8fa6c4";
+    ctx.fillRect(lx + 3, lyMid + 1, TILE_PX * 2 - 6, 1);
+    // Arrows: up on the left door, down on the right.
+    ctx.fillStyle = "#e8a33d";
+    ctx.beginPath();
+    ctx.moveTo(lx + 4, lyMid + 3);
+    ctx.lineTo(lx + 2, lyMid + 6);
+    ctx.lineTo(lx + 6, lyMid + 6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(lx + TILE_PX + 4, lyMid + 5);
+    ctx.lineTo(lx + TILE_PX + 2, lyMid + 2);
+    ctx.lineTo(lx + TILE_PX + 6, lyMid + 2);
+    ctx.closePath();
+    ctx.fill();
   }
 
   // Rooms: floors, walls, doors, plates, props.
@@ -890,16 +1130,43 @@ export interface DeckFrameOpts {
   speedTps: number;
 }
 
+/**
+ * One leg of a journey. Walks stay on one deck's grid; a lift leg is
+ * the ride between decks, boarded and left at the same shaft point.
+ * A cross-deck journey is walk, lift, walk, and nothing else.
+ */
+type Leg =
+  | { kind: "walk"; deck: number; points: Array<{ x: number; y: number }> }
+  | { kind: "lift"; toDeck: number; point: { x: number; y: number } };
+
 interface PersonState {
   x: number;
   y: number;
+  /** The deck the body is physically on (or fading out of). */
+  deck: number;
   path: Array<{ x: number; y: number }>;
+  /** Legs queued after the current walk. */
+  legs: Leg[];
+  /** A lift ride in progress: fade out, reappear, fade in. */
+  transit: {
+    toDeck: number;
+    point: { x: number; y: number };
+    phase: "out" | "in";
+    t: number;
+  } | null;
+  /** Draw opacity: 1, except mid-transit. */
+  alpha: number;
   facing: number;
   walkPhase: number;
   moving: boolean;
   atStation: boolean;
   workFx: number;
+  /** The member.room last routed for (hop-distance snap math). */
   lastRoom: number;
+  /** The room whose doors the body last routed from, physically. */
+  anchorRoom: number;
+  /** The body stands at a lift in a corridor, not inside anchorRoom. */
+  atLift: boolean;
   stationKey: string;
   phase: number;
   /** Current glide speed, tiles per second (movement easing). */
@@ -924,11 +1191,11 @@ const MAX_PARTICLES = 200;
 
 export class DeckView {
   private readonly ship: Ship;
-  private readonly layout: DeckLayout;
-  private readonly staticCanvas: HTMLCanvasElement;
+  readonly shipLayout: ShipLayout;
+  private readonly statics: [HTMLCanvasElement, HTMLCanvasElement];
   private readonly backdrop: SpaceBackdrop;
-  /** The ship's accumulated scars, tracked from the frame stream. */
-  readonly wear: WearLayer;
+  /** The ship's accumulated scars, one layer per deck. */
+  private readonly wears: [WearLayer, WearLayer];
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D | null;
   private readonly people = new Map<string, PersonState>();
@@ -936,18 +1203,22 @@ export class DeckView {
   private readonly damageAcc = new Map<number, number>();
   private readonly weldAcc = new Map<string, number>();
   private readonly bubbles = new BubbleLayer();
+  private viewDeck = 0;
 
   constructor(ship: Ship, canvas: HTMLCanvasElement) {
     this.ship = ship;
     this.canvas = canvas;
-    this.layout = buildLayout(ship);
-    canvas.width = this.layout.widthPx;
-    canvas.height = this.layout.heightPx;
-    this.staticCanvas = renderStatic(this.layout, ship);
+    this.shipLayout = buildShipLayout(ship);
+    canvas.width = this.shipLayout.widthPx;
+    canvas.height = this.shipLayout.heightPx;
+    this.statics = [
+      renderStatic(this.shipLayout.decks[0], ship),
+      renderStatic(this.shipLayout.decks[1], ship),
+    ];
     this.backdrop = new SpaceBackdrop(
-      this.layout.seedKey,
-      this.layout.widthPx,
-      this.layout.heightPx,
+      this.shipLayout.seedKey,
+      this.shipLayout.widthPx,
+      this.shipLayout.heightPx,
     );
     // Hull exterior geometry for the wear layer, in the same pixels
     // renderStatic paints: the engine block at the stern, its three
@@ -973,8 +1244,31 @@ export class DeckView {
       hullBottom: (OY + DECK_H + 1) * TILE_PX,
       sternX: (OX - 1) * TILE_PX,
     };
-    this.wear = new WearLayer(this.layout, wearGeom);
+    this.wears = [
+      new WearLayer(this.shipLayout.decks[0], wearGeom),
+      new WearLayer(this.shipLayout.decks[1], wearGeom),
+    ];
     this.ctx = canvas.getContext("2d");
+  }
+
+  /** The deck the main canvas is showing: 0 upper, 1 lower. */
+  get visibleDeck(): number {
+    return this.viewDeck;
+  }
+
+  /** Show a deck. Crew, wear, and light all follow the one ship. */
+  setDeck(deck: number): void {
+    this.viewDeck = deck === 1 ? 1 : 0;
+  }
+
+  /** The deck a room lives on. */
+  deckOfRoom(room: number): number {
+    return this.shipLayout.deckOfRoom[room] ?? 0;
+  }
+
+  /** The deck a person's body is on, or null before their first frame. */
+  deckOfPerson(id: string): number | null {
+    return this.people.get(id)?.deck ?? null;
   }
 
   /** An accusation was just spoken: bubble over the accuser. */
@@ -987,6 +1281,7 @@ export class DeckView {
     let best: string | null = null;
     let bestD = (TILE_PX * 0.9 + 3) ** 2;
     for (const [id, st] of this.people) {
+      if (st.deck !== this.viewDeck || st.alpha < 0.5) continue;
       const px = (st.x + OX) * TILE_PX;
       const py = (st.y + OY) * TILE_PX - 6;
       const d = (px - xPx) ** 2 + (py - yPx) ** 2;
@@ -998,21 +1293,25 @@ export class DeckView {
     return best;
   }
 
-  private walkableAt(x: number, y: number): boolean {
+  private walkableAt(plan: DeckLayout, x: number, y: number): boolean {
     const tx = Math.floor(x);
     const ty = Math.floor(y);
-    if (tx < 0 || ty < 0 || tx >= this.layout.deckW || ty >= DECK_H) {
+    if (tx < 0 || ty < 0 || tx >= plan.deckW || ty >= DECK_H) {
       return false;
     }
-    return this.layout.walkable[ty * this.layout.deckW + tx] === 1;
+    return plan.walkable[ty * plan.deckW + tx] === 1;
   }
 
-  private los(a: { x: number; y: number }, b: { x: number; y: number }): boolean {
+  private los(
+    plan: DeckLayout,
+    a: { x: number; y: number },
+    b: { x: number; y: number },
+  ): boolean {
     const dist = Math.hypot(b.x - a.x, b.y - a.y);
     const steps = Math.max(1, Math.ceil(dist / 0.2));
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
-      if (!this.walkableAt(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t)) {
+      if (!this.walkableAt(plan, a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t)) {
         return false;
       }
     }
@@ -1020,13 +1319,14 @@ export class DeckView {
   }
 
   private smooth(
+    plan: DeckLayout,
     pts: Array<{ x: number; y: number }>,
   ): Array<{ x: number; y: number }> {
     const out: Array<{ x: number; y: number }> = [];
     let i = 0;
     while (i < pts.length - 1) {
       let j = pts.length - 1;
-      while (j > i + 1 && !this.los(pts[i] as { x: number; y: number }, pts[j] as { x: number; y: number })) {
+      while (j > i + 1 && !this.los(plan, pts[i] as { x: number; y: number }, pts[j] as { x: number; y: number })) {
         j--;
       }
       out.push(pts[j] as { x: number; y: number });
@@ -1035,22 +1335,24 @@ export class DeckView {
     return out;
   }
 
+  /** Room to room on one deck: in-room, side door, or via corridor. */
   private route(
+    plan: DeckLayout,
     fromRoom: number,
     toRoom: number,
     start: { x: number; y: number },
     end: { x: number; y: number },
   ): Array<{ x: number; y: number }> {
-    const rooms = this.layout.rooms;
+    const rooms = plan.rooms;
     if (fromRoom === toRoom) {
       const room = rooms[fromRoom];
       const pts = [start];
-      if (room !== undefined && !this.los(start, end)) pts.push(room.center);
+      if (room !== undefined && !this.los(plan, start, end)) pts.push(room.center);
       pts.push(end);
-      return this.smooth(pts);
+      return this.smooth(plan, pts);
     }
     const sideKey = `${Math.min(fromRoom, toRoom)}|${Math.max(fromRoom, toRoom)}`;
-    const side = this.layout.sideDoors.get(sideKey);
+    const side = plan.sideDoors.get(sideKey);
     const a = rooms[fromRoom];
     const b = rooms[toRoom];
     if (side !== undefined && a !== undefined && b !== undefined) {
@@ -1058,27 +1360,159 @@ export class DeckView {
       const approachFrom = fromA ? side.approachA : side.approachB;
       const approachTo = fromA ? side.approachB : side.approachA;
       const pts = [start];
-      if (!this.los(start, approachFrom)) pts.push(a.center);
+      if (!this.los(plan, start, approachFrom)) pts.push(a.center);
       pts.push(approachFrom, side.mid, approachTo);
-      if (!this.los(approachTo, end)) pts.push(b.center);
+      if (!this.los(plan, approachTo, end)) pts.push(b.center);
       pts.push(end);
-      return this.smooth(pts);
+      return this.smooth(plan, pts);
     }
     if (a === undefined || b === undefined) return [end];
-    const corrY = CORR_Y + 1.5;
     const pts = [start];
-    if (!this.los(start, a.doorInside)) pts.push(a.center);
+    if (!this.los(plan, start, a.doorInside)) pts.push(a.center);
     pts.push(
       a.doorInside,
       a.doorTile,
-      { x: a.doorTile.x, y: corrY },
-      { x: b.doorTile.x, y: corrY },
+      { x: a.doorTile.x, y: CORR_MID },
+      { x: b.doorTile.x, y: CORR_MID },
       b.doorTile,
       b.doorInside,
     );
-    if (!this.los(b.doorInside, end)) pts.push(b.center);
+    if (!this.los(plan, b.doorInside, end)) pts.push(b.center);
     pts.push(end);
-    return this.smooth(pts);
+    return this.smooth(plan, pts);
+  }
+
+  /** Out of a room to a point on its deck's corridor (a lift). */
+  private routeToPoint(
+    plan: DeckLayout,
+    fromRoom: number,
+    start: { x: number; y: number },
+    point: { x: number; y: number },
+  ): Array<{ x: number; y: number }> {
+    const room = plan.rooms[fromRoom];
+    if (room === undefined) return this.corridorHop(plan, start, point);
+    const pts = [start];
+    if (!this.los(plan, start, room.doorInside)) pts.push(room.center);
+    pts.push(
+      room.doorInside,
+      room.doorTile,
+      { x: room.doorTile.x, y: CORR_MID },
+      { x: point.x, y: CORR_MID },
+      point,
+    );
+    return this.smooth(plan, pts);
+  }
+
+  /** From a point on the corridor (a lift) into a room's station. */
+  private routeFromPoint(
+    plan: DeckLayout,
+    point: { x: number; y: number },
+    toRoom: number,
+    end: { x: number; y: number },
+  ): Array<{ x: number; y: number }> {
+    const room = plan.rooms[toRoom];
+    if (room === undefined) return [point, end];
+    const pts = [
+      point,
+      { x: point.x, y: CORR_MID },
+      { x: room.doorTile.x, y: CORR_MID },
+      room.doorTile,
+      room.doorInside,
+    ];
+    if (!this.los(plan, room.doorInside, end)) pts.push(room.center);
+    pts.push(end);
+    return this.smooth(plan, pts);
+  }
+
+  /** Along the corridor from one corridor point to another. */
+  private corridorHop(
+    plan: DeckLayout,
+    start: { x: number; y: number },
+    point: { x: number; y: number },
+  ): Array<{ x: number; y: number }> {
+    return this.smooth(plan, [
+      start,
+      { x: start.x, y: CORR_MID },
+      { x: point.x, y: CORR_MID },
+      point,
+    ]);
+  }
+
+  /** The lift shaft nearest to a position, by corridor distance. */
+  private nearestLift(pos: { x: number; y: number }): LiftShaft {
+    let best = this.shipLayout.lifts[0] as LiftShaft;
+    let bestD = Number.POSITIVE_INFINITY;
+    for (const lift of this.shipLayout.lifts) {
+      const d = Math.abs(lift.point.x - pos.x) + Math.abs(lift.point.y - pos.y) * 0.25;
+      if (d < bestD) {
+        bestD = d;
+        best = lift;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Build the leg list from the body's physical position to a
+   * station. Same deck: one walk. Other deck: walk to the nearest
+   * lift, ride, walk in. A body standing in a corridor (off a lift,
+   * or routed from a room on the other deck) starts from the
+   * corridor, not from a stale room's doors.
+   */
+  private buildLegs(
+    st: PersonState,
+    member: CrewMember,
+    end: { x: number; y: number },
+  ): Leg[] {
+    const layout = this.shipLayout;
+    const fromDeck = st.deck;
+    const toDeck = layout.deckOfRoom[member.room] ?? fromDeck;
+    const start = { x: st.x, y: st.y };
+    const corridorStart =
+      st.atLift || (layout.deckOfRoom[st.anchorRoom] ?? fromDeck) !== fromDeck;
+    if (toDeck === fromDeck) {
+      const plan = layout.decks[fromDeck] as DeckLayout;
+      const points = corridorStart
+        ? this.routeFromPoint(plan, start, member.room, end)
+        : this.route(plan, st.anchorRoom, member.room, start, end);
+      return [{ kind: "walk", deck: fromDeck, points }];
+    }
+    const lift = this.nearestLift(start);
+    const fromPlan = layout.decks[fromDeck] as DeckLayout;
+    const toPlan = layout.decks[toDeck] as DeckLayout;
+    const first = corridorStart
+      ? this.corridorHop(fromPlan, start, lift.point)
+      : this.routeToPoint(fromPlan, st.anchorRoom, start, lift.point);
+    return [
+      { kind: "walk", deck: fromDeck, points: first },
+      { kind: "lift", toDeck, point: lift.point },
+      {
+        kind: "walk",
+        deck: toDeck,
+        points: this.routeFromPoint(toPlan, lift.point, member.room, end),
+      },
+    ];
+  }
+
+  /**
+   * Load the next queued leg: a walk becomes the current path, a
+   * lift starts its fade. Called when a walk runs out and when a
+   * ride completes, so legs chain without a frame between them.
+   */
+  private advanceLegs(st: PersonState): void {
+    while (st.path.length === 0 && st.transit === null && st.legs.length > 0) {
+      const leg = st.legs.shift() as Leg;
+      if (leg.kind === "walk") {
+        st.path = leg.points.slice();
+        return;
+      }
+      st.transit = {
+        toDeck: leg.toDeck,
+        point: leg.point,
+        phase: "out",
+        t: 0,
+      };
+    }
   }
 
   private hopDist(a: number, b: number): number {
@@ -1110,8 +1544,11 @@ export class DeckView {
     fx: number;
     lying: boolean;
   } {
-    const room = this.layout.rooms[member.room];
-    const seedKey = this.layout.seedKey;
+    const plan = this.shipLayout.decks[
+      this.shipLayout.deckOfRoom[member.room] ?? 0
+    ] as DeckLayout;
+    const room = plan.rooms[member.room];
+    const seedKey = this.shipLayout.seedKey;
     const num = Number(member.id.replace(/\D/g, "")) || 0;
     if (room === undefined) {
       return {
@@ -1187,20 +1624,65 @@ export class DeckView {
     };
   }
 
+  /**
+   * Everything the minimap needs, read off live view state: each
+   * member's deck, room, and position within that room as fractions.
+   */
+  minimapSnapshot(
+    crew: readonly CrewMember[],
+  ): Array<{
+    id: string;
+    deck: number;
+    room: number;
+    fx: number;
+    fy: number;
+  }> {
+    const out: Array<{
+      id: string;
+      deck: number;
+      room: number;
+      fx: number;
+      fy: number;
+    }> = [];
+    for (const m of crew) {
+      const st = this.people.get(m.id);
+      if (st === undefined) continue;
+      const plan = this.shipLayout.decks[st.deck] as DeckLayout;
+      const room = plan.rooms[m.room];
+      if (room === undefined) continue;
+      out.push({
+        id: m.id,
+        deck: st.deck,
+        room: m.room,
+        fx: (st.x - room.rect.x) / room.rect.w,
+        fy: (st.y - room.rect.y) / room.rect.h,
+      });
+    }
+    return out;
+  }
+
   frame(crew: readonly CrewMember[], opts: DeckFrameOpts): void {
     const ctx = this.ctx;
     if (ctx === null) return;
-    const { layout, ship } = this;
+    const { ship } = this;
+    const shipLayout = this.shipLayout;
+    // The visible deck's plan. Every per-deck structure below (rooms,
+    // anchors, screens, glows) reads from it; the hull, the sky, and
+    // the ship's clock are shared.
+    const layout = shipLayout.decks[this.viewDeck] as DeckLayout;
     const now = opts.now;
     const dt = Math.min(0.1, Math.max(0, opts.dtMs / 1000));
     ctx.imageSmoothingEnabled = false;
     // The moving sky behind the hull, then the ship herself.
     this.backdrop.drawFar(ctx, dt, opts.speedTps);
-    ctx.drawImage(this.staticCanvas, 0, 0);
+    ctx.drawImage(this.statics[this.viewDeck] as HTMLCanvasElement, 0, 0);
     // The ship's scars sit on the deck with the static layer, under
     // the night tint; the update repaints them only on bucket change.
-    this.wear.update(ship, opts.tick);
-    this.wear.draw(ctx);
+    // Both decks' layers update every frame: a ship scars whether or
+    // not anyone is watching that deck. Only the visible one draws.
+    this.wears[0].update(ship, opts.tick);
+    this.wears[1].update(ship, opts.tick);
+    (this.wears[this.viewDeck] as WearLayer).draw(ctx);
 
     // Occupant slots, for spreading stand positions inside a room.
     const slots = new Map<string, number>();
@@ -1230,44 +1712,112 @@ export class DeckView {
         opts.workSystem,
         restSlot.get(member.id) ?? -1,
       );
+      const homeDeck = shipLayout.deckOfRoom[member.room] ?? 0;
       if (st === undefined) {
         st = {
           x: want.point.x,
           y: want.point.y,
+          deck: homeDeck,
           path: [],
+          legs: [],
+          transit: null,
+          alpha: 1,
           facing: 1,
           walkPhase: 0,
           moving: false,
           atStation: want.key.startsWith("w:"),
           workFx: want.fx,
           lastRoom: member.room,
+          anchorRoom: member.room,
+          atLift: false,
           stationKey: want.key,
-          phase: hash01(layout.seedKey, num * 67) * Math.PI * 2,
+          phase: hash01(shipLayout.seedKey, num * 67) * Math.PI * 2,
           vel: 0,
           lying: want.lying,
         };
         this.people.set(member.id, st);
       }
       if (st.lastRoom !== member.room || st.stationKey !== want.key) {
-        const fromRoom = st.lastRoom;
-        const hops = this.hopDist(fromRoom, member.room);
-        const path = this.route(fromRoom, member.room, { x: st.x, y: st.y }, want.point);
-        if (opts.snap || hops > 2) {
+        const roomChanged = st.lastRoom !== member.room;
+        const hops = this.hopDist(st.lastRoom, member.room);
+        if (opts.snap || hops > 2 || st.transit !== null) {
+          // Teleport-grade changes (snap speeds, sim jumps, catch-up
+          // bursts) cut straight there, even mid-ride: at high speed
+          // a deck change reads as a clean cut, never a stuck fade.
           st.x = want.point.x;
           st.y = want.point.y;
+          st.deck = homeDeck;
+          st.path = [];
+          st.legs = [];
+          st.transit = null;
+          st.alpha = 1;
+          st.vel = 0;
+          st.anchorRoom = member.room;
+          st.atLift = false;
+          st.lying = want.lying;
+        } else if (roomChanged || st.legs.length > 0) {
+          // A real journey: legs from where the body physically is.
+          // Cross-deck, that is walk, lift, walk; same deck, one walk.
+          st.legs = this.buildLegs(st, member, want.point);
           st.path = [];
           st.vel = 0;
+          st.lying = false;
+          this.advanceLegs(st);
         } else {
-          st.path = path;
+          // A new station in the same room, from a standstill.
+          const plan = shipLayout.decks[homeDeck] as DeckLayout;
+          st.path = this.route(
+            plan,
+            member.room,
+            member.room,
+            { x: st.x, y: st.y },
+            want.point,
+          );
+          st.vel = 0;
+          st.lying = false;
         }
         st.lastRoom = member.room;
         st.stationKey = want.key;
         st.workFx = want.fx;
-        st.lying = want.lying;
         st.atStation = false;
       }
+      // Lift rides run on wall time, like the walks they join. The
+      // body fades out at the origin deck's shaft, reappears at the
+      // same shaft on the other deck, and fades back in: if the
+      // viewer is watching the origin deck they simply vanish into
+      // the lift, and the minimap tells the rest of the story.
+      if (st.transit !== null) {
+        const ride = st.transit;
+        const step = opts.snap
+          ? TRANSIT_PHASE_S
+          : dt *
+            (Number.isFinite(opts.tickMs)
+              ? Math.min(opts.tickMs / 300, 1)
+              : 1);
+        ride.t += step;
+        if (ride.phase === "out") {
+          st.alpha = Math.max(0, 1 - ride.t / TRANSIT_PHASE_S);
+          if (ride.t >= TRANSIT_PHASE_S) {
+            st.deck = ride.toDeck;
+            st.x = ride.point.x;
+            st.y = ride.point.y;
+            st.anchorRoom = member.room;
+            st.atLift = true;
+            ride.phase = "in";
+            ride.t = 0;
+            st.alpha = 0;
+          }
+        } else {
+          st.alpha = Math.min(1, ride.t / TRANSIT_PHASE_S);
+          if (ride.t >= TRANSIT_PHASE_S) {
+            st.transit = null;
+            st.alpha = 1;
+            this.advanceLegs(st);
+          }
+        }
+      }
       st.moving = false;
-      if (st.path.length > 0) {
+      if (st.transit === null && st.path.length > 0) {
         let remaining = 0;
         let px = st.x;
         let py = st.y;
@@ -1312,13 +1862,28 @@ export class DeckView {
           if (move >= d) st.path.shift();
         }
         if (st.path.length === 0) {
+          st.vel = 0;
+          // A walk that ends with legs queued has reached a lift:
+          // step in and ride. Only a walk with nothing behind it is
+          // an arrival.
+          if (st.legs.length > 0) this.advanceLegs(st);
+          if (st.path.length === 0 && st.transit === null) {
+            st.atStation = st.stationKey.startsWith("w:");
+            st.anchorRoom = member.room;
+            st.atLift = false;
+            st.lying = want.lying;
+          }
+        }
+      } else if (st.transit === null) {
+        if (st.legs.length > 0) this.advanceLegs(st);
+        if (st.path.length === 0 && st.transit === null) {
           st.atStation = st.stationKey.startsWith("w:");
           st.vel = 0;
+          st.anchorRoom = member.room;
+          st.atLift = false;
+          st.lying = want.lying;
+          if (st.atStation && st.workFx !== 0) st.facing = st.workFx;
         }
-      } else {
-        st.atStation = st.stationKey.startsWith("w:");
-        st.vel = 0;
-        if (st.atStation && st.workFx !== 0) st.facing = st.workFx;
       }
     }
 
@@ -1512,6 +2077,7 @@ export class DeckView {
       if (member.activity !== "repair") continue;
       const st = this.people.get(member.id);
       if (st === undefined || !st.atStation) continue;
+      if (st.deck !== this.viewDeck) continue;
       let acc = (this.weldAcc.get(member.id) ?? 0) + 36 * dt;
       while (acc >= 1) {
         acc -= 1;
@@ -1564,6 +2130,10 @@ export class DeckView {
     for (const member of ordered) {
       const st = this.people.get(member.id);
       if (st === undefined) continue;
+      // One deck at a time: the other deck's crew are the minimap's
+      // dots, not ghosts on this plan. A body mid-fade in a lift is
+      // drawn by the deck it is leaving, then by the deck it joins.
+      if (st.deck !== this.viewDeck || st.alpha <= 0.01) continue;
       const sprites = getBodySprites(member);
       const working =
         (member.activity === "work" || member.activity === "repair") &&
@@ -1601,6 +2171,13 @@ export class DeckView {
         ctx.stroke();
       }
       ctx.save();
+      if (st.alpha < 1) {
+        // In the lift: fade and shrink into the car.
+        ctx.globalAlpha = st.alpha;
+        ctx.translate(px, py - 6);
+        ctx.scale(Math.max(st.alpha, 0.05), Math.max(st.alpha, 0.05));
+        ctx.translate(-px, -(py - 6));
+      }
       if (lying) {
         // Horizontal on the bunk, head toward the bow, breathing slow.
         const breathe = Math.sin(now / 2600 + st.phase) * 0.3;

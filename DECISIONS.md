@@ -306,6 +306,46 @@ and consequences that flow back aboard; a major future engine
 system (a ground layer on the same kernel). Future engine design
 only; no code was written for any of it.
 
+## Two decks, lifts, and a minimap (Oct 18, 2026)
+
+The viewer splits the ship into two decks, the way the squad sim's
+buildings have floors the viewer peels between. The split is by
+room kind, fixed in a table in `viewer/src/deck.ts`: Deck 1 (upper)
+takes bridge, quarters, mess, medbay, and lab; Deck 2 (lower) takes
+engineering, cargo, hydroponics, airlock, and gym. A kind the table
+does not name goes to the deck with more spare width, ties broken
+by hash, so a future room kind still lands somewhere deterministic.
+Each deck is laid out by the existing generator (bands flanking its
+own corridor, sized by kind, adjacency-chained) inside the same
+hull footprint: deck width is shared, and the shorter deck pads
+the difference with structure plating dressed as tanks and pipe
+runs. The bridge pins the upper bow and engineering the lower
+stern, as before.
+
+Two lift shafts at fixed fractions of the corridor (about one
+third and two thirds along it, the same columns on both decks) are
+the only inter-deck route. Crew routing extends the door-to-door
+router with legs: room, corridor, nearest lift, ride, corridor,
+room. A ride is shown honestly: the body steps in, fades and
+shrinks over about 0.6 seconds of wall time, and reappears at the
+other deck's lift; at snap speeds the ride snaps too.
+
+The main canvas shows one deck at a time. Buttons above the canvas
+and keys 7 and 8 (or [ and ]) switch; the person card names the
+deck ("Engineering, Deck 2"), and tapping a crew member who is on
+the other deck switches the view to theirs. A minimap shows both
+deck silhouettes stacked, crew as department-colour dots, and a
+pulsing outline on a room whose worst system is under 60% (red
+under 30%); tapping a half switches to that deck. Static deck
+images and wear layers are per deck; both wear layers update every
+frame, so a deck scars unwatched. The space backdrop, hull
+outline, and day/night light stay shared: it is one ship.
+
+This is viewer-layer derivation, like the deck itself. The engine
+has no floors, no lifts, and no deck state; the split is a
+presentation of the room graph, derived from the seed, and dies
+with the page.
+
 ## Chronicle truth mode
 
 The chronicle renders the event log as a ship's log. The config flag

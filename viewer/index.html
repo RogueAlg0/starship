@@ -179,6 +179,51 @@
     border-radius: 8px;
     cursor: pointer;
   }
+  .deck-switch {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .deck-switch button {
+    flex: 1;
+    min-height: 40px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .deck-switch button.active {
+    border-color: var(--good);
+    color: var(--good);
+  }
+  .deck-foot {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-top: 8px;
+  }
+  #minimap-canvas {
+    width: 176px;
+    height: 56px;
+    flex: none;
+    image-rendering: pixelated;
+    background: #0b0f16;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .deck-hint {
+    margin: 0;
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+  @media (max-width: 520px) {
+    #minimap-canvas { width: 132px; height: 42px; }
+  }
   #side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
   .crew-row {
     display: grid;
@@ -348,7 +393,15 @@
 <main>
   <section aria-label="Ship schematic">
     <h2>Ship</h2>
+    <div class="deck-switch" role="group" aria-label="Deck selector">
+      <button id="deck1-btn" type="button">Deck 1 · Upper</button>
+      <button id="deck2-btn" type="button">Deck 2 · Lower</button>
+    </div>
     <canvas id="ship-canvas" role="img" aria-label="Top-down deck plan of the ship: rooms, equipment, and crew at work"></canvas>
+    <div class="deck-foot">
+      <canvas id="minimap-canvas" role="img" aria-label="Minimap of both decks: tap a deck to view it"></canvas>
+      <p class="deck-hint">Two decks, one ship. The minimap shows both: coloured dots are crew, gold ticks are the lifts, and a pulsing room needs help. Keys 7 and 8 switch decks.</p>
+    </div>
   </section>
   <div id="side">
     <section aria-label="Crew">

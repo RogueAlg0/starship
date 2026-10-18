@@ -32,6 +32,7 @@ import {
 } from "./faces.ts";
 import { dailySeed } from "./daily.ts";
 import { DeckView } from "./deck.ts";
+import { Minimap } from "./minimap.ts";
 import { watchName, type WatchName } from "./daynight.ts";
 import { spriteCanvas, type SpriteDef } from "./props.ts";
 
@@ -100,6 +101,9 @@ const seedInput = must<HTMLInputElement>("seed-input");
 const weatherBanner = must<HTMLElement>("weather-banner");
 const weatherNameEl = must<HTMLElement>("weather-name");
 const deckCanvas = must<HTMLCanvasElement>("ship-canvas");
+const deck1Btn = must<HTMLButtonElement>("deck1-btn");
+const deck2Btn = must<HTMLButtonElement>("deck2-btn");
+const minimapCanvas = must<HTMLCanvasElement>("minimap-canvas");
 const crewPanel = must<HTMLElement>("crew-panel");
 const chronicleEl = must<HTMLElement>("chronicle");
 const highlightsToggle = must<HTMLInputElement>("highlights-toggle");
@@ -117,8 +121,30 @@ let deck: DeckView | null = null;
  */
 const workSystemByMember = new Map<string, string | null>();
 
+/** The minimap: both decks at a glance, beside the main canvas. */
+let minimap: Minimap | null = null;
+let lastMinimapMs = 0;
+
 function buildDeck(): void {
   deck = new DeckView(run.ship, deckCanvas);
+  minimap = new Minimap(deck.shipLayout, minimapCanvas);
+  refreshDeckButtons();
+}
+
+/**
+ * Show one deck on the main canvas. The other deck keeps living: its
+ * wear accrues, its crew ride the lifts, and the minimap watches it.
+ */
+function setViewDeck(next: number): void {
+  if (deck === null) return;
+  deck.setDeck(next);
+  refreshDeckButtons();
+}
+
+function refreshDeckButtons(): void {
+  const active = deck?.visibleDeck ?? 0;
+  deck1Btn.classList.toggle("active", active === 0);
+  deck2Btn.classList.toggle("active", active === 1);
 }
 
 
@@ -199,6 +225,12 @@ function buildCrewPanel(): void {
 
 /** One tap behaviour for rows and map markers alike. */
 function tapCrew(id: string): void {
+  // The kind thing: if they are on the other deck, go to them.
+  const member = crewById(id);
+  if (member !== undefined && deck !== null) {
+    const where = deck.deckOfRoom(member.room);
+    if (where !== deck.visibleDeck) setViewDeck(where);
+  }
   if (selectedCrew === id) {
     selectCrew(null);
     closePersonCard();
@@ -495,8 +527,9 @@ function renderPersonCard(): void {
     `${member.title} · ${departmentOf(member.roleKey).name}`;
   const room = run.ship.rooms[member.room];
   const activity = ACTIVITY_WORDS[member.activity] ?? member.activity;
+  const deckNo = (deck?.deckOfRoom(member.room) ?? 0) + 1;
   personWhereEl.textContent =
-    `Currently ${activity} in the ${room?.name ?? "ship"}.`;
+    `Currently ${activity} in the ${room?.name ?? "ship"}, Deck ${deckNo}.`;
   personBioEl.textContent = bioText(member);
   buildDossier(member);
   personRecentEl.replaceChildren();
@@ -812,6 +845,23 @@ function frame(nowMs: number): void {
     updateSlowUi();
     updateHeader();
   }
+
+  // The minimap redraws at a throttled rate: it is a glance, not a
+  // second simulation, and its frame cost stays negligible.
+  if (
+    minimap !== null &&
+    deck !== null &&
+    nowMs - lastMinimapMs > 250
+  ) {
+    lastMinimapMs = nowMs;
+    minimap.draw(
+      run.ship,
+      run.crew,
+      deck.minimapSnapshot(run.crew),
+      deck.visibleDeck,
+      nowMs,
+    );
+  }
 }
 
 // -------------------------------------------------------------- controls
@@ -840,6 +890,17 @@ SPEEDS.forEach((speed, i) => {
 
 playBtn.addEventListener("click", () => setPlaying(!playing));
 dailyBtn.addEventListener("click", () => startDailyVoyage());
+deck1Btn.addEventListener("click", () => setViewDeck(0));
+deck2Btn.addEventListener("click", () => setViewDeck(1));
+minimapCanvas.addEventListener("click", (event) => {
+  if (minimap === null) return;
+  const rect = minimapCanvas.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return;
+  const x = (event.clientX - rect.left) * (minimapCanvas.width / rect.width);
+  const y = (event.clientY - rect.top) * (minimapCanvas.height / rect.height);
+  const target = minimap.deckAt(x, y);
+  if (target !== null) setViewDeck(target);
+});
 deckCanvas.addEventListener("click", (event) => {
   const rect = deckCanvas.getBoundingClientRect();
   if (rect.width === 0 || rect.height === 0) return;
@@ -881,6 +942,10 @@ window.addEventListener("keydown", (event) => {
     closePersonCard();
   } else if (event.key >= "1" && event.key <= "6") {
     setSpeed(Number(event.key) - 1);
+  } else if (event.key === "7" || event.key === "[") {
+    setViewDeck(0);
+  } else if (event.key === "8" || event.key === "]") {
+    setViewDeck(1);
   }
 });
 

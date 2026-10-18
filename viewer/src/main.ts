@@ -32,6 +32,7 @@ import {
   getPortraitCanvas,
   stateSignature,
 } from "./faces.ts";
+import { dailySeed } from "./daily.ts";
 
 /** Playback speeds: keys and buttons 1 to 6, mirroring the reference. */
 const SPEEDS = [
@@ -91,6 +92,8 @@ function luminance(hex: string): number {
 
 let run: RunContext;
 let renderer: ChronicleRenderer;
+let currentSeed = 42;
+let toastTimer = 0;
 let seenEvents = 0;
 let allLines: ChronicleLine[] = [];
 let playing = true;
@@ -112,6 +115,9 @@ const speedReadoutEl = must<HTMLElement>("speed-readout");
 const hashEl = must<HTMLElement>("hash");
 const eventCountEl = must<HTMLElement>("event-count");
 const playBtn = must<HTMLButtonElement>("play-btn");
+const dailyText = must<HTMLElement>("daily-text");
+const dailyBtn = must<HTMLButtonElement>("daily-btn");
+const toastEl = must<HTMLElement>("toast");
 const speedGroup = must<HTMLElement>("speed-group");
 const seedInput = must<HTMLInputElement>("seed-input");
 const weatherBanner = must<HTMLElement>("weather-banner");
@@ -809,7 +815,43 @@ function drainEvents(): void {
 
 // ---------------------------------------------------------------- voyage
 
-function startVoyage(seed: number): void {
+/**
+ * The Voyage of the Day banner: a chip naming today's ship when this
+ * voyage is the daily one, and a button that starts today's seed when
+ * it is not. The rotation itself lives in ./daily.ts; the engine never
+ * hears about it.
+ */
+function refreshDailyBanner(): void {
+  if (currentSeed === dailySeed()) {
+    dailyText.textContent =
+      `★ Voyage of the Day: the ${run.ship.name} — the same ship for everyone`;
+    dailyBtn.hidden = true;
+  } else {
+    dailyText.textContent = "Today's voyage is a different ship.";
+    dailyBtn.hidden = false;
+  }
+}
+
+function showToast(text: string): void {
+  toastEl.textContent = text;
+  toastEl.hidden = false;
+  window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => {
+    toastEl.hidden = true;
+  }, 6000);
+}
+
+/** Start today's seed as the daily voyage, with its greeting toast. */
+function startDailyVoyage(): void {
+  startVoyage(dailySeed(), { daily: true });
+  showToast(
+    `Voyage of the day: ${run.ship.name}. ` +
+      "Everyone who opens today's voyage gets this same ship.",
+  );
+}
+
+function startVoyage(seed: number, opts?: { daily?: boolean }): void {
+  currentSeed = seed;
   run = createRun({ seed });
   renderer = createChronicleRenderer();
   seenEvents = 0;
@@ -826,8 +868,14 @@ function startVoyage(seed: number): void {
   drainEvents(); // ship_generated and crew_generated header lines
   updateHeader();
   updateSlowUi();
+  refreshDailyBanner();
   const url = new URL(window.location.href);
   url.searchParams.set("seed", String(seed));
+  // The daily flag describes how this voyage was chosen: it is set by a
+  // daily start and cleared by any hand-picked seed, so a reload never
+  // silently swaps a chosen ship for today's.
+  if (opts?.daily === true) url.searchParams.set("daily", "1");
+  else url.searchParams.delete("daily");
   window.history.replaceState(null, "", url);
 }
 
@@ -992,6 +1040,7 @@ SPEEDS.forEach((speed, i) => {
 });
 
 playBtn.addEventListener("click", () => setPlaying(!playing));
+dailyBtn.addEventListener("click", () => startDailyVoyage());
 must<HTMLButtonElement>("new-voyage-btn").addEventListener("click", () => {
   const seed = Number(seedInput.value);
   startVoyage(Number.isFinite(seed) ? Math.trunc(seed) : 42);
@@ -1031,8 +1080,14 @@ window.addEventListener("keydown", (event) => {
 // ------------------------------------------------------------------ boot
 
 const params = new URLSearchParams(window.location.search);
-const initialSeed = Number(params.get("seed") ?? "42") || 42;
 setSpeed(speedIndex);
 setPlaying(true);
-startVoyage(initialSeed);
+if (params.get("daily") === "1") {
+  // ?daily=1 wins over ?seed=: it names a day, not a ship, and the ship
+  // it names changes at UTC midnight.
+  startDailyVoyage();
+} else {
+  const initialSeed = Number(params.get("seed") ?? "42") || 42;
+  startVoyage(initialSeed);
+}
 requestAnimationFrame(frame);

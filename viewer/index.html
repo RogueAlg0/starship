@@ -96,6 +96,44 @@
     user-select: none;
   }
   .toggle input { width: 20px; height: 20px; accent-color: var(--accent); }
+  #daily-banner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 12px;
+    margin-top: 10px;
+    padding: 7px 10px;
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    background: #171208;
+    color: var(--accent);
+    font-size: 14px;
+  }
+  #daily-banner button {
+    border-color: var(--accent);
+    color: var(--accent);
+    min-height: 34px;
+    padding: 4px 12px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  #toast {
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 18px;
+    z-index: 30;
+    width: max-content;
+    max-width: min(92vw, 540px);
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--accent);
+    border-radius: 10px;
+    padding: 10px 16px;
+    font-size: 14.5px;
+    text-align: center;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  }
   #weather-banner {
     padding: 7px 12px;
     font-size: 14px;
@@ -339,6 +377,10 @@
       Highlights only
     </label>
   </div>
+  <div id="daily-banner">
+    <span id="daily-text"></span>
+    <button id="daily-btn" type="button" hidden>★ Today's voyage</button>
+  </div>
 </header>
 <div id="weather-banner">Space weather: <b id="weather-name">calm</b></div>
 <main>
@@ -372,6 +414,7 @@
   <h3>Recently</h3>
   <div id="person-recent"></div>
 </div>
+<div id="toast" role="status" hidden></div>
 <script src="./dist/bundle.js"></script>
 </body>
 </html>

@@ -134,6 +134,18 @@ slept phone resumes gently, never burst-simulating), and the chronicle
 keeps at most 300 line elements in the DOM while the full rendered log
 stays in memory.
 
+**Voyage of the Day.** Mirroring the reference project's "Battle of
+the day", the viewer carries a curated list of seven vetted seeds
+(`viewer/src/daily.ts`) and rotates through it by UTC day: everyone
+who opens the daily voyage on the same day gets the same ship. A
+banner chip in the header names today's ship when you are sailing it,
+and offers a "★ Today's voyage" button when you are not. Opening the
+viewer with `?daily=1` starts today's seed directly (it takes
+precedence over `?seed=`), with a toast naming the ship. The seeds
+were vetted for drama by full 30-day runs (see DECISIONS.md); the
+rotation is a viewer-layer choice only, and the engine never sees a
+clock.
+
 For link publishing, `npm run viewer:static` writes a single
 self-contained page at `viewer/dist-static/index.html` with the bundle
 inlined. Build outputs (`viewer/dist/`, `viewer/dist-static/`) are not

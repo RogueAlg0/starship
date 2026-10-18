@@ -131,6 +131,49 @@ with bond and trust, grudges, suspicions), and the person's own
 recent events rendered through the chronicle. The viewer invents
 nothing but the look and the prose glue.
 
+## Voyage of the Day (Oct 18, 2026)
+
+The viewer offers one featured voyage per day, mirroring the
+reference project's "Battle of the day". A curated list of seven
+vetted seeds lives in the viewer layer (`viewer/src/daily.ts`), and
+the day's seed is `DAILY_SEEDS[Math.floor(Date.now() / 86_400_000) %
+7]`: whole UTC days since the epoch, modulo the list. The wall clock
+exists only in that one viewer function; a daily voyage is an
+ordinary run of an ordinary seed, and the engine's purity rules are
+untouched (the seed-42 gate still hashes cf1dffaeb4796f91). Opening
+the viewer with `?daily=1` starts today's seed, taking precedence
+over `?seed=`; starting any hand-picked seed clears the flag, so a
+reload never silently swaps a chosen ship for today's.
+
+The list is curated, not computed, because a dud day would poison
+the ritual. Vetting: 30-day voyages (4,320 ticks) for seeds 1 to 40,
+scored by drama (grudges and sabotages weighted 2, accusations 1).
+The counter was verified against every previously known run before
+the sweep was trusted: seed 42 (1 grudge, 2 sabotages, 5
+accusations), seed 99 (2, 2, 6), seeds 1 and 2 (all zero), seeds 3
+and 7 (1 grudge, 1 sabotage) all matched exactly. Twelve of the
+forty seeds scored zero and were rejected as duds. So were the three
+runaway cascades (seed 21 at score 992, seed 35 at 952, seed 6 at
+143, with accusations in the hundreds): that is the ship-wide feud
+failure mode the negative feedback exists to prevent, and at
+highlights pace the chronicle becomes an accusation firehose, not a
+story. The chosen seven are the high, bounded band, each with a
+different ship and a different shape of trouble:
+
+- 11: Meridian Verge, 12 rooms, 1 grudge, 2 sabotages, 1 accusation (7)
+- 16: Ostara Signal, 10 rooms, 2 grudges, 3 sabotages, 2 accusations (12)
+- 17: Cobalt Compass, 12 rooms, 2 grudges, 4 sabotages, 46 accusations (58)
+- 30: Vela Theorem, 14 rooms, 1 grudge, 2 sabotages, 0 accusations (6)
+- 39: Juniper Garden, 10 rooms, 1 grudge, 2 sabotages, 2 accusations (8)
+- 40: Vela Drift, 10 rooms, 2 grudges, 3 sabotages, 5 accusations (15)
+- 42: Keel Harbour, 13 rooms, 1 grudge, 2 sabotages, 5 accusations (11)
+
+Seed 42 is in by right, not by score: it is the flagship story. Seed
+30 is the quiet knife (damage done, suspicion never spoken aloud);
+seed 17 is the stormy day, an accusation-rich feud that stays
+bounded. For 2026-10-18 UTC, epoch day 20,744 gives index 3, so
+today's voyage is seed 30, the Vela Theorem.
+
 ## Chronicle truth mode
 
 The chronicle renders the event log as a ship's log. The config flag

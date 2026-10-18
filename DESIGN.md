@@ -395,6 +395,145 @@ Determinism is unchanged: the ground layer runs on the same
 fixed-order loop, named streams, and event log, and an away mission
 replays from its decision log like any other part of the voyage.
 
+## Stores: the ship's economy (designed Oct 18, 2026, not built)
+
+Playtest note (the user's, from watching v0): there is no economy.
+Crew hunger rises, a crew member walks to the mess, hunger resets,
+and nothing was ever spent. The ship has no pantry, so scarcity,
+theft, and starvation, the village sim's whole engine of human
+behaviour, cannot happen here. This chapter designs the fix. It
+is the backbone several other chapters quietly assume: sabotage
+needs a victim slower than a repair bill, the consequences chapter
+needs its slowest cause, and the quartermaster needs a kingdom.
+
+### The five stores
+
+The ship tracks five stores, each a single number, each readable
+at a glance in **days of supply** at current crew and consumption:
+food, water, oxygen margin, fuel, and spare parts. Days is the
+unit a captain watches; kilograms are bookkeeping underneath.
+
+- **Food.** Grown by the hydroponics rig, eaten at meals. The
+  pantry buffer is the harvest rhythm made visible.
+- **Water.** Cycled by the water recycler. Losses are small while
+  it works and permanent while it does not.
+- **Oxygen margin.** Held by life support. Not a stockpile so much
+  as a pressure: how long the air stays breathable if life support
+  stopped now.
+- **Fuel.** Burned by the engines over distance. In the ship-only
+  sim it drains slowly under way; its real master is the galaxy
+  layer (legs between ports are fuel decisions). Tracked from the
+  start so the ledger is honest when ports arrive.
+- **Spare parts.** Consumed by repairs. The quiet killer: a ship
+  can have food for a month and still die because nothing aboard
+  can be fixed any more. Parts are bought, salvaged, or, later,
+  manufactured; they are never grown.
+
+### The closed loop
+
+Between ports the ship is a sealed terrarium. Per tick:
+
+- **Production** is a rate per producing system, scaled by that
+  system's condition (and strain): a rig at 60 percent grows 60
+  percent of its rated food. Production is why system condition
+  matters before anything breaks outright.
+- **Consumption** is per living crew member: meals, water, air,
+  plus flat ship overheads (leaks, losses, the mess's waste).
+- The design balance for a healthy ship of twelve: food
+  production near 105 percent of consumption, water and air
+  slightly positive, so an undamaged ship slowly banks margin and
+  any sustained damage shows up as a falling days counter within
+  a day or two of ship time. Stores are sized at departure for
+  roughly 30 to 45 days of buffer at full consumption, a voyage
+  leg, not a lifetime.
+
+Damage therefore becomes a **clock**, not a nuisance: a sabotaged
+recycler reads as "water fails in nine days", and the crew can
+watch the number fall in the stores readout while the repair race
+runs. A radiation storm is a countdown with a sound.
+
+### Rationing
+
+When a store crosses its worry threshold, the captain (an agent,
+deciding from beliefs and traits, never the player) may impose
+rationing on that store: full, reduced, or strict. Rations stretch
+the days counter at the price of hunger, thirst, morale, and
+trust in command; lifting them early spends goodwill the other
+way. Rationing is a decision other crew hold beliefs about, and
+remember. The quartermaster administers stores and is the natural
+lightning rod: every shortage has his name on it whether he
+earned it or not, which the suspicion system will duly discover.
+
+### Theft, hoarding, and the pantry door
+
+Scarcity wakes the village's signature behaviours, reusing the
+existing machinery (beliefs, presence evidence, evidence
+half-life, accusations):
+
+- **Theft from stores** when a store is rationed or low and a
+  crew member is hungry enough, desperate enough, or angry
+  enough: small amounts, taken at night or when the cargo bay and
+  stores are unwatched. Theft leaves traces like sabotage does,
+  and the inquiry machinery cannot tell a thief from a saboteur
+  at a glance, which is rather the point.
+- **Hoarding**: a frightened crew member quietly caches food in
+  quarters. A cache discovered by the wrong person reads as
+  proof of selfishness in a crisis, and travels by gossip (see the
+  routine design: reputations move at meals).
+- **The locked door**: at strict rationing the captain may post
+  stores access control, which ends casual theft and begins
+  resentment of a different flavour. Every cure is also a cause.
+
+### Starvation and the slow cause
+
+A store at zero stops being arithmetic. Missed meals deepen
+hunger into weakness (the body model of the consequences
+chapter): work slows, accidents rise, sickness finds purchase,
+and sustained deprivation is a cause of death booked to the
+cause ledger like any other, with the inquiry asking the only
+question that matters: who saw the counter falling, and what did
+they do. Dehydration and air run the same path on shorter fuses.
+These are designed to be rare, slow, and always, *always*
+explainable from the log: the frequency law of the consequences
+chapter binds here too.
+
+### Readout and alerts
+
+The viewer gains a stores strip, always visible: five counters
+in days (air as a margin state), each with its trend arrow. The
+alert system's critical tier takes stores thresholds as first
+class citizens: a store crossing into its last week is a major
+alert, into its last three days a critical one that persists
+like any emergency state. The captain's rations, when imposed,
+are a chronicle headline and a banner state ("Water: strict
+rationing, 6 days") so the witness always knows the terms the
+crew are living under.
+
+### Determinism and build notes (for when it is built)
+
+Stores arithmetic is deterministic float-free bookkeeping on the
+tick loop (rates in integer milli-units per tick, as the kernel
+prefers). Production and consumption need no randomness at all;
+the human decisions around them (rationing, theft, hoarding) go
+through the decision source like sabotage does, on their own
+named streams, so replay covers them exactly. New events: store
+threshold crossings (worry, critical, empty, recovered), ration
+imposed/lifted, theft and discovery, cache found. Chronicle lines
+for thresholds and decisions; the per-tick arithmetic stays
+silent, as it should.
+
+### Open questions for the build
+
+- Does the captain ration by fixed policy (thresholds in config)
+  or by trait-weighted judgment per captain? Leaning: policy sets
+  the menu, the captain's traits pick from it, so captains differ.
+- Can crew draw emergency stores without authority in a crisis
+  (a mercy theft the inquiry later forgives)? Rich, but scope it
+  after plain theft works.
+- Do passengers and rescued survivors eat at full share? (The
+  crew-flow chapter says mouths arrive uninvited; the resentment
+  writes itself. Decide when crew flow is built.)
+
 ## Version zero slice
 
 One ship. Twelve crew. Needs and relationships. One incident generator:

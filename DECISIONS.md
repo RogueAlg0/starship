@@ -400,3 +400,14 @@ culprit, marked as what the log knows and the crew does not.
 Accusation lines are always rendered as accusations. Turning the flag
 off produces the crew's-eye view, where only discovered damage and
 spoken beliefs appear.
+
+## Stores designed, build deferred (Oct 18, 2026)
+
+At the user's direction ("Design Stores first, build later"),
+DESIGN.md gained a full Stores chapter: five stores counted in
+days of supply (food, water, oxygen margin, fuel, spare parts), a
+closed production/consumption loop keyed to system condition,
+captain-ordered rationing, theft and hoarding on the existing
+beliefs/evidence machinery, and starvation as the slow cause in
+the consequences ledger. No code yet; the design is the contract
+for the build when he calls it.

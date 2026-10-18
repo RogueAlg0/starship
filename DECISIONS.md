@@ -481,3 +481,25 @@ Queued follow-ups from the same research, in its order: the
 accusation made visible (words crossing the room, bodies
 recoiling), synthesized sound, and skip-to-next-incident with a
 demoted chronicle.
+
+## The Ship's Council adopted into the design (Oct 18, 2026)
+
+At the user's direction ("Ship should have a council or a doctor
+etc, think Stellaris"), DESIGN.md gained a Ship's Council
+chapter: seven seats worn over roles (Captain, First Officer,
+Chief Engineer, Chief Medical Officer, Security Chief, Science
+Officer, Quartermaster), captain-appointed succession, recusal by
+bonds and department, and jurisdiction over inquiries,
+rationing, discipline, admissions, course and port calls,
+emergency powers, and relief of the captain. Voting is computed
+from each officer's beliefs in four terms (evidence as held,
+trust in the people of the motion, trait and portfolio leanings,
+blocs). The verdict machinery adapts the village sim's court,
+researched from its source: judges deduce from their own beliefs,
+testimony is trust-discounted, distrust itself scores as motive,
+and verdicts manufacture grievances against the bench. Adoption
+revises the Stores chapter: rationing is now proposed by the
+Quartermaster and disposed of by the council, with the captain's
+solo imposition an emergency act that expires unratified. Full
+research: ~/workspace/research/dunya-council-ships-council.md.
+Design only; no code.

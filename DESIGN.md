@@ -454,15 +454,18 @@ runs. A radiation storm is a countdown with a sound.
 
 ### Rationing
 
-When a store crosses its worry threshold, the captain (an agent,
-deciding from beliefs and traits, never the player) may impose
-rationing on that store: full, reduced, or strict. Rations stretch
-the days counter at the price of hunger, thirst, morale, and
-trust in command; lifting them early spends goodwill the other
-way. Rationing is a decision other crew hold beliefs about, and
-remember. The quartermaster administers stores and is the natural
-lightning rod: every shortage has his name on it whether he
-earned it or not, which the suspicion system will duly discover.
+When a store crosses its worry threshold, rationing is proposed
+and disposed of by the Ship's Council (see the council chapter):
+the quartermaster proposes a level (full, reduced, strict) and
+the council votes; the captain may impose rationing alone only
+as an emergency act, and it expires within a day unless the
+council ratifies it. Rations stretch the days counter at the
+price of hunger, thirst, morale, and trust in command; lifting
+them early spends goodwill the other way. Rationing is a decision
+other crew hold beliefs about, and remember. The quartermaster
+administers stores and is the natural lightning rod: every
+shortage has his name on it whether he earned it or not, which
+the suspicion system will duly discover.
 
 ### Theft, hoarding, and the pantry door
 
@@ -533,6 +536,276 @@ silent, as it should.
 - Do passengers and rescued survivors eat at full share? (The
   crew-flow chapter says mouths arrive uninvited; the resentment
   writes itself. Decide when crew flow is built.)
+
+## The Ship's Council (designed Oct 18, 2026, not built)
+
+Stellaris gives a state a council: a ruler and a row of portfolio
+holders whose traits bend the whole empire, meeting over an
+agenda. The village sim gives the other half of the truth: its
+"council" is a court only (elder plus household heads, no
+elections, no laws passed), and its verdict machinery is the
+finest politics engine in either sim: judges who deduce guilt
+from their own beliefs alone, testimony discounted at the ear by
+trust in the teller, witnesses who lie to protect their own and
+redirect suspicion onto a scapegoat, and verdicts that manufacture
+tomorrow's grudges. Aboard ship the two ideas are the same room.
+The captain commands between sittings; the council is where
+command becomes judgment, and judgment, being made of beliefs,
+can be wrong in ways that outlive the meeting.
+
+### Composition: seven seats, worn over roles
+
+The council is not a separate cast. It is seven of the twelve
+roles, sitting with portfolio authority (Stellaris's move: the
+office matters, not just the person).
+
+- **Captain** (the captain): agenda, tie-break, command between
+  sittings.
+- **First Officer** (the executive officer): crew welfare,
+  discipline, the roster.
+- **Chief Engineer** (the chief engineer): the ship's body:
+  systems, damage, repair truth.
+- **Chief Medical Officer** (the medic): bodies: wounds,
+  sickness, fitness, cause of death.
+- **Security Chief** (the security officer): investigations,
+  evidence, the brig.
+- **Science Officer** (the scientist): sensors, samples, the
+  unknown.
+- **Quartermaster** (the quartermaster): stores, rations, cargo,
+  who eats.
+
+The five off-council roles (engineer, cook, botanist, pilot,
+navigator) are the crew the council governs and the pool it draws
+from. The cook's exclusion is deliberate and load-bearing: the
+mess is where the crew's unofficial politics happens, at meals
+and in gossip. The cook hears everything and votes on nothing,
+which makes the cook the most courted person aboard in a crisis.
+
+**Filling seats.** A seat belongs to its role: whoever holds the
+role holds the seat, automatically, the way the village elder
+presides by being the elder. There is no election aboard a ship.
+But roles fall vacant: when a role-holder dies, is confined, is
+relieved, or retires hurt, the **captain appoints** a successor
+from the surviving crew, by qualification where there is a choice.
+Every appointment is a political act the crew has beliefs about:
+promote the captain's friend and the mess notices; pass over the
+obvious engineer for a loyalist and engineering notices louder.
+An appointment from a shrinking crew is how a botanist ends up
+Chief Engineer, and everyone aboard, including the botanist,
+knows exactly what that means for the next repair.
+
+**Vacancy.** An empty seat does not block the council; it shrinks
+it, and the chronicle names the empty chairs. A vacant portfolio
+degrades its domain: no Chief Medical Officer means wounds are
+judged by laymen at the inquiry and treated by whoever
+volunteers; no Quartermaster means stores counted by someone with
+other work, and the counts drift from the truth the way beliefs
+do. A sitting with four of seven seats filled is legal. It is
+also a symptom, and the crew reads it as one.
+
+**Recusal.** The village rule crosses over in ship clothes: no
+officer sits in judgment on a case where they are the accused,
+the accuser, the victim, or bonded close to any of them. Where
+the village used kinship and household, the ship uses bonds and
+department: the Chief Engineer does not judge an accusation
+against her own engineer if her bond with him is high enough that
+the crew would call it protection. A recused seat stands empty
+for that case, and the chronicle notes it, because who steps
+aside is information.
+
+### Jurisdiction: what the council decides
+
+The council sits for enumerated business only. Everything not
+listed is the captain's alone, which is what makes the listed
+things feel like law.
+
+- **Boards of inquiry.** The consequences chapter's inquiry IS a
+  council sitting; this chapter gives it its judges. Any death
+  convenes one automatically, as the village inquest is convened
+  by a body. So do a sabotage discovery above a damage threshold,
+  a theft from stores with a named suspect, and any accusation
+  the Security Chief certifies as case-ready. The board finds
+  cause and, where it believes there is one, culprit;
+  consequences flow from the finding, not the truth (brig, put
+  off at the next port, restriction from systems, forgiveness),
+  exactly as the consequences chapter designs.
+- **Rationing.** When a store crosses its worry threshold, the
+  Quartermaster proposes a level (full, reduced, strict) and the
+  council disposes. The captain may impose emergency rationing
+  unilaterally, but it expires: within a day the council must
+  ratify it or it lapses, and a council that refuses leaves the
+  captain holding the hunger and the blame. Rationing is the
+  council's most frequent business and its most remembered; more
+  grudges will be born over the water line than over any verdict.
+- **Discipline short of inquiry.** Confirmed minor offences the
+  Security Chief brings: confinement to quarters, extra duties,
+  loss of mess privileges. A Security Chief who brings the same
+  botanist before the council every week is building a case in
+  public, or conducting a persecution, and the crew's beliefs
+  will decide which.
+- **Admissions.** Rescued survivors, a discovered stowaway, a
+  passenger asking to sign on: the crew-flow chapter's "the crew
+  decide from beliefs" lives here. The vote weighs the
+  Quartermaster's stores math, the doctor's read of their health,
+  Security's read of their story, and everyone's read of the
+  stranger's face. Refused: put off at the next port with
+  supplies. Admitted: signed on under a probationary eye.
+- **Course and port.** The captain navigates; the council decides
+  two questions: whether to answer a distress call off the
+  planned leg, and whether to put in at an unplanned port. Both
+  are stores-and-risk questions wearing navigation clothes.
+- **Emergency powers.** On the captain's declaration (reactor
+  casualty, hull breach, plague signs), the council may grant
+  emergency powers by simple majority: unrestricted system
+  access, compulsory duties, stores seizure, confinement without
+  hearing. Grants expire in days; renewal is a fresh vote, and
+  each renewal is harder to carry than the last.
+- **Relief of the captain.** The terminal jurisdiction. Any three
+  officers may table a motion of no confidence; it carries on
+  five of seven (or two-thirds of sitting officers when seats
+  stand empty). The grounds are whatever the officers believe: a
+  wrongful verdict the captain forced, rations imposed over the
+  council's refusal, a death the inquiry laid at command's door,
+  simple accumulated distrust. Carried: the First Officer takes
+  command; the relieved captain is confined to quarters or put
+  off at the next port, and the ship sails on under a captain
+  nobody's beliefs have caught up with yet. A failed motion is
+  not free: the movers are marked (the vote is recorded, not
+  secret, aboard a ship of twelve) and trust moves accordingly.
+  This is the polite mutiny, and the frequency law binds here
+  too: a run that produces one should be able to narrate exactly
+  why.
+
+### How a vote falls
+
+No officer rolls a die at the table. Each vote is computed from
+what the officer believes, in four terms the witness can inspect:
+
+1. **The evidence, as they hold it.** For an inquiry, each
+   officer deduces from their own belief store, the village
+   method intact: means, opportunity, eyewitness weight,
+   corroboration, with testimony discounted by trust in the
+   teller. The Security Chief's presentation enters every
+   officer's store as testimony; it does not enter as fact. For
+   a stores motion, the evidence is the Quartermaster's counters
+   as that officer believes them, and counters can be wrong,
+   stale, or lied about by a quartermaster protecting his own.
+2. **Trust in the people of the motion.** Trust in the accused
+   pulls toward acquittal; trust in the accuser and proposer
+   pulls toward their motion; distrust is not neutral, it is a
+   vote for the other side (in the village deduction, distrust
+   itself scores as motive).
+3. **Trait and portfolio leanings.** Each seat carries a standing
+   bias the chronicle can name: the Chief Medical Officer votes
+   the body (a wound pattern she believes accidental outweighs
+   three officers' suspicions; on stores she votes health,
+   against strict rationing, almost always); the Chief Engineer
+   protects the ship, then her department (she will confine a
+   saboteur on thinner evidence than anyone, and acquit her own
+   engineer on thicker); the Quartermaster counts days of supply
+   and votes the arithmetic even when the arithmetic is
+   unpopular; the Security Chief votes the case file; the
+   Scientist votes uncertainty, abstaining or demanding delay
+   when the sensor story is thin; the First Officer votes the
+   crew's cohesion, which makes her the swing seat both blocs
+   court. Personal traits bend the seat's bias: an empathic
+   doctor, a vindictive security chief, a loyalist quartermaster
+   are different councils wearing the same seven chairs.
+4. **Blocs.** Bonds pull votes together the way household loyalty
+   did in the village: an officer strongly bonded to another
+   tends to land where they land, and a grudge against the
+   proposer is a vote already cast. Two sittings with identical
+   evidence and different outcomes because the bonds moved is
+   the politics working.
+
+Formally: a motion carries on a simple majority of sitting,
+unrecused officers unless stated otherwise (admissions and
+emergency powers: simple majority; relief of the captain: the
+supermajority above; inquiry findings: majority, with the
+strength of the finding scaled by the evidence the median officer
+held, so a 4-3 conviction on thin beliefs sentences lighter than
+a 7-0 on strong ones). The captain votes only to break a tie,
+but holds three powers worth more than a vote: **agenda** (the
+captain decides what reaches the table and when; a buried motion
+is a chronicle fact), **veto** over discipline and admissions
+(never over an inquiry finding, never over relief), exercised at
+a trust cost every officer remembers, and **emergency override**
+(act first, answer at the next sitting; ratification restores
+trust, refusal costs double). A captain who overrides often is
+building the case for the terminal motion one sitting at a time,
+in public, in the log.
+
+### Politics over time
+
+The council is a slow machine for converting private suspicion
+into public fact, and public fact into new private grudges. A
+verdict's fallout follows the village pattern with ship names:
+the convicted's friends record grievances against the officers
+who voted to convict and against whoever chaired; the victim's
+side, if the board acquits someone they believe guilty,
+accumulates injustice against the accused and against the bench,
+and injustice aboard a ship has the same far end it had in the
+village: sabotage is the middle of that road, and what the
+village called retribution waits at the end of it. Testimony has
+weight by portfolio: the doctor on wounds, the engineer on
+whether a system could fail that way, the quartermaster on
+whether the stores could be short the amount claimed. An officer
+caught presenting what the officer beside them believes was a lie
+loses the only currency the table runs on, and their next three
+true statements land discounted, because testimony discount is
+trust arithmetic and trust, once spent at the table, is spent
+everywhere.
+
+Power moves between sittings. Appointments after a death let a
+captain stack the table over a long voyage, one tragedy at a
+time, and the crew's beliefs track it: a council that has never
+once voted against its captain is read by the mess as furniture,
+and furniture cannot acquit anyone credibly the day the captain
+needs the board to clear someone the crew believes guilty.
+Legitimacy is a store like the others: it fills slowly, from
+findings the crew believes were honest, and it empties in a
+single sitting. The stores chapter gave the ship five counters;
+the council is the sixth, unnumbered, and the only one that can
+hit zero while every tank is full.
+
+### Staging (viewer)
+
+A sitting is a set-piece the deck already knows how to show: the
+council convenes in the mess, officers leaving their stations and
+crossing the ship to take seats around the mess tables, the
+accused standing at the open end with the Security Chief beside
+them, witnesses called in from the corridor one at a time and
+visibly waiting outside the door when comms are down and word
+travels by runner. Testimony is speech bubbles with weight: a
+statement the table believes lands as a firm bubble, a discounted
+one renders faded, and the witness watching the fade learns what
+the discount means without a number ever showing. When the vote
+comes, each officer's token rises over their head in turn, in
+seat order, so the count is a thing that happens in time and a
+4-3 feels different from a 7-0. The captain's veto, when it
+comes, is a standing figure and a cut-off gesture and a room that
+goes quiet in the way a room can when everyone's next action is
+to leave. Then the chronicle writes it up in full: who sat, who
+recused themselves and why, what was presented, how each officer
+voted and, in the log's god-view margin, what the truth was. The
+mess empties. The cook, who heard all of it through the serving
+hatch and voted on none of it, starts dinner.
+
+### Open questions for the build
+
+- Does the captain appoint successors freely, or must an
+  appointment be ratified at the next sitting? Leaning: free
+  appointment; ratification only for the First Officer's seat,
+  since that seat is the succession.
+- Secret ballot for the relief motion? Leaning: no. Aboard
+  twelve people a secret ballot is a fiction everyone sees
+  through, and the recorded vote is what makes a failed motion
+  cost something.
+- Can the council sit with the captain recused and accused? It
+  must be able to, or the terminal jurisdiction is decorative.
+  The First Officer chairs; the doctor certifies; Security
+  presents. Design the captain-as-accused inquiry first and the
+  rest of the table inherits it.
 
 ## Version zero slice
 

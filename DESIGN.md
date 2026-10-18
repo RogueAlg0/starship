@@ -1002,3 +1002,61 @@ fictional engineer.
 - Chronicle voice: plain log lines, or a log written in the ship's own
   formal register ("Captain's log" energy without a captain character)?
 - A name for the project. Unnamed is fine for now.
+
+# Staging the mundane
+
+Direction chapter, Oct 18, 2026. It follows the ruling in
+DECISIONS.md ("The mundane is the game"): the routine is the
+content. This chapter sets how the viewer presents it. The
+problem it answers: the ordinary day currently arrives as text.
+The fix is not less routine and not faster routine. The fix is
+that the routine becomes visible, and the text steps back.
+
+## The deck carries the day
+
+1. Meals are scenes. During a sitting, crew sit at tables: a
+   seated posture in the body dictionary, chairs filled in
+   table order, the cook moving between galley and tables,
+   steam over the food. A sitting should read from across the
+   room without a single word.
+2. Work is carried, literally. A member travelling to a repair
+   or a fetch carries the thing: a parts crate, a tool case, a
+   stores box, drawn in the hands. Empty hands mean a person
+   going somewhere; full hands mean a person on an errand, and
+   the witness learns the difference in a minute.
+3. Free time has furniture. Games are two seated figures
+   facing each other over a board. The gym's machines animate
+   under their users. A reader sits, book open, in the common
+   room. Idleness is staged as specifically as labour.
+4. Sleep is a place, not an absence. Bunks show occupancy;
+   the night pair's lamps are the only warm light on a dark
+   deck; the ship at 03:00 should feel kept, not empty.
+
+## The ship's day ribbon
+
+A thin strip names the rhythm so the witness can keep it too:
+the current watch phase, the current block for most of the
+crew, and the next beat of the day with its time ("Evening
+meal 18:00", "Lights-out 22:00", "Breakfast 07:00"). The
+routine is a schedule being kept; the ribbon is how a new
+witness learns it in one sitting instead of a week of logs.
+
+## The chronicle steps back
+
+The chronicle becomes a minor channel. Default view:
+highlights only - meals, games, bonds and grudges, accusations,
+incidents, system trouble, weather turns, firsts. The full log
+remains one toggle away, complete and exact; nothing is
+deleted, only demoted. Movement, shift changes, and rest
+records do not print in highlights. The log stops being the
+game's main text and becomes its archive.
+
+## Discipline
+
+Presentation only. The engine does not change for this
+chapter; seating, carrying, and furniture states are derived
+in the viewer from the state it already receives. New body
+postures follow the house rule: a posture is rows in the
+string-grid dictionary plus a line in the sprite cache key.
+All additions respect the performance pass: sprites cached,
+particles capped, nothing allocated per frame.

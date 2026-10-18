@@ -666,3 +666,12 @@ watching is pleasant. This retires translation-table items #12
 (skip-to-next-incident) and the digest-first reading of #9 from
 the squad-feel research; both may exist later only as minor
 conveniences, never as the game's shape.
+
+Staging the mundane (Oct 18, 2026): on the user's "Let's do
+it", the reframed plan was adopted as a DESIGN.md chapter of
+the same name. Chronicle demoted to highlights-by-default with
+the full log one toggle away; meals staged with a seated
+posture and filled chairs; errands shown by carried items;
+free time given furniture (games seated, gym machines in use,
+readers with books); a ship's day ribbon naming the current
+block and the next beat. Viewer-only; the engine is untouched.

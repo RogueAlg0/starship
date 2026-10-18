@@ -439,3 +439,14 @@ captain-ordered rationing, theft and hoarding on the existing
 beliefs/evidence machinery, and starvation as the slow cause in
 the consequences ledger. No code yet; the design is the contract
 for the build when he calls it.
+
+## Daily list kept as-is after the weather retelling (Oct 18, 2026)
+
+The weather fix retold every seed. Spot checks under the new
+engine: seed 42 (Keel Harbour) is now a fully peaceful month with
+zero grudges and 125 bonds; seed 16 became a cascade (32 grudges,
+50 sabotages, 526 accusations); seeds 11, 17, 30, 39, 40 kept
+healthy drama. Offered a re-vet; the user chose to leave the
+Voyage of the Day list unchanged: [11, 16, 17, 30, 39, 40, 42].
+The rotation now includes one calm day and one storm day by
+accident. So be it; a week with weather in it is honest.

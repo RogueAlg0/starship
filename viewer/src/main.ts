@@ -30,6 +30,11 @@ import {
   getPortraitCanvas,
   stateSignature,
 } from "./faces.ts";
+import {
+  AlertStack,
+  AlertStackView,
+  type AlertItem,
+} from "./alerts.ts";
 import { dailySeed } from "./daily.ts";
 import { DeckView } from "./deck.ts";
 import { Minimap } from "./minimap.ts";
@@ -100,6 +105,7 @@ const speedGroup = must<HTMLElement>("speed-group");
 const seedInput = must<HTMLInputElement>("seed-input");
 const weatherBanner = must<HTMLElement>("weather-banner");
 const weatherNameEl = must<HTMLElement>("weather-name");
+const alertStackEl = must<HTMLElement>("alert-stack");
 const deckCanvas = must<HTMLCanvasElement>("ship-canvas");
 const deck1Btn = must<HTMLButtonElement>("deck1-btn");
 const deck2Btn = must<HTMLButtonElement>("deck2-btn");
@@ -145,6 +151,184 @@ function refreshDeckButtons(): void {
   const active = deck?.visibleDeck ?? 0;
   deck1Btn.classList.toggle("active", active === 0);
   deck2Btn.classList.toggle("active", active === 1);
+}
+
+// ---------------------------------------------------------------- alerts
+
+/**
+ * Urgency-tiered alerts over the deck (./alerts.ts). Two feeds,
+ * both from state the viewer already holds: the event stream (in
+ * drainEvents) for moments, and the per-frame system conditions
+ * (in updateSlowUi) for states. Nothing is invented here; the
+ * texts mirror the chronicle's own sentences.
+ */
+const alertStack = new AlertStack();
+const alertView = new AlertStackView(alertStackEl, alertStack, (item) => {
+  focusAlert(item);
+});
+
+/** A tap on an alert: go to the person, or to the room it names. */
+function focusAlert(item: AlertItem): void {
+  const focus = item.focus;
+  if (focus.personId !== undefined) {
+    const member = crewById(focus.personId);
+    if (member === undefined || deck === null) return;
+    const where = deck.deckOfRoom(member.room);
+    if (where !== deck.visibleDeck) setViewDeck(where);
+    selectCrew(member.id);
+    openPersonCard(member.id);
+    return;
+  }
+  if (focus.room !== undefined && deck !== null) {
+    const where = deck.deckOfRoom(focus.room);
+    if (where !== deck.visibleDeck) setViewDeck(where);
+    deck.flashRoom(focus.room);
+  }
+}
+
+function eventStr(event: SimEvent, key: string): string {
+  const value = event.data[key];
+  return typeof value === "string" ? value : "";
+}
+
+function eventNum(event: SimEvent, key: string): number {
+  const value = event.data[key];
+  return typeof value === "number" ? value : 0;
+}
+
+function systemName(id: string): string {
+  return run.ship.systems.find((s) => s.id === id)?.name ?? id;
+}
+
+function roomName(index: number): string {
+  return run.ship.rooms[index]?.name ?? `room ${index}`;
+}
+
+/** Moments from the event stream, tiered by how loud they are. */
+function feedAlert(event: SimEvent): void {
+  const now = performance.now();
+  const actor = event.actors[0];
+  switch (event.type) {
+    case "sabotage_committed": {
+      const systemId = eventStr(event, "system");
+      const system = run.ship.systems.find((s) => s.id === systemId);
+      const room = system?.room ?? eventNum(event, "room");
+      alertStack.post(
+        {
+          tier: "major",
+          category: "sabotage",
+          text:
+            `Sabotage: the ${systemName(systemId)} in the ` +
+            `${roomName(room)} is found damaged.`,
+          focus: { room, systemId },
+        },
+        now,
+      );
+      break;
+    }
+    case "accusation": {
+      if (actor === undefined) break;
+      alertStack.post(
+        {
+          tier: "major",
+          category: "speech",
+          text:
+            `${personName(actor)} accuses ` +
+            `${personName(eventStr(event, "accused"))} of sabotage.`,
+          focus: { personId: actor },
+        },
+        now,
+      );
+      break;
+    }
+    case "grudge_formed": {
+      if (actor === undefined) break;
+      alertStack.post(
+        {
+          tier: "major",
+          category: "grudge",
+          text:
+            `${personName(actor)} now holds a grudge against ` +
+            `${personName(eventStr(event, "target"))}.`,
+          focus: { personId: actor },
+        },
+        now,
+      );
+      break;
+    }
+    case "trust_broken": {
+      if (actor === undefined) break;
+      alertStack.post(
+        {
+          tier: "major",
+          category: "trust",
+          text:
+            `${personName(actor)}'s trust in ` +
+            `${personName(eventStr(event, "with"))} is broken.`,
+          focus: { personId: actor },
+        },
+        now,
+      );
+      break;
+    }
+    case "system_repaired": {
+      const systemId = eventStr(event, "system");
+      const system = run.ship.systems.find((s) => s.id === systemId);
+      const by = eventStr(event, "by");
+      alertStack.post(
+        {
+          tier: "minor",
+          category: "repair",
+          text:
+            by !== ""
+              ? `${personName(by)} has repaired the ${systemName(systemId)}.`
+              : `The ${systemName(systemId)} is repaired.`,
+          focus: { room: system?.room, systemId },
+        },
+        now,
+      );
+      break;
+    }
+    case "bond_formed": {
+      if (actor === undefined) break;
+      const level = eventNum(event, "level");
+      alertStack.post(
+        {
+          tier: "minor",
+          category: "bond",
+          text:
+            level >= 2
+              ? `${personName(actor)} and ${personName(eventStr(event, "with"))} are fast friends now.`
+              : `${personName(actor)} and ${personName(eventStr(event, "with"))} have grown close.`,
+          focus: { personId: actor },
+        },
+        now,
+      );
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+/** States from the live conditions, plus the speed the clock runs at. */
+function syncAlerts(): void {
+  alertStack.setTps(
+    playing
+      ? (SPEEDS[speedIndex] as (typeof SPEEDS)[number]).ticksPerSecond
+      : 0,
+  );
+  alertStack.syncSystems(
+    run.ship.systems.map((s) => ({
+      id: s.id,
+      name: s.name,
+      room: s.room,
+      roomName: roomName(s.room),
+      condition: s.condition,
+      failed: s.failed,
+    })),
+    performance.now(),
+  );
 }
 
 
@@ -618,6 +802,7 @@ function drainEvents(): void {
       const actor = event.actors[0];
       if (actor !== undefined) deck?.speech(actor);
     }
+    feedAlert(event);
     for (const line of renderer.push(event)) {
       allLines.push(line);
       appendLineToDom(line);
@@ -673,6 +858,7 @@ function startVoyage(seed: number, opts?: { daily?: boolean }): void {
   accumulator = 0;
   weatherName = CONFIG.weather.states[0] ?? "calm";
   workSystemByMember.clear();
+  alertStack.reset();
   chronicleEl.replaceChildren();
   shipNameEl.textContent = run.ship.name;
   seedInput.value = String(seed);
@@ -763,6 +949,7 @@ function updateHeader(): void {
 function updateSlowUi(): void {
   weatherNameEl.textContent = weatherName;
   weatherBanner.classList.toggle("storm", weatherName === "radiation storm");
+  syncAlerts();
 
   for (const member of run.crew) {
     const ui = crewUi.get(member.id);
@@ -791,7 +978,6 @@ function updateSlowUi(): void {
     lastCardRenderMs = performance.now();
     renderPersonCard();
   }
-
 }
 
 function frame(nowMs: number): void {
@@ -817,6 +1003,10 @@ function frame(nowMs: number): void {
       updateHeader();
     }
   }
+
+  // Alerts expire and burn down their lifetime bars on the frame
+  // clock, not the sim clock: they are wall-time news.
+  alertView.frame(nowMs);
 
   // The deck: bodies glide, work, spark, and think, on canvas.
   if (deck !== null) {

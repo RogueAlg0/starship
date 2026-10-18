@@ -147,6 +147,20 @@ were vetted for drama by full 30-day runs (see DECISIONS.md); the
 rotation is a viewer-layer choice only, and the engine never sees a
 clock.
 
+**Alerts.** News floats over the deck's top-right corner as compact
+chips (on narrow phones the stack runs full-width above the deck
+instead), tiered by urgency like the reference squad viewer's battle
+news. Critical alerts (red) are states: a system below 30% condition,
+or failed, stays up while the condition holds, and its dismiss button
+snoozes it only until the condition changes band. Major alerts
+(amber) are moments — sabotage found, an accusation, a grudge, a
+system crossing below 60% — and linger about 12 seconds; minor
+alerts (neutral) carry the quiet good news (a repair finished, a
+system back above 90%, a bond formed) and fade in about 5. Lifetimes
+scale mildly with playback speed (see DECISIONS.md), the stack holds
+at most four with one alert per subject, and tapping a chip goes to
+what it names: the person, or the room, which flashes on its deck.
+
 For link publishing, `npm run viewer:static` writes a single
 self-contained page at `viewer/dist-static/index.html` with the bundle
 inlined. Build outputs (`viewer/dist/`, `viewer/dist-static/`) are not

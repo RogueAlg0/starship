@@ -1276,6 +1276,18 @@ export class DeckView {
     this.bubbles.speech(id, "bang");
   }
 
+  /** A room outline that pulses briefly (an alert named this room). */
+  private flash: { room: number; startMs: number } | null = null;
+
+  /**
+   * Flash a room's outline for about two seconds of wall time. The
+   * caller switches to the room's deck first; a room on the hidden
+   * deck simply never paints.
+   */
+  flashRoom(room: number): void {
+    this.flash = { room, startMs: -1 };
+  }
+
   /** The member whose body sits at canvas pixel (xPx, yPx), if any. */
   pick(xPx: number, yPx: number): string | null {
     let best: string | null = null;
@@ -2198,5 +2210,28 @@ export class DeckView {
     // ---- bubbles, above everything
     this.bubbles.update(now, crew);
     this.bubbles.draw(ctx, now, positions, layout.widthPx);
+
+    // ---- alert flash: a pulsing outline on the room an alert named
+    if (this.flash !== null) {
+      if (this.flash.startMs < 0) this.flash.startMs = now;
+      const age = now - this.flash.startMs;
+      const roomLayout = layout.rooms[this.flash.room];
+      if (age > 2000 || roomLayout === undefined) {
+        this.flash = null;
+      } else {
+        const rect = roomLayout.rect;
+        const rx = (rect.x + OX) * TILE_PX;
+        const ry = (rect.y + OY) * TILE_PX;
+        const rw = rect.w * TILE_PX;
+        const rh = rect.h * TILE_PX;
+        const pulse = 0.5 + 0.5 * Math.sin(now / 130);
+        const fade = age > 1600 ? 1 - (age - 1600) / 400 : 1;
+        ctx.strokeStyle = `rgba(255, 215, 106, ${((0.45 + 0.55 * pulse) * fade).toFixed(3)})`;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(rx + 1, ry + 1, rw - 2, rh - 2);
+        ctx.fillStyle = `rgba(255, 215, 106, ${(0.07 * pulse * fade).toFixed(3)})`;
+        ctx.fillRect(rx + 1, ry + 1, rw - 2, rh - 2);
+      }
+    }
   }
 }

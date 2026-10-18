@@ -52,7 +52,7 @@
     flex-wrap: wrap;
     gap: 8px;
     align-items: center;
-    margin-top: 10px;
+    margin-top: 8px;
   }
   button {
     background: var(--panel-2);
@@ -102,8 +102,8 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 6px 12px;
-    margin-top: 10px;
-    padding: 7px 10px;
+    margin-top: 8px;
+    padding: 6px 10px;
     border: 1px solid var(--accent);
     border-radius: 8px;
     background: #171208;
@@ -136,7 +136,7 @@
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
   }
   #weather-banner {
-    padding: 7px 12px;
+    padding: 6px 12px;
     font-size: 14px;
     color: var(--muted);
     background: #0e141f;
@@ -163,7 +163,7 @@
     min-width: 0;
   }
   section h2 {
-    margin: 0 0 8px;
+    margin: 0 0 6px;
     font-size: 13px;
     text-transform: uppercase;
     letter-spacing: 0.09em;
@@ -179,10 +179,103 @@
     border-radius: 8px;
     cursor: pointer;
   }
+  /* Alerts: urgency-tiered chips floated over the deck's top-right,
+     the squad viewer's floating battle news. On narrow phones the
+     stack leaves the overlay and runs full-width above the canvas
+     instead, so it never covers the deck switcher or the minimap. */
+  .ship-stage { position: relative; }
+  #alert-stack {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 6;
+    width: min(320px, 72%);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    pointer-events: none;
+  }
+  .alert {
+    pointer-events: auto;
+    position: relative;
+    display: flex;
+    align-items: stretch;
+    background: rgba(11, 16, 24, 0.93);
+    border: 1px solid var(--line);
+    border-left: 4px solid #5b7290;
+    border-radius: 8px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+    overflow: hidden;
+    transition: opacity 0.25s ease, transform 0.25s ease;
+  }
+  .alert.tier-critical { border-left-color: var(--bad); }
+  .alert.tier-major { border-left-color: var(--warn); }
+  .alert.enter { opacity: 0; transform: translateX(10px); }
+  .alert.leaving { opacity: 0; }
+  .alert-main {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    min-height: 40px;
+    padding: 6px 8px;
+    background: none;
+    border: none;
+    border-radius: 0;
+    color: var(--text);
+    font-size: 13px;
+    text-align: left;
+  }
+  .alert-icon {
+    width: 18px;
+    height: 18px;
+    flex: none;
+    image-rendering: pixelated;
+  }
+  .alert-text {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .alert-x {
+    flex: none;
+    align-self: stretch;
+    min-width: 36px;
+    min-height: 40px;
+    padding: 0 6px;
+    background: none;
+    border: none;
+    border-left: 1px solid var(--line);
+    border-radius: 0;
+    color: var(--muted);
+    font-size: 16px;
+  }
+  .alert-life {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    background: rgba(255, 255, 255, 0.08);
+  }
+  .alert-life-fill { height: 100%; width: 100%; background: #8fa3bf; }
+  .alert.tier-major .alert-life-fill { background: var(--warn); }
+  @media (max-width: 640px) {
+    #alert-stack {
+      position: static;
+      width: auto;
+      margin-bottom: 6px;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .alert { transition: opacity 0.25s ease; }
+    .alert.enter { transform: none; }
+  }
   .deck-switch {
     display: flex;
     gap: 8px;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
   }
   .deck-switch button {
     flex: 1;
@@ -203,7 +296,7 @@
     display: flex;
     align-items: flex-start;
     gap: 10px;
-    margin-top: 8px;
+    margin-top: 6px;
   }
   #minimap-canvas {
     width: 176px;
@@ -358,6 +451,17 @@
     main { grid-template-columns: minmax(0, 7fr) minmax(330px, 5fr); }
     #chronicle { height: calc(100dvh - 210px); max-height: 900px; }
   }
+  /* Density: the squad screen feels tight because its chrome is
+     thin. Desktop gives up a few pixels of padding per surface so
+     the ship claims them; phones keep their comfortable spacing,
+     and no touch target drops below 40px anywhere. */
+  @media (min-width: 980px) {
+    header { padding: 7px 12px 6px; }
+    main { gap: 10px; padding: 10px; }
+    section { padding: 8px; }
+    #side { gap: 10px; }
+    .crew-row { padding: 6px; }
+  }
 </style>
 </head>
 <body>
@@ -397,7 +501,10 @@
       <button id="deck1-btn" type="button">Deck 1 · Upper</button>
       <button id="deck2-btn" type="button">Deck 2 · Lower</button>
     </div>
-    <canvas id="ship-canvas" role="img" aria-label="Top-down deck plan of the ship: rooms, equipment, and crew at work"></canvas>
+    <div class="ship-stage">
+      <div id="alert-stack" aria-live="polite" aria-label="Ship alerts"></div>
+      <canvas id="ship-canvas" role="img" aria-label="Top-down deck plan of the ship: rooms, equipment, and crew at work"></canvas>
+    </div>
     <div class="deck-foot">
       <canvas id="minimap-canvas" role="img" aria-label="Minimap of both decks: tap a deck to view it"></canvas>
       <p class="deck-hint">Two decks, one ship. The minimap shows both: coloured dots are crew, gold ticks are the lifts, and a pulsing room needs help. Keys 7 and 8 switch decks.</p>

@@ -346,6 +346,52 @@ has no floors, no lifts, and no deck state; the split is a
 presentation of the room graph, derived from the seed, and dies
 with the page.
 
+## Alerts disappear according to urgency (Oct 18, 2026)
+
+The viewer floats its news over the deck as tiered chips
+(`viewer/src/alerts.ts`), the way the squad viewer floats battle
+news over its map. Nothing is invented: moments come from the same
+event stream the chronicle renders, states from the same live
+system conditions the sparks read. Viewer-only; the engine is
+untouched (the seed-42 gate still reads cf1dffaeb4796f91).
+
+The tier model splits states from moments, because they age
+differently. Critical (red) is a state: a system below 30%
+condition, or carrying the failed flag, holds its alert for as
+long as the condition holds. Its dismiss is a snooze, not a
+deletion: the alert stays down only until the band changes, so a
+dismissed emergency that gets worse (or better, then worse again)
+speaks again. Major (amber) is a moment with a long echo: sabotage
+found, an accusation, a grudge formed, trust broken, and a system
+crossing below 60%; base lifetime 12 s. Minor (neutral) is the
+quiet good news: a repair completed, a system back above 90%
+after having been in a band, a bond formed; base lifetime 5 s.
+
+Lifetimes are wall-clock, scaled by playback rate with the rule
+scale = clamp(2.5 / max(ticksPerSecond, 0.4), 0.5, 2.5): a major
+lives 30 s at the 1x witness pace, 12 s at 2.5 tps, and 6 s at 6x.
+The scaling is deliberately mild and bounded both ways, so speed
+never makes news unreadable or immortal.
+
+Stack discipline: at most four visible, newest on top, and one
+alert per subject (condition states coalesce by system: a slide
+from 55% to 28% escalates the same chip through its shapes, timed
+bar to dismiss button, rather than stacking a second). Minors are
+rate-limited to one accepted per 3 s and are dropped by a full
+stack. Majors and criticals displace the oldest minor, then the
+oldest timed major; criticals are never displaced, and behind four
+criticals a fifth red may stand (the cap is a discipline, not a
+blindfold). Tapping a chip focuses what it names: the person card
+for a person, a deck switch plus a two-second room flash for a
+system. The stack runs on a pure state machine with the DOM as a
+renderer, so a headless harness drives the whole tier model on a
+fake clock.
+
+The same pass tightened the screen's chrome a notch (thinner
+header, section, and control padding, mostly on desktop), the
+squad screen's tightness being mostly thin chrome; no touch target
+dropped below 40 px.
+
 ## Chronicle truth mode
 
 The chronicle renders the event log as a ship's log. The config flag

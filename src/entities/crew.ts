@@ -19,9 +19,19 @@ import {
   driftBond,
   driftTrust,
   reportMilestones,
+  spreadGossip,
   trustOf,
   type Beliefs,
 } from "../perception/beliefs.ts";
+import {
+  blockAt,
+  makeRoutine,
+  mealWindowAt,
+  pickNightWatchRoles,
+  type BlockKind,
+  type Routine,
+  type WatchName,
+} from "./routine.ts";
 import { applySabotage, sabotageCandidate } from "../plots/sabotage.ts";
 import { CONFIG } from "../scenario/config.ts";
 import type { Ship } from "../world/ship.ts";
@@ -50,10 +60,16 @@ export class CrewMember {
   room: number;
   readonly needs: Needs;
   readonly beliefs: Beliefs;
+  /** The watch this person stands: "day" for most, "night" for the pair. */
+  readonly watch: WatchName;
+  /** Their daily shape: sleep block, work blocks, free time between. */
+  readonly routine: Routine;
   /** What they did most recently; read by crewmates deciding to approach. */
   activity = "idle";
   lastAccusationTick = -1000000;
   lastSabotageTick = -1000000;
+  /** Tick of this person's last leisure event, for the leisure cooldown. */
+  lastLeisureTick = -1000000;
   /** System currently being repaired, for repair-session event dedupe. */
   repairTarget: string | null = null;
 
@@ -68,6 +84,8 @@ export class CrewMember {
     room: number,
     needs: Needs,
     beliefs: Beliefs,
+    watch: WatchName,
+    routine: Routine,
   ) {
     this.id = id;
     this.name = name;
@@ -79,7 +97,27 @@ export class CrewMember {
     this.room = room;
     this.needs = needs;
     this.beliefs = beliefs;
+    this.watch = watch;
+    this.routine = routine;
   }
+}
+
+/** Bookkeeping for one meal window, gathered while the crew eat. */
+export interface MealServiceState {
+  /** `${dayIndex}:${meal}`; one state exists per window with eaters. */
+  key: string;
+  day: number;
+  meal: "breakfast" | "evening";
+  /** The mess room the window is served in. */
+  room: number;
+  /** Ids of everyone who ate in the mess during the window, in order. */
+  eaters: string[];
+  /** Table groupings recorded as they formed: arrays of person ids. */
+  tables: string[][];
+  /** Id pairs (sorted, joined) whose gossip has already flowed. */
+  pairs: Set<string>;
+  /** A table pairing worth a chronicle clause, if one formed. */
+  notable: { a: string; b: string; kind: "grudge" | "friends" } | null;
 }
 
 export interface CrewContext {
@@ -87,6 +125,10 @@ export interface CrewContext {
   weather: Weather;
   /** Recent presence snapshots, one per tick, oldest first. */
   history: Record<string, number>[];
+  /** The meal window currently gathering, if anyone has eaten in it. */
+  meal: MealServiceState | null;
+  /** Last tick a table game started in each room, by room index. */
+  lastGameTick: Map<number, number>;
 }
 
 function shuffled<T>(rng: Rng, items: readonly T[]): T[] {
@@ -100,12 +142,22 @@ function shuffled<T>(rng: Rng, items: readonly T[]): T[] {
   return out;
 }
 
-/** Generate the crew of twelve. Draws only from the given stream. */
-export function generateCrew(rng: Rng, ship: Ship): CrewMember[] {
+/**
+ * Generate the crew of twelve. Identity draws (names, traits, needs,
+ * beliefs) come from the given stream; watches and routines are drawn
+ * from the routine stream, so the routine a person draws can never
+ * reshuffle who they are.
+ */
+export function generateCrew(
+  rng: Rng,
+  ship: Ship,
+  routineRng: Rng = rng,
+): CrewMember[] {
   const firstNames = shuffled(rng, CONFIG.crewGen.firstNames);
   const lastNames = shuffled(rng, CONFIG.crewGen.lastNames);
   const roles = shuffled(rng, CONFIG.roles);
   const roster = roles.map((_, i) => `c${i}`);
+  const nightRoles = pickNightWatchRoles(routineRng);
 
   const crew: CrewMember[] = roles.map((role, i) => {
     const traitPool = shuffled(rng, CONFIG.crewGen.traitPool);
@@ -115,6 +167,7 @@ export function generateCrew(rng: Rng, ship: Ship): CrewMember[] {
     const need = () =>
       CONFIG.crewGen.needMin +
       rng.next() * (CONFIG.crewGen.needMax - CONFIG.crewGen.needMin);
+    const watch: WatchName = nightRoles.has(role.key) ? "night" : "day";
     return new CrewMember(
       roster[i] as string,
       `${firstNames[i]} ${lastNames[i]}`,
@@ -131,6 +184,8 @@ export function generateCrew(rng: Rng, ship: Ship): CrewMember[] {
         morale: CONFIG.needs.moraleBase,
       },
       createBeliefs(roster),
+      watch,
+      makeRoutine(watch, traits, routineRng),
     );
   });
 
@@ -176,6 +231,7 @@ export function crewSignature(crew: readonly CrewMember[]): string {
       role: m.roleKey,
       traits: m.traits,
       room: m.room,
+      watch: m.watch,
     })),
   );
 }
@@ -251,34 +307,60 @@ function buildCandidates(
   tick: number,
 ): Candidate[] {
   const { ship, weather } = ctx;
+  const routine = CONFIG.routine;
   const candidates: Candidate[] = [];
   const roomKind = ship.roomKind(member.room);
   const systemsHere = ship.systemsInRoom(member.room);
 
+  // The schedule comes first: the member's current block shapes what is
+  // worth doing. In a work block the ship's business runs at full score;
+  // in free time it fades; at a meal it waits; in the sleep block it all
+  // but vanishes. Needs and emergencies push back through the same scores:
+  // hunger still drags a sleeper toward the mess, and a failed system in
+  // the member's own department ignores the schedule completely.
+  const block: BlockKind = blockAt(member.routine, tick);
+  const workFactor =
+    block === "work"
+      ? 1
+      : block === "free"
+        ? routine.freeWorkFactor
+        : block === "meal"
+          ? routine.mealWorkFactor
+          : routine.sleepWorkFactor;
+
   if (roomKind === "mess") {
     candidates.push({
       key: "eat",
-      base: CONFIG.scores.eatBase,
+      base:
+        CONFIG.scores.eatBase *
+        (block === "meal" ? routine.mealEatFactor : 1),
       urgency:
         CONFIG.scores.eatUrgencyBase +
         (1 - member.needs.hunger) * CONFIG.scores.eatUrgencyPerDeficit,
     });
   }
-  candidates.push({
-    key: "rest",
-    base: restScore(member, weather, roomKind === "quarters"),
-  });
+  let restBase = restScore(member, weather, roomKind === "quarters");
+  if (block === "sleep") {
+    restBase = Math.max(
+      restBase,
+      routine.sleepRestBase *
+        (roomKind === "quarters" ? 1 : CONFIG.needs.restOffQuartersFactor),
+    );
+  }
+  candidates.push({ key: "rest", base: restBase });
 
   if (systemsHere.length > 0) {
     const system = pickWorkSystem(member, systemsHere);
-    let base = workScore(member);
+    let base = workScore(member) * workFactor;
     if (!member.affinity.includes(system.kind)) base *= 0.6;
     candidates.push({ key: `work:${system.id}`, base });
     for (const s of systemsHere) {
       if (s.damaged && canRepair(member, s)) {
         candidates.push({
           key: `repair:${s.id}`,
-          base: CONFIG.scores.repairBase,
+          base:
+            CONFIG.scores.repairBase *
+            (block === "sleep" && !s.failed ? routine.sleepRepairFactor : 1),
           urgency: 1 + (1 - s.condition),
         });
       }
@@ -286,19 +368,47 @@ function buildCandidates(
   } else {
     candidates.push({
       key: "work:generic",
-      base: workScore(member) * CONFIG.scores.genericWorkFactor,
+      base: workScore(member) * CONFIG.scores.genericWorkFactor * workFactor,
     });
   }
 
-  for (const other of crew) {
-    if (other === member || other.room !== member.room) continue;
-    if (trustOf(member.beliefs, other.id) < CONFIG.relationships.socializeMinTrust) {
-      continue;
+  // Nobody holds a conversation in their sleep; free time and meals are
+  // when the ship talks.
+  if (block !== "sleep") {
+    const socialFactor =
+      block === "free" || block === "meal" ? routine.freeSocialFactor : 1;
+    for (const other of crew) {
+      if (other === member || other.room !== member.room) continue;
+      if (trustOf(member.beliefs, other.id) < CONFIG.relationships.socializeMinTrust) {
+        continue;
+      }
+      candidates.push({
+        key: `socialize:${other.id}`,
+        base: socialScore(member, other) * socialFactor,
+      });
     }
-    candidates.push({
-      key: `socialize:${other.id}`,
-      base: socialScore(member, other),
-    });
+  }
+
+  // Free-time texture: a table game in the mess when company is present,
+  // exercise in the gym, reading in quarters. Cooldowns keep these
+  // occasions, not a per-tick drumbeat.
+  if (block === "free" && tick - member.lastLeisureTick >= routine.leisureCooldownTicks) {
+    if (roomKind === "mess") {
+      const company = crew.some(
+        (other) =>
+          other !== member &&
+          other.room === member.room &&
+          other.activity !== "rest",
+      );
+      const lastGame = ctx.lastGameTick.get(member.room) ?? -1000000;
+      if (company && tick - lastGame >= routine.gameCooldownTicks) {
+        candidates.push({ key: "game", base: routine.gameBase });
+      }
+    } else if (roomKind === "gym") {
+      candidates.push({ key: "exercise", base: routine.exerciseBase });
+    } else if (roomKind === "quarters") {
+      candidates.push({ key: "read", base: routine.readBase });
+    }
   }
 
   const sabotage = sabotageCandidate(member, ship, crew, tick);
@@ -312,37 +422,57 @@ function buildCandidates(
     if (desire > (desires.get(roomIndex) ?? 0)) desires.set(roomIndex, desire);
   };
   consider(ship.firstRoomOfKind("mess"), eatScore(member));
-  consider(ship.firstRoomOfKind("quarters"), restScore(member, weather, true));
-  const duty = ship.systems
-    .filter((s) => member.affinity.includes(s.kind))
-    .reduce<ShipSystem | null>(
-      (best, s) => (best === null || s.condition < best.condition ? s : best),
-      null,
+  if (block === "meal") {
+    // The whole awake ship comes to table when the window opens.
+    consider(
+      ship.firstRoomOfKind("mess"),
+      Math.max(eatScore(member), routine.mealTravelDesire),
     );
-  if (duty !== null) consider(duty.room, workScore(member));
-  for (const s of ship.systems) {
-    if (s.damaged && canRepair(member, s)) {
+  }
+  consider(ship.firstRoomOfKind("quarters"), restScore(member, weather, true));
+  if (block === "free") {
+    consider(ship.firstRoomOfKind("gym"), routine.freeGymDesire);
+    consider(ship.firstRoomOfKind("quarters"), routine.freeQuartersDesire);
+  }
+  if (block === "work" || block === "free") {
+    const duty = ship.systems
+      .filter((s) => member.affinity.includes(s.kind))
+      .reduce<ShipSystem | null>(
+        (best, s) => (best === null || s.condition < best.condition ? s : best),
+        null,
+      );
+    if (duty !== null) {
       consider(
-        s.room,
-        CONFIG.scores.repairBase * (1 + (1 - s.condition)),
+        duty.room,
+        workScore(member) * (block === "free" ? routine.freeWorkFactor : 1),
       );
     }
   }
-  let bestSocial: CrewMember | null = null;
-  let bestSocialScore = 0;
-  for (const other of crew) {
-    if (other === member || other.room === member.room) continue;
-    if (trustOf(member.beliefs, other.id) < CONFIG.relationships.socializeMinTrust) {
-      continue;
-    }
-    const score = socialScore(member, other);
-    if (score > bestSocialScore) {
-      bestSocialScore = score;
-      bestSocial = other;
+  for (const s of ship.systems) {
+    if (s.damaged && canRepair(member, s)) {
+      let desire = CONFIG.scores.repairBase * (1 + (1 - s.condition));
+      // A failed system is an emergency in any block, even at 3 a.m.
+      if (s.failed) desire *= routine.emergencyRepairFactor;
+      consider(s.room, desire);
     }
   }
-  if (bestSocial !== null) consider(bestSocial.room, bestSocialScore);
-  if (member.roleKey === "security officer") {
+  if (block !== "sleep" && block !== "meal") {
+    let bestSocial: CrewMember | null = null;
+    let bestSocialScore = 0;
+    for (const other of crew) {
+      if (other === member || other.room === member.room) continue;
+      if (trustOf(member.beliefs, other.id) < CONFIG.relationships.socializeMinTrust) {
+        continue;
+      }
+      const score = socialScore(member, other);
+      if (score > bestSocialScore) {
+        bestSocialScore = score;
+        bestSocial = other;
+      }
+    }
+    if (bestSocial !== null) consider(bestSocial.room, bestSocialScore);
+  }
+  if (member.roleKey === "security officer" && block === "work") {
     const room = ship.rooms[member.room];
     if (room !== undefined) {
       for (const neighbor of room.neighbors) {
@@ -413,6 +543,29 @@ function resolveSocialize(
   w.emit("socialize", [member.id], { with: target.id, room: member.room });
   reportMilestones(w, member, target.id);
   reportMilestones(w, target, member.id);
+
+  // Talk in shared free time is where rumour travels: suspicion passes
+  // between the two in both directions, and companionship itself nudges
+  // trust a little further along the way it already leans. Workaday chat
+  // carries no gossip; the pair must both be off the clock or at table.
+  const memberBlock = blockAt(member.routine, w.tick);
+  const targetBlock = blockAt(target.routine, w.tick);
+  const sharedLeisure =
+    (memberBlock === "free" || memberBlock === "meal") &&
+    (targetBlock === "free" || targetBlock === "meal");
+  if (sharedLeisure) {
+    spreadGossip(w, member, target);
+    spreadGossip(w, target, member);
+    const drift = CONFIG.routine.companionDrift;
+    const memberLean = trustOf(member.beliefs, target.id);
+    if (memberLean !== 0) {
+      driftTrust(member.beliefs, target.id, Math.sign(memberLean) * drift);
+    }
+    const targetLean = trustOf(target.beliefs, member.id);
+    if (targetLean !== 0) {
+      driftTrust(target.beliefs, member.id, Math.sign(targetLean) * drift);
+    }
+  }
 }
 
 function updateMorale(
@@ -464,7 +617,15 @@ function applyChoice(
   if (key === "eat") {
     member.needs.hunger = clamp01(member.needs.hunger + CONFIG.needs.eatRestore);
     member.activity = "eat";
-    w.emit("meal", [member.id], { room: member.room });
+    const data: Record<string, unknown> = { room: member.room };
+    const mealName = mealWindowAt(w.tick);
+    if (mealName !== null && ship.roomKind(member.room) === "mess") {
+      // Eating in the mess during a meal window is eating at table: the
+      // window gathers the company, the tables, and the gossip.
+      data.window = mealName;
+      data.tablemates = recordMealAttendance(w, member, crew, ctx, mealName);
+    }
+    w.emit("meal", [member.id], data);
     return;
   }
   if (key === "rest") {
@@ -473,11 +634,16 @@ function applyChoice(
       CONFIG.needs.restRestore *
       (inQuarters ? 1 : CONFIG.needs.restOffQuartersFactor);
     member.needs.energy = clamp01(member.needs.energy + amount);
+    // One event per rest spell, not per tick, as with repair sessions:
+    // the log records that a person went to rest, not every minute of it.
+    const startingSpell = member.activity !== "rest";
     member.activity = "rest";
-    w.emit("rest", [member.id], {
-      room: member.room,
-      energy: r3(member.needs.energy),
-    });
+    if (startingSpell) {
+      w.emit("rest", [member.id], {
+        room: member.room,
+        energy: r3(member.needs.energy),
+      });
+    }
     return;
   }
   if (key.startsWith("work:")) {
@@ -539,7 +705,227 @@ function applyChoice(
     );
     return;
   }
+  if (key === "game") {
+    resolveGame(w, member, crew, ctx);
+    return;
+  }
+  if (key === "exercise") {
+    const partner = crew.find(
+      (other) =>
+        other !== member &&
+        other.room === member.room &&
+        other.activity !== "rest",
+    );
+    member.needs.energy = clamp01(
+      member.needs.energy - CONFIG.routine.exerciseEnergyCost,
+    );
+    member.needs.morale = clamp01(
+      member.needs.morale + CONFIG.routine.exerciseMorale,
+    );
+    member.lastLeisureTick = w.tick;
+    member.activity = "exercise";
+    if (partner !== undefined) {
+      partner.needs.morale = clamp01(
+        partner.needs.morale + CONFIG.routine.exerciseMorale * 0.6,
+      );
+      driftTrust(member.beliefs, partner.id, CONFIG.routine.gameTrustDrift);
+      driftBond(member.beliefs, partner.id, CONFIG.routine.gameBondDrift);
+      driftTrust(partner.beliefs, member.id, CONFIG.routine.gameTrustDrift);
+      driftBond(partner.beliefs, member.id, CONFIG.routine.gameBondDrift);
+      reportMilestones(w, member, partner.id);
+      reportMilestones(w, partner, member.id);
+    }
+    w.emit("leisure_exercise", [member.id], {
+      room: member.room,
+      with: partner !== undefined ? partner.id : null,
+    });
+    return;
+  }
+  if (key === "read") {
+    member.needs.morale = clamp01(
+      member.needs.morale + CONFIG.routine.readMorale,
+    );
+    member.lastLeisureTick = w.tick;
+    member.activity = "read";
+    w.emit("leisure_read", [member.id], { room: member.room });
+    return;
+  }
   member.activity = "idle";
+}
+
+/**
+ * A table game in the mess: the member and the company present (up to the
+ * table size) play, one of them wins, and an hour of cards does what
+ * cards do: company restored, small change in how the players regard
+ * each other, a lift for the winner. The winner is drawn on the
+ * "routine" stream, so the game replays exactly.
+ */
+function resolveGame(
+  w: World,
+  member: CrewMember,
+  crew: readonly CrewMember[],
+  ctx: CrewContext,
+): void {
+  const cfg = CONFIG.routine;
+  const company = crew.filter(
+    (other) =>
+      other !== member &&
+      other.room === member.room &&
+      other.activity !== "rest",
+  );
+  const participants = [member, ...company].slice(0, cfg.gameMaxPlayers);
+  if (participants.length < cfg.gameMinPlayers) {
+    member.activity = "idle";
+    return;
+  }
+  const winner = participants[
+    w.rng.get("routine").int(participants.length)
+  ] as CrewMember;
+  for (const player of participants) {
+    player.needs.social = clamp01(player.needs.social + cfg.gameSocialRestore);
+    player.needs.morale = clamp01(
+      player.needs.morale +
+        (player === winner ? cfg.gameWinnerMorale : cfg.gamePlayerMorale),
+    );
+    player.lastLeisureTick = w.tick;
+    for (const other of participants) {
+      if (other === player) continue;
+      driftTrust(player.beliefs, other.id, cfg.gameTrustDrift);
+      driftBond(player.beliefs, other.id, cfg.gameBondDrift);
+    }
+  }
+  for (const player of participants) {
+    for (const other of participants) {
+      if (other !== player) reportMilestones(w, player, other.id);
+    }
+  }
+  ctx.lastGameTick.set(member.room, w.tick);
+  member.activity = "socialize";
+  w.emit("leisure_game", [member.id], {
+    room: member.room,
+    participants: participants.map((p) => p.id),
+    winner: winner.id,
+  });
+}
+
+/**
+ * Record one person eating in the mess during a meal window: gather the
+ * window's state, seat them at a table formed from who is actually
+ * present and awake, flow the table's gossip once per pair, and return
+ * the tablemates' ids for the meal event.
+ */
+function recordMealAttendance(
+  w: World,
+  member: CrewMember,
+  crew: readonly CrewMember[],
+  ctx: CrewContext,
+  mealName: "breakfast" | "evening",
+): string[] {
+  const day = Math.floor(w.tick / CONFIG.time.ticksPerDay);
+  const key = `${day}:${mealName}`;
+  let state = ctx.meal;
+  if (state === null || state.key !== key) {
+    state = {
+      key,
+      day,
+      meal: mealName,
+      room: member.room,
+      eaters: [],
+      tables: [],
+      pairs: new Set<string>(),
+      notable: null,
+    };
+    ctx.meal = state;
+  }
+  if (!state.eaters.includes(member.id)) state.eaters.push(member.id);
+
+  const present = crew.filter(
+    (other) => other.room === member.room && other.activity !== "rest",
+  );
+  const size = CONFIG.routine.gameMaxPlayers;
+  let table: CrewMember[] = [member];
+  for (let i = 0; i < present.length; i += size) {
+    const chunk = present.slice(i, i + size);
+    if (chunk.includes(member)) table = chunk;
+  }
+  const tableIds = table.map((p) => p.id);
+  if (!state.tables.some((t) => t.join(",") === tableIds.join(","))) {
+    state.tables.push(tableIds);
+  }
+  if (state.notable === null) {
+    state.notable = notableTablePairing(table);
+  }
+
+  const tablemates: string[] = [];
+  for (const other of table) {
+    if (other === member) continue;
+    tablemates.push(other.id);
+    const pairKey = [member.id, other.id].sort().join("|");
+    if (state.pairs.has(pairKey)) continue;
+    state.pairs.add(pairKey);
+    spreadGossip(w, member, other);
+    spreadGossip(w, other, member);
+  }
+  return tablemates;
+}
+
+/**
+ * The pairing at a table that earns a chronicle clause: two people at
+ * one table with a grudge between them, or two fast friends who took a
+ * table together. Grudges outrank friendships; first found wins.
+ */
+function notableTablePairing(
+  table: readonly CrewMember[],
+): MealServiceState["notable"] {
+  for (const a of table) {
+    for (const b of table) {
+      if (a !== b && a.beliefs.grudges.includes(b.id)) {
+        return { a: a.id, b: b.id, kind: "grudge" };
+      }
+    }
+  }
+  for (const a of table) {
+    for (const b of table) {
+      if (
+        a !== b &&
+        bondOf(a.beliefs, b.id) >= CONFIG.relationships.bondMilestoneHigh &&
+        bondOf(b.beliefs, a.id) >= CONFIG.relationships.bondMilestoneHigh
+      ) {
+        return { a: a.id, b: b.id, kind: "friends" };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * When a meal window closes, close its book: one summary event for the
+ * whole window, naming how many sat down, rather than a line per eater.
+ */
+function flushMealService(w: World, ctx: CrewContext): void {
+  const state = ctx.meal;
+  if (state === null) return;
+  const day = Math.floor(w.tick / CONFIG.time.ticksPerDay);
+  const tod = w.tick % CONFIG.time.ticksPerDay;
+  const endHour =
+    state.meal === "breakfast"
+      ? CONFIG.routine.breakfastEndHour
+      : CONFIG.routine.eveningEndHour;
+  const ticksPerHour = CONFIG.time.ticksPerDay / 24;
+  if (day === state.day && tod < endHour * ticksPerHour) return;
+  ctx.meal = null;
+  const data: Record<string, unknown> = {
+    meal: state.meal,
+    room: state.room,
+    count: state.eaters.length,
+    tables: state.tables,
+  };
+  if (state.notable !== null) {
+    data.notableA = state.notable.a;
+    data.notableB = state.notable.b;
+    data.notableKind = state.notable.kind;
+  }
+  w.emit("meal_service", [], data);
 }
 
 /** One tick of crew behaviour, in roster order. */
@@ -548,6 +934,10 @@ export function stepCrew(
   crew: readonly CrewMember[],
   ctx: CrewContext,
 ): void {
+  // A meal window that ended with the last tick gets its summary first,
+  // before anyone acts in the new hour.
+  flushMealService(w, ctx);
+
   const snapshot: Record<string, number> = {};
   for (const member of crew) snapshot[member.id] = member.room;
   ctx.history.push(snapshot);
@@ -573,7 +963,12 @@ export function stepCrew(
     updateMorale(w, member, ctx, occupancy[member.room] as number);
 
     // Crowding stress: too many people in one room frays small trusts.
-    if ((occupancy[member.room] as number) >= CONFIG.relationships.crowdThreshold) {
+    // A shared meal is the exception: a full mess at dinner is the
+    // routine working as intended, not a crowd.
+    if (
+      (occupancy[member.room] as number) >= CONFIG.relationships.crowdThreshold &&
+      blockAt(member.routine, w.tick) !== "meal"
+    ) {
       const lonerFactor = member.traits.includes("loner") ? 2 : 1;
       for (const other of crew) {
         if (other !== member && other.room === member.room) {

@@ -338,8 +338,15 @@ export const CONFIG = {
     intensityWeight: 0.9,
     /** Grudge intensity times trait factor must reach this to offer the act. */
     minIntensity: 0.45,
-    /** Ticks after an act before the same person can act again. */
-    cooldownTicks: 288,
+    /**
+     * Ticks after an act before the same person can act again. Raised
+     * from 288 when the Ship's Routine landed: a scheduled ship empties
+     * its system rooms for hours at a time (the crew is in quarters, or
+     * all at table), so solitude with a system, the act's gate, became
+     * far more common. The longer cooldown restores the intended act
+     * frequency against the denser opportunity.
+     */
+    cooldownTicks: 720,
     /** Striking back spends some of the grudge's heat. */
     catharsisTrust: 0.1,
     /** Presence snapshots kept, one per tick: the witness evidence window. */
@@ -351,6 +358,99 @@ export const CONFIG = {
     /** True: the chronicle names culprits as log-truth. False: it prints
      *  only what the crew could know, and accusations stand as beliefs. */
     knowsTruth: true,
+  },
+
+  /**
+   * The Ship's Routine (Playtest Note #4): watches, sleep and work blocks,
+   * two shared meal windows a day, gossip that only travels between people
+   * actually together, and free-time texture. Hours are ship hours; a day
+   * is CONFIG.time.ticksPerDay ticks of ten minutes.
+   */
+  routine: {
+    /** How many crew stand the night watch (drawn one per pool below). */
+    nightWatchSize: 2,
+    /**
+     * Night-watch pools, in draw order: one engineering hand, one
+     * bridge/security hand, so the ship is never unwatched. The member is
+     * drawn from each pool on the "routine" stream.
+     */
+    nightWatchPools: [
+      ["chief engineer", "engineer"],
+      ["pilot", "navigator", "security officer", "executive officer"],
+    ],
+    /** Meal windows: breakfast and the evening meal, start/end ship hour. */
+    breakfastStartHour: 7,
+    breakfastEndHour: 8,
+    eveningStartHour: 18,
+    eveningEndHour: 19,
+    /** Day watch shape: asleep 22:00-06:00, works two blocks between. */
+    daySleepStartHour: 22,
+    daySleepEndHour: 6,
+    dayWorkWindows: [
+      [8, 12],
+      [13, 18],
+    ] as [number, number][],
+    /** Night watch shape: works the dark, sleeps through the morning. */
+    nightSleepStartHour: 7,
+    nightSleepEndHour: 15,
+    nightWorkWindows: [
+      [22, 24],
+      [0, 6],
+    ] as [number, number][],
+    /** Rest is offered at at least this score during the sleep block. */
+    sleepRestBase: 0.85,
+    /** Work scores are scaled by this outside a work block. */
+    sleepWorkFactor: 0.05,
+    freeWorkFactor: 0.15,
+    mealWorkFactor: 0.1,
+    /** Non-failed repairs are scaled by this during the sleep block;
+     *  failed systems ignore the schedule entirely (see below). */
+    sleepRepairFactor: 0.25,
+    /** Travel desire toward a FAILED system the member can repair is
+     *  scaled by this, in any block: emergencies pull people out of bed. */
+    emergencyRepairFactor: 1.6,
+    /** During a meal window, travel desire toward the mess is at least
+     *  this, and eating there scores at this multiple. */
+    mealTravelDesire: 0.8,
+    mealEatFactor: 1.5,
+    /** Socialize scores are scaled by this in free and meal blocks. */
+    freeSocialFactor: 1.3,
+    /**
+     * Gossip: a suspicion held at or above gossipThreshold can pass from
+     * a speaker to a co-located listener, by at most gossipTransfer per
+     * occasion (scaled by the listener's trust in the speaker), and never
+     * above the level the speaker holds it at. Companionship drift: shared
+     * free time moves trust this much per occasion, in the direction of
+     * its current sign.
+     */
+    gossipThreshold: 0.48,
+    gossipTransfer: 0.008,
+    /** A tipping of one person's suspicion of one target is recorded at
+     *  most once per this many ticks, however often rumour re-tops it. */
+    gossipTipCooldownTicks: 144,
+    companionDrift: 0.002,
+    /** Free-time leisure candidates and their effects. */
+    gameBase: 0.5,
+    exerciseBase: 0.45,
+    readBase: 0.4,
+    gameMinPlayers: 2,
+    gameMaxPlayers: 4,
+    /** A room hosts at most one table game per this many ticks, and a
+     *  person starts at most one leisure event per this many ticks, so
+     *  free time textures the log instead of flooding it. */
+    gameCooldownTicks: 9,
+    leisureCooldownTicks: 30,
+    gameTrustDrift: 0.004,
+    gameBondDrift: 0.006,
+    gameWinnerMorale: 0.05,
+    gamePlayerMorale: 0.01,
+    gameSocialRestore: 0.12,
+    exerciseMorale: 0.03,
+    exerciseEnergyCost: 0.015,
+    readMorale: 0.02,
+    /** Free-block travel desires toward the gym and toward quarters. */
+    freeGymDesire: 0.3,
+    freeQuartersDesire: 0.25,
   },
 
   weather: {

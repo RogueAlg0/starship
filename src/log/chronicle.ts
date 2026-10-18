@@ -167,12 +167,56 @@ class Renderer implements ChronicleRenderer {
       }
       case "meal": {
         if (actor === undefined) break;
+        // A meal eaten in a window is part of the shared service; the
+        // meal_service summary carries it, one line for the whole table.
+        if (typeof data.window === "string") break;
         const key = `${day}|${actor}`;
         if (this.seenMeal.has(key)) break;
         this.seenMeal.add(key);
         line(
           `${ts} — ${person(actor)} eats in the ${room(num(data, "room"))}.`,
           false,
+        );
+        break;
+      }
+      case "meal_service": {
+        const mealName =
+          str(data, "meal") === "breakfast" ? "Breakfast" : "Evening meal";
+        let text =
+          `${ts} — ${mealName} in the ${room(num(data, "room"))}: ` +
+          `${num(data, "count")} at table.`;
+        const notableA = str(data, "notableA");
+        const notableB = str(data, "notableB");
+        if (notableA !== "" && notableB !== "") {
+          text +=
+            str(data, "notableKind") === "grudge"
+              ? ` ${person(notableA)} and ${person(notableB)} sat at one table, grudge and all.`
+              : ` ${person(notableA)} and ${person(notableB)}, fast friends, took a table together.`;
+        }
+        line(text, false);
+        break;
+      }
+      case "leisure_game": {
+        const players = Array.isArray(data.participants)
+          ? data.participants.map((id) => person(String(id)))
+          : [];
+        if (players.length === 0) break;
+        const names =
+          players.length === 1
+            ? players[0]
+            : `${players.slice(0, -1).join(", ")} and ${players[players.length - 1]}`;
+        line(
+          `${ts} — ${names} play a table game in the ${room(num(data, "room"))}; ` +
+            `${person(str(data, "winner"))} wins.`,
+          true,
+        );
+        break;
+      }
+      case "gossip": {
+        line(
+          `${ts} — Shipboard rumour: ${person(str(data, "to"))} now suspects ` +
+            `${person(str(data, "about"))}.`,
+          true,
         );
         break;
       }

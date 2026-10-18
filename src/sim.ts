@@ -55,9 +55,19 @@ export function buildWorld(
   const engine = new Engine(world);
 
   const ship = generateShip(world.rng.get("shipgen"));
-  const crew = generateCrew(world.rng.get("crewgen"), ship);
+  const crew = generateCrew(
+    world.rng.get("crewgen"),
+    ship,
+    world.rng.get("routine"),
+  );
   const weather = new Weather();
-  const ctx: CrewContext = { ship, weather, history: [] };
+  const ctx: CrewContext = {
+    ship,
+    weather,
+    history: [],
+    meal: null,
+    lastGameTick: new Map(),
+  };
 
   world.emit("ship_generated", [], {
     name: ship.name,
@@ -81,6 +91,7 @@ export function buildWorld(
       role: member.title,
       roleKey: member.roleKey,
       traits: member.traits,
+      watch: member.watch,
     })),
   });
 

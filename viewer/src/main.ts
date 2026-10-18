@@ -24,6 +24,10 @@ import { CONFIG } from "../../src/scenario/config.ts";
 import { createRun, type RunContext } from "../../src/sim.ts";
 import type { CrewMember } from "../../src/entities/crew.ts";
 import {
+  blockAt,
+  type BlockKind,
+} from "../../src/entities/routine.ts";
+import {
   appearanceOf,
   departmentOf,
   faceStateOf,
@@ -452,7 +456,17 @@ const ACTIVITY_WORDS: Record<string, string> = {
   move: "on the move",
   repair: "repairing",
   socialize: "in conversation",
+  exercise: "exercising",
+  read: "reading",
   idle: "taking a moment",
+};
+
+/** The routine block names for the person card's watch line. */
+const BLOCK_WORDS: Record<BlockKind, string> = {
+  sleep: "Asleep",
+  work: "On duty",
+  meal: "At table",
+  free: "Free time",
 };
 
 function crewById(id: string): CrewMember | undefined {
@@ -712,8 +726,11 @@ function renderPersonCard(): void {
   const room = run.ship.rooms[member.room];
   const activity = ACTIVITY_WORDS[member.activity] ?? member.activity;
   const deckNo = (deck?.deckOfRoom(member.room) ?? 0) + 1;
+  const watchWord = member.watch === "night" ? "Night watch" : "Day watch";
+  const blockWord = BLOCK_WORDS[blockAt(member.routine, run.tick)];
   personWhereEl.textContent =
-    `Currently ${activity} in the ${room?.name ?? "ship"}, Deck ${deckNo}.`;
+    `Currently ${activity} in the ${room?.name ?? "ship"}, Deck ${deckNo}. ` +
+    `${watchWord} · ${blockWord}.`;
   personBioEl.textContent = bioText(member);
   buildDossier(member);
   personRecentEl.replaceChildren();

@@ -8,6 +8,7 @@
 
 import type { World } from "../engine/engine.ts";
 import type { CrewMember } from "../entities/crew.ts";
+import { r3 } from "../log/events.ts";
 import { clamp01 } from "../world/systems.ts";
 import { CONFIG } from "../scenario/config.ts";
 
@@ -24,6 +25,9 @@ export interface Beliefs {
   lowTrustSince: Record<string, number>;
   /** Tick of this person's last accusation against each person id. */
   accusationsMade: Record<string, number>;
+  /** Tick gossip last tipped this person's suspicion of each id over
+   *  their accusation threshold (the recorded, chronicle-worthy tips). */
+  gossipTips: Record<string, number>;
   /** Milestones already reported, keyed `${personId}:bond` / `:trust`. */
   milestones: Record<string, string>;
 }
@@ -45,6 +49,7 @@ export function createBeliefs(roster: readonly string[]): Beliefs {
     grudges: [],
     lowTrustSince: {},
     accusationsMade: {},
+    gossipTips: {},
     milestones: {},
   };
 }
@@ -76,6 +81,78 @@ export function driftSuspicion(
   delta: number,
 ): void {
   beliefs.suspicion[id] = clamp01(suspicionOf(beliefs, id) + delta);
+}
+
+/**
+ * The suspicion level at which this person speaks an accusation aloud:
+ * the configured line, lowered by traits that loosen tongues. The society
+ * step accuses from it; gossip reports against it.
+ */
+export function accusationThresholdFor(member: CrewMember): number {
+  return (
+    CONFIG.accusation.threshold -
+    member.traits.reduce(
+      (sum, trait) => sum + (CONFIG.traitEffects[trait]?.accuse ?? 0),
+      0,
+    )
+  );
+}
+
+/**
+ * Gossip: the rumour engine, and the only road suspicion travels socially.
+ *
+ * When two people are actually together (a shared table, a shared free
+ * hour; the callers guarantee the co-location), the speaker's suspicions
+ * can take root in the listener: any suspicion the speaker holds at or
+ * above the gossip threshold rises in the listener by a small amount,
+ * scaled by how much the listener trusts the speaker, and never above
+ * the level the speaker holds it at: you cannot catch more suspicion
+ * than the teller has. Nor can rumour alone carry a listener past their
+ * own accusation threshold: gossip can bring a person to the edge of
+ * speaking, but the last step is always evidence or a public claim.
+ * Ordinary gossip is silent in the log; only the moment a transferred
+ * suspicion reaches the listener's accusation threshold is recorded,
+ * because that is the moment rumour becomes a future accusation.
+ */
+export function spreadGossip(
+  w: World,
+  speaker: CrewMember,
+  listener: CrewMember,
+): void {
+  const receptivity =
+    0.5 + 0.5 * Math.max(0, trustOf(listener.beliefs, speaker.id));
+  const threshold = accusationThresholdFor(listener);
+  for (const id of Object.keys(speaker.beliefs.suspicion)) {
+    if (id === speaker.id || id === listener.id) continue;
+    const held = suspicionOf(speaker.beliefs, id);
+    if (held < CONFIG.routine.gossipThreshold) continue;
+    const before = suspicionOf(listener.beliefs, id);
+    if (before >= held) continue;
+    const after = Math.min(
+      held,
+      threshold,
+      before + CONFIG.routine.gossipTransfer * receptivity,
+    );
+    if (after <= before) continue;
+    driftSuspicion(listener.beliefs, id, after - before);
+    // The tipping line fires when the crossing is news: a suspicion that
+    // decays a hair below the line and is topped back up at the next
+    // meal does not earn a second line inside the cooldown.
+    const lastTip = listener.beliefs.gossipTips[id] ?? -1000000;
+    if (
+      before < threshold &&
+      after >= threshold &&
+      w.tick - lastTip >= CONFIG.routine.gossipTipCooldownTicks
+    ) {
+      listener.beliefs.gossipTips[id] = w.tick;
+      w.emit("gossip", [speaker.id], {
+        to: listener.id,
+        about: id,
+        room: speaker.room,
+        suspicion: r3(after),
+      });
+    }
+  }
 }
 
 /**
@@ -169,12 +246,7 @@ export function stepSociety(w: World, crew: readonly CrewMember[]): void {
   }
 
   for (const accuser of crew) {
-    const threshold =
-      CONFIG.accusation.threshold -
-      accuser.traits.reduce(
-        (sum, trait) => sum + (CONFIG.traitEffects[trait]?.accuse ?? 0),
-        0,
-      );
+    const threshold = accusationThresholdFor(accuser);
     for (const other of crew) {
       if (other === accuser) continue;
       const suspicion = suspicionOf(accuser.beliefs, other.id);

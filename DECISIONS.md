@@ -524,3 +524,70 @@ parts; only a surveyor reads space weather a day early; only a
 cutter lawfully holds prisoners for other ships. Manufacturers
 and faction hull-binding are deferred to the galaxy chapter.
 Design only; no code.
+
+## Playtest Note #4: the ship felt empty (Oct 18, 2026)
+
+The user's verdict after watching the daily voyages: the ship felt
+empty. Nobody kept a schedule, nobody ate together, free time did not
+exist, and rumour (suspicion spread from accusations) travelled
+between people who never met. The response is the Ship's Routine, an
+engine build in src/ with a minimal viewer line.
+
+What shipped. Each crew member gains a deterministic routine at
+generation: a watch (day, or a night watch of two drawn by role
+affinity, one from the engineering pool and one from the
+bridge/security pool), a sleep block, work blocks, and free blocks,
+shifted an hour either way per member and bent by traits
+(disciplined members keep the base shape; restless members sleep an
+hour less). The per-tick activity choice is schedule-first: work
+blocks work, sleep blocks rest, meal windows pull the awake ship to
+the mess, free blocks offer leisure; critical needs and a failed
+system in the member's own department still override the schedule,
+through the existing candidate machinery. Two meal windows a day
+(07:00 and 18:00 ship time) seat eaters at tables of up to four,
+deterministic from co-presence; the chronicle prints one summary
+line per sitting, plus a notable pairing when a table holds one.
+Gossip is a transfer function with a hard co-location rule: it runs
+only inside a shared meal or a shared free-time conversation, a
+suspicion at or above 0.48 can pass to a companion in a small amount
+scaled by trust, never above the teller's own level, and never past
+the listener's own accusation threshold on rumour alone. The log
+stays silent on ordinary gossip; it prints a line only when a
+transfer tips the listener to their threshold, at most once per pair
+and target per day. Companions in shared free time also drift trust
+by a hair, in the direction of the relationship they already have.
+Free time has texture: table games in the mess (2 to 4 players, one
+winner, small bond and morale effects), exercise in the gym, reading
+in quarters; games reach the chronicle, exercise and reading do not.
+The viewer's person card gains one line: watch and current block.
+
+Two balance changes rode along, both forced by the schedule itself.
+A scheduled ship empties its system rooms for hours (the crew is
+asleep, or all at table), so solitude with a system, the sabotage
+gate, became far more common; the sabotage cooldown rose from 288 to
+720 ticks to restore the intended act frequency, and a full mess at
+mealtime no longer counts as a crowd for stress purposes. Gossip
+took three tuning passes: the first settings produced a paranoia
+cascade, and an A/B run with gossip disabled proved the schedule,
+not the gossip, was the main amplifier; the hearsay ceiling (rumour
+cannot carry anyone past their own threshold) is what finally kept
+the slate's shape.
+
+New seed-42 30-day fingerprint: hash b4f952711cb7ec7e, 34,478 events
+(the old run was 52,017; resting now records once per sleep instead
+of once per hour), about 4,000 ticks per second. Drama slate,
+grudges / sabotages / accusations over 30 days, new engine: seed 11:
+2/2/0. Seed 16: 76/28/497 (still the storm ship, as before). Seed
+17: 5/5/8. Seed 30: 3/6/17. Seed 39: 2/3/26. Seed 40: 30/16/206,
+the one seed that flipped hot; its evidence and accusation machinery
+ignites once gossip primes it, and we accept it as a second
+storm-leaning ship rather than tuning the whole fleet to its
+measure. Seed 42: 1/4/2, gentle. Seed 99: 9/7/94, warm. Against the
+pre-routine slate, seeds 17, 30, and 39 gained healthy warmth and
+the flagship stayed calm.
+
+Deferred on purpose: the gossip distortion variant (a suspicion
+attaching slightly to a second person the teller distrusts) stays
+off and is noted as future work; the insomnia override was omitted,
+because a sleep block that reliably rests is what makes the night
+watch read as a watch.

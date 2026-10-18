@@ -7,6 +7,21 @@ seed and witnesses. The seed chooses the ship, the crew, and the fate,
 and the event log (the ship's chronicle) records what truly happened
 while the crew acted on what they believed.
 
+The crew keeps the Ship's Routine. Every member sails on one of two
+watches (a day watch, and a night watch of two drawn by role: one
+engineering hand, one bridge or security hand) with a daily shape of
+sleep, work blocks, meals, and free time, nudged by traits. The awake
+ship eats together at two meal windows a day, seated at tables of up
+to four; the chronicle prints one line per sitting, plus the
+occasional notable pairing. Rumour travels only between people who
+were actually together: a strongly held suspicion can pass at table
+or in shared free time, capped by the teller's own level and by the
+listener's accusation threshold, and the chronicle speaks only when
+gossip tips someone to the edge of accusing. Free time has its own
+texture: table games with a winner, exercise in the gym, reading in
+quarters. The viewer's person card names each member's watch and
+current block.
+
 Status: v0 slice. The kernel is in place and tested, and the first
 living world runs on it: a procedural ship (10 to 14 rooms, seven kinds
 of ship system) generated from the seed, a crew of twelve with names,

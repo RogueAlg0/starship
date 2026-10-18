@@ -160,6 +160,11 @@
     pointer-events: none;
   }
   #ship-svg .condbar-bg { fill: #0d1420; }
+  #ship-svg .crew-dot { cursor: pointer; }
+  #ship-svg .crew-dot .marker-ring {
+    stroke: #0b0f16;
+    stroke-width: 1.5;
+  }
   #ship-svg .crew-dot circle.core {
     stroke: #0b0f16;
     stroke-width: 1.5;
@@ -170,6 +175,7 @@
     text-anchor: middle;
     pointer-events: none;
   }
+  #ship-svg .crew-dot.selected .marker-ring,
   #ship-svg .crew-dot.selected circle.core {
     stroke: #ffffff;
     stroke-width: 3;
@@ -177,7 +183,7 @@
   #side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
   .crew-row {
     display: grid;
-    grid-template-columns: 14px minmax(0, 1fr);
+    grid-template-columns: 44px minmax(0, 1fr);
     gap: 4px 10px;
     padding: 7px 6px;
     border-radius: 8px;
@@ -186,11 +192,95 @@
   }
   .crew-row + .crew-row { border-top: 1px solid #1d293d; }
   .crew-row.selected { background: var(--panel-2); }
-  .crew-row .swatch {
-    width: 12px; height: 12px;
-    border-radius: 50%;
+  .crew-row .face {
+    width: 40px; height: 40px;
+    border-radius: 9px;
+    border: 2px solid var(--line);
+    background: var(--panel-2);
+    image-rendering: pixelated;
     grid-row: span 2;
   }
+  #person-card {
+    position: fixed;
+    z-index: 20;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    max-height: 64dvh;
+    overflow-y: auto;
+  }
+  @media (min-width: 980px) {
+    #person-card {
+      left: auto;
+      bottom: auto;
+      top: 76px;
+      right: 16px;
+      width: 384px;
+      max-height: calc(100dvh - 100px);
+    }
+  }
+  #person-close {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    min-height: 36px;
+    min-width: 40px;
+    padding: 2px 10px;
+    font-size: 18px;
+    line-height: 1;
+  }
+  .person-head { display: flex; gap: 12px; align-items: center; }
+  .person-head .face {
+    width: 64px; height: 64px;
+    border-radius: 10px;
+    border: 2px solid var(--line);
+    background: var(--panel-2);
+    image-rendering: pixelated;
+    flex: none;
+  }
+  .person-head .pname { font-size: 17px; font-weight: 700; }
+  .person-head .prole { font-size: 13px; color: var(--muted); }
+  .person-head .pwhere { font-size: 13px; color: var(--muted); }
+  #person-bio { font-size: 14px; line-height: 1.5; margin: 10px 0 4px; }
+  #person-dossier .needs {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    margin: 8px 0;
+  }
+  #person-dossier .drow {
+    font-size: 13px;
+    padding: 3px 0;
+    border-top: 1px solid #1d293d;
+  }
+  #person-dossier .drow b { font-weight: 600; }
+  #person-dossier .dlabel {
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-top: 8px;
+  }
+  #person-card h3 {
+    margin: 12px 0 4px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  #person-recent {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: #c9d6ea;
+  }
+  #person-recent .rline { padding: 1px 0; }
   .crew-row .who { min-width: 0; }
   .crew-row .who .name { font-size: 14.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .crew-row .who .role { font-size: 12px; color: var(--muted); }
@@ -267,6 +357,21 @@
     </section>
   </div>
 </main>
+<div id="person-card" hidden>
+  <button id="person-close" type="button" aria-label="Close person card">×</button>
+  <div class="person-head">
+    <canvas id="person-face" class="face" width="64" height="64"></canvas>
+    <div>
+      <div class="pname" id="person-name"></div>
+      <div class="prole" id="person-role"></div>
+      <div class="pwhere" id="person-where"></div>
+    </div>
+  </div>
+  <p id="person-bio"></p>
+  <div id="person-dossier"></div>
+  <h3>Recently</h3>
+  <div id="person-recent"></div>
+</div>
 <script src="./dist/bundle.js"></script>
 </body>
 </html>

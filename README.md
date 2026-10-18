@@ -138,3 +138,36 @@ For link publishing, `npm run viewer:static` writes a single
 self-contained page at `viewer/dist-static/index.html` with the bundle
 inlined. Build outputs (`viewer/dist/`, `viewer/dist-static/`) are not
 committed.
+
+## Faces
+
+The crew are not dots. Following the reference viewer's pattern, each
+person's face is a pure function of their crew id: an integer hash with
+one salt per feature picks the skin tone (7 tones), hair colour (8),
+hair style (short, long, bun, shaved, wavy, swept), eye colour, face
+shape, facial hair, and a distinguishing mark (a mole, freckles, or
+none), and the uniform is painted in their department's colour
+(Command gold, Engineering orange, Medical white, Science blue,
+Operations red, Services green). There is no stored appearance data
+and no image asset: the same id always yields the same face. The
+portrait is painted pixel by pixel on a 16x16 canvas in
+`viewer/src/faces.ts`, cached per person, and repainted only when the
+state that shows on it changes.
+
+Live state is painted over that stable identity at draw time, so the
+face doubles as a status display: the mouth follows morale (content,
+neutral, unhappy, miserable), low energy bags and half-closes the
+eyes, and holding an active grudge furrows the brow. The overlay hook
+is where future state (bandages, scars, a grey cast for the dead) will
+plug in when the simulation grows injuries.
+
+The schematic shows head-crop minis of the portraits in
+department-coloured rings (falling back to an initial dot only if a
+face cannot render). Tapping a crew member, in the panel or on the
+schematic, opens a person card: the large portrait, a prose bio
+composed from the same hash-derived appearance plus the clauses live
+state has earned (tired, hungry, lonely, holding a grudge, suspected),
+a dossier (need bars, closest relationships with bond and trust, held
+grudges, suspicions held and received), and a RECENT list of that
+person's own last events as chronicle sentences. The viewer invents
+nothing but the look and the prose glue; every fact is sim state.

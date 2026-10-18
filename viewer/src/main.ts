@@ -19,10 +19,19 @@ import {
   type ChronicleLine,
   type ChronicleRenderer,
 } from "../../src/log/chronicle.ts";
+import type { SimEvent } from "../../src/log/events.ts";
 import { CONFIG } from "../../src/scenario/config.ts";
 import { createRun, type RunContext } from "../../src/sim.ts";
 import type { CrewMember } from "../../src/entities/crew.ts";
 import type { Ship } from "../../src/world/ship.ts";
+import {
+  appearanceOf,
+  departmentOf,
+  faceStateOf,
+  getFace,
+  getPortraitCanvas,
+  stateSignature,
+} from "./faces.ts";
 
 /** Playback speeds: keys and buttons 1 to 6, mirroring the reference. */
 const SPEEDS = [
@@ -41,11 +50,6 @@ const ROOM_W = 148;
 const ROOM_H = 64;
 const GAP_X = 48;
 const GAP_Y = 18;
-
-const PALETTE = [
-  "#e6194b", "#3cb44b", "#ffe119", "#4363d8", "#f58231", "#911eb4",
-  "#42d4f4", "#f032e6", "#bfef45", "#fabed4", "#469990", "#dcbeff",
-];
 
 const NEED_KEYS = ["energy", "hunger", "social", "morale"] as const;
 type NeedKey = (typeof NEED_KEYS)[number];
@@ -132,6 +136,9 @@ let roomSysLabels = new Map<number, SVGTextElement>();
 interface Dot {
   group: SVGGElement;
   member: CrewMember;
+  image: SVGImageElement | null;
+  /** Face state signature the marker currently shows. */
+  sig: string;
   x: number;
   y: number;
   tx: number;
@@ -271,32 +278,65 @@ function buildSchematic(): void {
     roomGroups.set(room.index, group);
   }
 
-  // Crew dots on top.
+  // Crew markers on top: a mini face in a department-coloured ring.
+  // If a face cannot be rendered for some reason, the marker falls back
+  // to the old coloured dot with the person's initial.
   dots = new Map();
   const occupants = occupantsByRoom();
-  run.crew.forEach((member, i) => {
-    const color = PALETTE[i % PALETTE.length] as string;
+  for (const member of run.crew) {
+    const dept = departmentOf(member.roleKey);
     const group = svg("g", { class: "crew-dot" });
-    const circle = svg("circle", { r: 8.5, fill: color, class: "core" });
-    const letter = svg("text", { y: 3 });
-    letter.setAttribute(
-      "fill",
-      luminance(color) > 0.55 ? "#131a26" : "#f4f7fb",
-    );
-    letter.textContent = member.name.charAt(0);
-    group.appendChild(circle);
-    group.appendChild(letter);
+    let image: SVGImageElement | null = null;
+    let sig = "";
+    try {
+      const face = getFace(member);
+      sig = face.signature;
+      group.appendChild(
+        svg("rect", {
+          x: -12,
+          y: -12,
+          width: 24,
+          height: 24,
+          rx: 7,
+          fill: dept.colour,
+          class: "marker-ring",
+        }),
+      );
+      image = svg("image", {
+        x: -10,
+        y: -10,
+        width: 20,
+        height: 20,
+        href: face.miniUrl,
+      });
+      group.appendChild(image);
+    } catch {
+      const circle = svg("circle", { r: 8.5, fill: dept.colour, class: "core" });
+      const letter = svg("text", { y: 3 });
+      letter.setAttribute(
+        "fill",
+        luminance(dept.colour) > 0.55 ? "#131a26" : "#f4f7fb",
+      );
+      letter.textContent = member.name.charAt(0);
+      group.appendChild(circle);
+      group.appendChild(letter);
+    }
+    group.addEventListener("click", () => {
+      tapCrew(member.id);
+    });
     svgEl.appendChild(group);
     const target = slotTarget(member, occupants);
     dots.set(member.id, {
       group,
       member,
+      image,
+      sig,
       x: target.x,
       y: target.y,
       tx: target.x,
       ty: target.y,
     });
-  });
+  }
 }
 
 function occupantsByRoom(): Map<number, CrewMember[]> {
@@ -313,6 +353,9 @@ function occupantsByRoom(): Map<number, CrewMember[]> {
 
 interface CrewUi {
   row: HTMLDivElement;
+  face: HTMLCanvasElement;
+  /** Face state signature the row portrait currently shows. */
+  sig: string;
   bars: Map<NeedKey, HTMLDivElement>;
 }
 let crewUi = new Map<string, CrewUi>();
@@ -320,16 +363,23 @@ let crewUi = new Map<string, CrewUi>();
 function buildCrewPanel(): void {
   crewPanel.replaceChildren();
   crewUi = new Map();
-  run.crew.forEach((member, i) => {
-    const color = PALETTE[i % PALETTE.length] as string;
+  for (const member of run.crew) {
+    const dept = departmentOf(member.roleKey);
     const row = document.createElement("div");
     row.className = "crew-row";
     row.dataset.crew = member.id;
 
-    const swatch = document.createElement("div");
-    swatch.className = "swatch";
-    swatch.style.background = color;
-    row.appendChild(swatch);
+    const face = document.createElement("canvas");
+    face.className = "face";
+    face.width = 64;
+    face.height = 64;
+    face.style.borderColor = dept.colour;
+    const faceCtx = face.getContext("2d");
+    const state = faceStateOf(member);
+    if (faceCtx !== null) {
+      faceCtx.drawImage(getPortraitCanvas(member, state), 0, 0);
+    }
+    row.appendChild(face);
 
     const who = document.createElement("div");
     who.className = "who";
@@ -362,11 +412,27 @@ function buildCrewPanel(): void {
     row.appendChild(needs);
 
     row.addEventListener("click", () => {
-      selectCrew(selectedCrew === member.id ? null : member.id);
+      tapCrew(member.id);
     });
     crewPanel.appendChild(row);
-    crewUi.set(member.id, { row, bars });
-  });
+    crewUi.set(member.id, {
+      row,
+      face,
+      sig: stateSignature(state),
+      bars,
+    });
+  }
+}
+
+/** One tap behaviour for rows and map markers alike. */
+function tapCrew(id: string): void {
+  if (selectedCrew === id) {
+    selectCrew(null);
+    closePersonCard();
+  } else {
+    selectCrew(id);
+    openPersonCard(id);
+  }
 }
 
 function selectCrew(id: string | null): void {
@@ -378,6 +444,305 @@ function selectCrew(id: string | null): void {
     dot.group.classList.toggle("selected", crewId === id);
   }
   refreshLineDims();
+}
+
+// --------------------------------------------------------- person card
+
+const personCard = must<HTMLElement>("person-card");
+const personFace = must<HTMLCanvasElement>("person-face");
+const personNameEl = must<HTMLElement>("person-name");
+const personRoleEl = must<HTMLElement>("person-role");
+const personWhereEl = must<HTMLElement>("person-where");
+const personBioEl = must<HTMLElement>("person-bio");
+const personDossierEl = must<HTMLElement>("person-dossier");
+const personRecentEl = must<HTMLElement>("person-recent");
+let cardCrewId: string | null = null;
+let lastCardRenderMs = 0;
+
+const ACTIVITY_WORDS: Record<string, string> = {
+  work: "working",
+  rest: "resting",
+  eat: "eating",
+  move: "on the move",
+  repair: "repairing",
+  socialize: "in conversation",
+  idle: "taking a moment",
+};
+
+function crewById(id: string): CrewMember | undefined {
+  return run.crew.find((member) => member.id === id);
+}
+
+function personName(id: string): string {
+  return crewById(id)?.name ?? id;
+}
+
+function openPersonCard(id: string): void {
+  cardCrewId = id;
+  personCard.hidden = false;
+  lastCardRenderMs = 0;
+  renderPersonCard();
+}
+
+function closePersonCard(): void {
+  cardCrewId = null;
+  personCard.hidden = true;
+}
+
+must<HTMLButtonElement>("person-close").addEventListener("click", () => {
+  selectCrew(null);
+  closePersonCard();
+});
+
+/**
+ * The prose bio: appearance from the hash-derived descriptor, then the
+ * clauses the live state has earned. Every fact is sim state or the
+ * person's own descriptor; the viewer writes only the glue.
+ */
+function bioText(member: CrewMember): string {
+  const look = appearanceOf(member);
+  const parts: string[] = [];
+  let opening =
+    `${member.name} is ${look.heightWord}, of ${look.buildWord}, ` +
+    `with ${look.skinWord} skin, ${look.hairStyleWord} in ${look.hairWord}, ` +
+    `and ${look.eyeWord} eyes.`;
+  if (look.mark === "mole") {
+    opening += ` A small mole marks their ${look.markSide} cheek.`;
+  } else if (look.mark === "freckles") {
+    opening += " Freckles are scattered across their nose and cheeks.";
+  }
+  parts.push(opening);
+  parts.push(
+    `They serve as the ship's ${member.title.toLowerCase()} ` +
+      `in the ${look.department.name.toLowerCase()} department.`,
+  );
+  if (member.traits.length > 0) {
+    parts.push(`By temperament they are ${member.traits.join(", ")}.`);
+  }
+  const n = member.needs;
+  if (n.energy < 0.2) parts.push("They are running on empty and badly need rest.");
+  else if (n.energy < 0.4) parts.push("They look tired.");
+  if (n.hunger < 0.3) parts.push("They have not eaten properly in a while.");
+  if (n.social < 0.3) parts.push("They have been keeping to themselves, and it shows.");
+  if (n.morale >= 0.72) parts.push("Their morale is high.");
+  else if (n.morale < 0.3) parts.push("Their morale is in the bilges.");
+  if (member.beliefs.grudges.length > 0) {
+    const names = member.beliefs.grudges.map(personName).join(", ");
+    parts.push(`They hold a grudge against ${names}.`);
+  }
+  let accusers = 0;
+  for (const other of run.crew) {
+    if (other !== member && (other.beliefs.suspicion[member.id] ?? 0) >= 0.3) {
+      accusers++;
+    }
+  }
+  if (accusers >= 2) {
+    parts.push("Several crewmates suspect them of sabotage.");
+  }
+  return parts.join(" ");
+}
+
+function dossierRow(label: string, text: string): HTMLDivElement {
+  const row = document.createElement("div");
+  row.className = "drow";
+  const b = document.createElement("b");
+  b.textContent = label;
+  row.append(b, document.createTextNode(` ${text}`));
+  return row;
+}
+
+function dossierLabel(text: string): HTMLDivElement {
+  const label = document.createElement("div");
+  label.className = "dlabel";
+  label.textContent = text;
+  return label;
+}
+
+function pct(value: number): string {
+  return `${Math.round(value * 100)}%`;
+}
+
+function signedPct(value: number): string {
+  const p = Math.round(value * 100);
+  return p > 0 ? `+${p}%` : `${p}%`;
+}
+
+function buildDossier(member: CrewMember): void {
+  personDossierEl.replaceChildren();
+
+  const needs = document.createElement("div");
+  needs.className = "needs";
+  for (const key of NEED_KEYS) {
+    const cell = document.createElement("div");
+    cell.className = "need";
+    const label = document.createElement("span");
+    label.className = "need-label";
+    label.textContent = NEED_LABELS[key];
+    const bar = document.createElement("div");
+    bar.className = "bar";
+    const fill = document.createElement("div");
+    const value = member.needs[key];
+    fill.style.width = `${Math.round(value * 100)}%`;
+    fill.className = value < 0.25 ? "low" : value < 0.5 ? "mid" : "";
+    bar.appendChild(fill);
+    cell.append(label, bar);
+    needs.appendChild(cell);
+  }
+  personDossierEl.appendChild(needs);
+
+  // Closest relationships first: bond, with trust beside it.
+  const others = run.crew
+    .filter((other) => other !== member)
+    .sort(
+      (a, b) =>
+        (member.beliefs.bond[b.id] ?? 0) - (member.beliefs.bond[a.id] ?? 0),
+    )
+    .slice(0, 5);
+  personDossierEl.appendChild(dossierLabel("Closest aboard"));
+  for (const other of others) {
+    personDossierEl.appendChild(
+      dossierRow(
+        other.name,
+        `bond ${pct(member.beliefs.bond[other.id] ?? 0)}, ` +
+          `trust ${signedPct(member.beliefs.trust[other.id] ?? 0)}`,
+      ),
+    );
+  }
+
+  if (member.beliefs.grudges.length > 0) {
+    personDossierEl.appendChild(
+      dossierRow(
+        "Holds a grudge against",
+        member.beliefs.grudges.map(personName).join(", "),
+      ),
+    );
+  }
+
+  const suspects = run.crew
+    .filter(
+      (other) =>
+        other !== member && (member.beliefs.suspicion[other.id] ?? 0) >= 0.2,
+    )
+    .sort(
+      (a, b) =>
+        (member.beliefs.suspicion[b.id] ?? 0) -
+        (member.beliefs.suspicion[a.id] ?? 0),
+    );
+  if (suspects.length > 0) {
+    personDossierEl.appendChild(
+      dossierRow(
+        "Suspects",
+        suspects
+          .map(
+            (other) =>
+              `${other.name} (${pct(member.beliefs.suspicion[other.id] ?? 0)})`,
+          )
+          .join(", "),
+      ),
+    );
+  }
+
+  const suspectedBy = run.crew
+    .filter(
+      (other) =>
+        other !== member && (other.beliefs.suspicion[member.id] ?? 0) >= 0.2,
+    )
+    .sort(
+      (a, b) =>
+        (b.beliefs.suspicion[member.id] ?? 0) -
+        (a.beliefs.suspicion[member.id] ?? 0),
+    );
+  if (suspectedBy.length > 0) {
+    personDossierEl.appendChild(
+      dossierRow(
+        "Suspected by",
+        suspectedBy
+          .map(
+            (other) =>
+              `${other.name} (${pct(other.beliefs.suspicion[member.id] ?? 0)})`,
+          )
+          .join(", "),
+      ),
+    );
+  }
+}
+
+const INVOLVES_KEYS = ["with", "accused", "target", "by", "culprit"] as const;
+
+function eventInvolves(event: SimEvent, id: string): boolean {
+  if (event.actors.includes(id)) return true;
+  for (const key of INVOLVES_KEYS) {
+    if (event.data[key] === id) return true;
+  }
+  return false;
+}
+
+/**
+ * The person's own recent history, as chronicle sentences: scan the log
+ * backwards for events that involve them, then render those events
+ * through the one chronicle renderer (seeded with the generation
+ * events so names resolve), newest last.
+ */
+function recentLinesFor(id: string): string[] {
+  const events = run.world.events.events;
+  const seeds = events.filter(
+    (event) =>
+      event.type === "ship_generated" || event.type === "crew_generated",
+  );
+  const matches: SimEvent[] = [];
+  for (let i = events.length - 1; i >= 0 && matches.length < 30; i--) {
+    const event = events[i] as SimEvent;
+    if (eventInvolves(event, id)) matches.push(event);
+  }
+  matches.reverse();
+  const renderer = createChronicleRenderer();
+  for (const event of seeds) renderer.push(event);
+  const lines: string[] = [];
+  for (const event of matches) {
+    for (const line of renderer.push(event)) {
+      if (line.text !== "") lines.push(line.text);
+    }
+  }
+  return lines.slice(-8);
+}
+
+function renderPersonCard(): void {
+  if (cardCrewId === null) return;
+  const member = crewById(cardCrewId);
+  if (member === undefined) {
+    closePersonCard();
+    return;
+  }
+  const state = faceStateOf(member);
+  const faceCtx = personFace.getContext("2d");
+  if (faceCtx !== null) {
+    faceCtx.clearRect(0, 0, personFace.width, personFace.height);
+    faceCtx.drawImage(getPortraitCanvas(member, state), 0, 0);
+  }
+  personFace.style.borderColor = departmentOf(member.roleKey).colour;
+  personNameEl.textContent = member.name;
+  personRoleEl.textContent =
+    `${member.title} · ${departmentOf(member.roleKey).name}`;
+  const room = run.ship.rooms[member.room];
+  const activity = ACTIVITY_WORDS[member.activity] ?? member.activity;
+  personWhereEl.textContent =
+    `Currently ${activity} in the ${room?.name ?? "ship"}.`;
+  personBioEl.textContent = bioText(member);
+  buildDossier(member);
+  personRecentEl.replaceChildren();
+  const recent = recentLinesFor(member.id);
+  if (recent.length === 0) {
+    const div = document.createElement("div");
+    div.className = "rline";
+    div.textContent = "Nothing yet. The voyage is young.";
+    personRecentEl.appendChild(div);
+  }
+  for (const text of recent) {
+    const div = document.createElement("div");
+    div.className = "rline";
+    div.textContent = text;
+    personRecentEl.appendChild(div);
+  }
 }
 
 // -------------------------------------------------------------- chronicle
@@ -450,6 +815,7 @@ function startVoyage(seed: number): void {
   seenEvents = 0;
   allLines = [];
   selectedCrew = null;
+  closePersonCard();
   accumulator = 0;
   weatherName = CONFIG.weather.states[0] ?? "calm";
   chronicleEl.replaceChildren();
@@ -501,6 +867,27 @@ function updateSlowUi(): void {
       fill.style.width = `${Math.round(value * 100)}%`;
       fill.className = value < 0.25 ? "low" : value < 0.5 ? "mid" : "";
     }
+    // Faces repaint only when the state that shows on them changes.
+    const state = faceStateOf(member);
+    const sig = stateSignature(state);
+    if (ui.sig !== sig) {
+      ui.sig = sig;
+      const faceCtx = ui.face.getContext("2d");
+      if (faceCtx !== null) {
+        faceCtx.clearRect(0, 0, ui.face.width, ui.face.height);
+        faceCtx.drawImage(getPortraitCanvas(member, state), 0, 0);
+      }
+      const dot = dots.get(member.id);
+      if (dot !== undefined && dot.image !== null) {
+        dot.sig = sig;
+        dot.image.setAttribute("href", getFace(member, state).miniUrl);
+      }
+    }
+  }
+
+  if (cardCrewId !== null && performance.now() - lastCardRenderMs > 1000) {
+    lastCardRenderMs = performance.now();
+    renderPersonCard();
   }
 
   for (const room of run.ship.rooms) {
@@ -633,6 +1020,9 @@ window.addEventListener("keydown", (event) => {
   if (event.code === "Space") {
     event.preventDefault();
     setPlaying(!playing);
+  } else if (event.key === "Escape") {
+    selectCrew(null);
+    closePersonCard();
   } else if (event.key >= "1" && event.key <= "6") {
     setSpeed(Number(event.key) - 1);
   }

@@ -103,6 +103,34 @@ the chronicle keeps at most 300 line elements in the DOM (the full
 rendered log stays in memory as text) so hours of streaming stay
 smooth.
 
+## Faces are a pure function of the crew id (Oct 18, 2026)
+
+The viewer gives every crew member a procedural face, following the
+reference viewer's pattern: identity is derived from an integer hash
+of the crew id, one salt per feature (skin, hair colour and style,
+eyes, face shape, facial hair, marks, height and build for the prose),
+with zero stored appearance data and zero image assets. The same id
+has the same face in every run and every viewer, for free. Uniforms
+carry the group layer the reference gets from household and side
+colours: a department colour per role (Command, Engineering, Medical,
+Science, Operations, Services).
+
+Identity and state are split. The face's unchanging layer is painted
+once and cached per person, keyed by id plus a state signature; live
+state is painted over it at draw time (expression from morale, tired
+eyes from low energy, a furrowed brow from an active grudge) through
+one overlay hook, which is where injury and death overlays will plug
+in when the simulation grows a body model. A face is repainted only
+when its state signature changes, so frame cost stays at one cached
+canvas per person.
+
+The person card follows the reference panel's three layers: a prose
+bio composed from the hash-derived appearance words plus clauses the
+live state has earned, a structured dossier (needs, relationships
+with bond and trust, grudges, suspicions), and the person's own
+recent events rendered through the chronicle. The viewer invents
+nothing but the look and the prose glue.
+
 ## Chronicle truth mode
 
 The chronicle renders the event log as a ship's log. The config flag

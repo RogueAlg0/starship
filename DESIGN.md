@@ -174,6 +174,95 @@ Every arrival enters with empty relationships and a past the others
 cannot see. The chronicle introduces them the way the crew meets them:
 as a name and a knock on the airlock door.
 
+## Consequences, death, and endings (designed, post-v0)
+
+Point three of the v0 honesty list, fleshed out: in v0 nobody can die
+and nothing can end. This layer fixes both, using the village sim's two
+best tools: statistical harm booked to a cause ledger, and an inquest
+that judges from beliefs.
+
+### Harm is modeled, never rolled out of nowhere
+
+No crew member dies because a dice said so. Harm arrives through chains
+the witness could have seen coming:
+
+- Accidents: risk per tick of real work, scaled by the work's danger,
+  conditions (radiation storm, darkness of a failed light circuit),
+  fatigue, and hurry. The village model: risk over the tiles actually
+  walked; ours: risk over the tasks actually done.
+- System cascades: a system at low condition stops being a repair bill
+  and starts being a hazard. Life support failing means air quality
+  falls shipwide; a reactor in the red leaks radiation into engineering;
+  a sabotaged water recycler left unrepaired becomes thirst, then
+  sickness. Sabotage does not kill. Sabotage plus neglect plus time can.
+- Sickness: from bad water, bad air, crowding, and contact with whatever
+  the last port or rescue brought aboard. Spreads by co-location, the
+  way beliefs do.
+- Violence: grudges have a far end. Sabotage is the middle of the road,
+  not the end of it. A crew member whose grudge, traits, and despair all
+  peak can attack the person they blame. Rare by design, and the
+  chronicle should make it feel rare.
+
+### The body, at ship time
+
+Adapted from the squad sim's wound model, slowed to ship time: wounds
+per body part (head, torso, arms, legs), each with severity, bleeding,
+and infection risk. Bleeding runs in minutes and hours, not seconds.
+Treatment is work: the medic's skill, the medbay's condition, and who
+carries the wounded there all matter. Healing runs in days. Lasting
+marks are real: the lame leg, the ruined hand, the lost eye, and the
+career that quietly changes shape around them. A crew member can
+survive an incident and never be the same crew member again.
+
+Death comes from accumulated state, the way the village keeps it: total
+health collapse from bleeding, infection, suffocation, radiation, or
+untreated sickness. Every point of harm is booked to a cause in a
+ledger at the moment it lands. The ledger is the truth about how
+someone died, and it is written before anyone forms an opinion.
+
+### The inquiry
+
+Every death triggers a board of inquiry, the village inquest in ship
+clothes. Witnesses testify from their belief stores: what they saw,
+what they heard, discounted by how much the hearers trust them.
+Testimony can omit, distort, and fabricate, and a guilty party can
+offer up a scapegoat, the least trusted non-kin soul aboard. The board
+finds a cause and, where it believes there is one, a culprit. Its
+finding can be wrong. The chronicle prints both: the ledger's truth in
+its own marker, and the board's verdict as the crew received it.
+
+Consequences flow from the finding, not from the truth: the accused is
+confined to the brig, or put off at the next port, or quietly forgiven
+by a captain who does not believe the board. The dead person's friends
+inherit the grudge the way the village inherits feuds. A wrongful
+finding is not a bug in this layer; it is the layer working.
+
+### Endings
+
+A run ends when the story does. The designed endings:
+
+- Arrival: when voyage legs exist, a final destination ends the
+  voyage. The epilogue is a closing log entry: days sailed, the crew
+  who arrived, the crew who did not, the grudges still open.
+- Ship lost: life support or reactor cascade reaches the point of no
+  repair. Abandon ship if pods and time allow; who reaches the pods is
+  decided by where people are and what they believe is happening. The
+  survivors become a rescue chain for some other ship, possibly one the
+  witness meets in a later seed's galaxy.
+- Crew collapse: too few able crew to run the ship. She drifts. The log
+  continues on emergency power for a while, recording a quieter and
+  quieter ship, and then stops. The last entry is the ship's, not a
+  person's.
+- The open run stays possible: a witness who never wants an ending can
+  sail a healthy ship indefinitely. Endings are attractors, not timers.
+
+### Frequency law
+
+Death is an event of the month, not of the day. Targets for tuning: a
+typical 90-day voyage sees zero to two deaths, each one traceable in
+the chronicle to a chain a witness could recount. If a death cannot be
+explained from the log, the model is wrong, not the luck.
+
 ## Version zero slice
 
 One ship. Twelve crew. Needs and relationships. One incident generator:

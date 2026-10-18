@@ -503,3 +503,24 @@ Quartermaster and disposed of by the council, with the captain's
 solo imposition an emergency act that expires unratified. Full
 research: ~/workspace/research/dunya-council-ships-council.md.
 Design only; no code.
+
+## Ship archetypes adopted into the design (Oct 18, 2026)
+
+At the user's direction, following a sourced research pass on
+Vanguard Galaxy's ship and crew systems
+(~/workspace/research/vanguard-ship-crew-systems.md), DESIGN.md
+gained a Ship archetypes chapter: an archetype (one of six roles
+- hauler, surveyor, patrol cutter, salvage rig, mining barge,
+passenger transport - plus a shapeless Independent, crossed with
+three sizes, small ~8 / standard ~12 / large ~16-18 crew) is
+drawn from the ship's signature before rooms or crew, and
+compartments, systems, roster (with officer specialisations),
+stores appetites, and the voyage's meaning are generated inside
+its grammar. Brig capacity is a size stat (1/2/4 cells),
+borrowed from Vanguard's hull tables. Capabilities gate by
+archetype, our adaptation of Vanguard's equipment gating (we
+have no player to fit modules): only a barge refines ore into
+parts; only a surveyor reads space weather a day early; only a
+cutter lawfully holds prisoners for other ships. Manufacturers
+and faction hull-binding are deferred to the galaxy chapter.
+Design only; no code.

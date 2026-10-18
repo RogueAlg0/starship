@@ -537,6 +537,174 @@ silent, as it should.
   crew-flow chapter says mouths arrive uninvited; the resentment
   writes itself. Decide when crew flow is built.)
 
+## Ship archetypes: role and size (designed Oct 18, 2026, not built)
+
+Today every seed produces the same kind of ship in different
+clothes: the rooms, name, and crew vary, but nothing a ship IS
+changes what it needs. Vanguard Galaxy (researched Oct 18, 2026;
+~/workspace/research/vanguard-ship-crew-systems.md) shows the
+discipline that fixes this: typed randomness. Its ships are a
+matrix, 4 roles by 6 sizes making 24 classes and about 150 named
+hulls, and everything downstream of the class (cargo, hardpoints,
+crew capacity, even the size of the brig) is rolled inside the
+class's grammar, never across the whole possibility space. This
+chapter adopts that grammar at our scale and bends it toward
+what our game is about: not loadouts, but people.
+
+### The draw
+
+Ship generation gains a first step. From the ship's signature,
+before rooms or crew exist, the generator draws an **archetype:
+one role and one size**. Everything else (compartments, systems,
+roster, stores, voyage) is then generated conditioned on the
+archetype's tables, which live in scenario config as data, the
+way the village's norms are data. Same seed, same archetype,
+forever; the archetype is part of the ship's signature and shows
+in the viewer beside her name from the first frame.
+
+### Roles (six)
+
+- **Hauler** (trade). A working freighter on a paying leg. Big
+  cargo, thin crew comforts, a captain who answers to a schedule.
+  Characteristic scarcity: time and fuel. Characteristic sin:
+  smuggling (cargo that is not on the manifest, and a quartermaster
+  who knows).
+- **Surveyor** (science). A survey circuit of uncharted systems.
+  The lab and the sensor array are the ship; the crew is small,
+  clever, and alone for a long time. Scarcity: company.
+  Sin: the isolation vices, obsession, feuds in a closed room,
+  and sensor ghosts argued about like theology.
+- **Patrol cutter** (navy). A beat, a flag, and discipline.
+  Armoury, a real brig, doubled security, stores kept like a
+  parade ground. Scarcity: warmth. Sin: rigidity: discipline
+  cases multiply, and the council sits often and hangs heavy.
+- **Salvage rig**. Flies to dead ships and takes them apart.
+  Grapples, a cutting bay, cargo full of other people's endings.
+  Scarcity: luck. Sin: salvage law is mostly custom, and a rig's
+  crew argues about what the dead owned, especially when the
+  dead turn out to be alive (the rescue chains will meet this
+  ship often).
+- **Mining barge**. Slow, huge, and patient; it eats asteroids
+  and excretes ore. A refinery that is also a factory and also
+  the most dangerous room aboard. Scarcity: spare parts, always.
+  Sin: hoarding them, and a hierarchy of who works the dangerous
+  shifts.
+- **Passenger transport**. Carries people who are not crew:
+  cabins, a big mess, a purser's diplomacy. Scarcity: privacy
+  and patience. Sin: everything passengers bring aboard: their
+  feuds, their appetites at the ration vote, their habit of
+  becoming crew, suspects, and council business.
+
+An **Independent** (tramp) archetype is the seventh, deliberately
+shapeless option: a generalist table with no signature room and
+no characteristic sin, for seeds that roll her. She is the
+control group the others are measured against.
+
+### Sizes (three)
+
+Size sets the human scale, which for us is a drama variable
+before it is a stat:
+
+- **Small**: about 8 crew. Everyone knows everything; there is
+  nowhere to withdraw to; the council can barely fill its seats
+  and one death is a constitutional crisis. Brig: 1 cell.
+- **Standard**: about 12 crew, the v0 shape. Brig: 2 cells.
+- **Large**: about 16 to 18 crew. Departments become places, not
+  people; a crew member can be a stranger; gossip takes a day to
+  cross the ship, which the comms-and-runners design will feel.
+  Brig: 4 cells.
+
+Brig capacity is borrowed directly from Vanguard, where it is a
+hull stat (3 cells on a Cutter, 78 on a Battlecruiser): when the
+council sentences more people than the brig holds, the sentence
+itself has to change, and the chronicle will say why.
+
+### What the archetype bends
+
+- **Compartments.** Each role adds signature rooms to the
+  generator's table and re-weights the rest: the barge grows its
+  refinery and ore holds; the cutter an armoury beside its brig;
+  the transport passenger cabins and a second mess; the surveyor
+  a sensor dome and a second lab; the hauler cargo, cargo, and a
+  small chapel-quiet room crews invent uses for. The viewer's
+  deck generator already speaks room kinds; archetypes will need
+  props and floors for the new kinds when they land.
+- **Systems.** Signature systems join the ship's system list,
+  breakable and sabotageable like the rest: the refinery, the
+  sensor array, the grapple arm, the cutting laser, the passenger
+  life-support loop. A sabotaged refinery on a barge is a
+  different story from a sabotaged recycler anywhere, and the
+  difference is the point.
+- **Roster.** Role tables re-weight the crew draw: the cutter
+  carries a second security officer and no botanist; the barge
+  doubles engineers and works a fitter; the surveyor doubles
+  scientists and skips the gym's best customer. Within a role,
+  officers gain **specialisations** (a drive-tech versus a
+  fabricator under "engineer"; a trauma surgeon versus a
+  psychiatrist under "medic"), rolled per person, printed on
+  their card, and felt in two places: what they are good at, and
+  what the council believes they are good at, which are different
+  numbers because one of them is a belief.
+- **Stores.** The five counters get archetype appetites and
+  archetype deaths: the transport eats food at passenger rates
+  and dies of hunger with full fuel tanks; the barge dies of
+  parts with a hold full of ore it cannot refine; the surveyor's
+  air margin matters more than her food, because nobody is
+  coming. Starting buffers and production tables are per
+  archetype in config.
+- **The voyage.** A leg means different things: a trade run with
+  a manifest, a survey circuit, a patrol beat, a salvage claim,
+  an ore run, a passenger route. The galaxy layer will generate
+  encounters against the archetype (patrols inspect haulers for
+  contraband and salute cutters; a distress call means something
+  different to a salvage rig), and bounties and convoys will be
+  drawn as archetyped ships with captains, per the galaxy
+  chapter.
+- **Capabilities, by construction.** Vanguard gates activities
+  by equipment (any hull can mine if it fits a mining laser);
+  we have no player to do the fitting, so the archetype is the
+  fit: only a barge refines ore into parts (a production path
+  the Stores chapter needs), only a surveyor's array reads space
+  weather a day early (a telegraph at galaxy scale for the
+  storms the feel pass shakes the deck for), only a cutter can
+  lawfully hold a prisoner for another ship. Capability is
+  identity here, not inventory.
+
+### Manufacturers and factions (deferred to the galaxy chapter)
+
+Vanguard binds factions to hulls through 13 manufacturers
+(Mindus builds the best mining ships and sells them only to
+Mindus; the police yard's patrol hulls can only be taken by
+boarding one). When the galaxy layer is built, archetype
+availability, hull naming flavour, and refit access should
+follow faction and manufacturer the same way, so a region of
+space feels different in the only language a ship game speaks.
+Noted here; designed there.
+
+### The viewer
+
+The archetype is identity, so it is displayed like identity:
+beside the ship's name in the header and on the banner ("Hauler
+· Large"), in the ship's card, and, when the hull exterior view
+is built (it is already queued), in the silhouette itself: a
+barge is wide and scarred, a cutter is sleek and grey, a
+transport is windowed like a lantern. The exterior view takes
+its grammar from this chapter.
+
+### Open questions for the build
+
+- Can a witness filter seeds by archetype in the viewer (show me
+  a cutter)? Leaning: yes, as a viewer convenience over seed
+  search; the seed still decides, the filter just hunts.
+- Can an archetype change mid-voyage? A hauler refit into a
+  salvage rig at a port is the construction chapter's best story.
+  Leaning: allowed only there, slowly, at cost, and the ship
+  keeps her old name.
+- Do passengers on a transport get council votes through a
+  representative? Leaning: no vote, one voice: a passenger
+  witness at admissions and rationing sittings, which the
+  council can ignore at the usual price.
+
 ## The Ship's Council (designed Oct 18, 2026, not built)
 
 Stellaris gives a state a council: a ruler and a row of portfolio

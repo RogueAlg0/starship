@@ -401,6 +401,34 @@ Accusation lines are always rendered as accusations. Turning the flag
 off produces the crew's-eye view, where only discovered damage and
 spoken beliefs appear.
 
+## Playtest Note #1: weather changed too fast (Oct 18, 2026)
+
+Reported by the user from a live run: the chronicle showed calm
+and solar wind ping-ponging every ten minutes, and a radiation
+storm at 03:20 on day one was weather noise, not news. The old
+chain rolled every tick (cadenceTicks 1) with weak self-holds
+(calm 0.90, solar wind 0.65, storm 0.40), giving expected dwells
+of about 100 minutes calm, 29 minutes solar wind, 17 minutes
+storm: on the order of 1,500 weather turns in a 60-day run.
+
+Fix, config-level only (the chain, the weather stream, and every
+reader of current state are unchanged): the chain now rolls once
+per ship hour (cadenceTicks 6) and every state holds hard: calm
+[0.97, 0.025, 0.005], solar wind [0.06, 0.92, 0.02], radiation
+storm [0.05, 0.10, 0.85]. Expected dwells are about 33 hours
+calm, 12.5 hours solar wind, 6.7 hours storm; measured over
+60 days the fleet's seeds turn 56 to 93 times, with median
+dwells in the designed bands (pinned by test/weather.test.ts).
+Storm entry out of calm stays rare (0.005 per hourly roll), and
+once a storm arrives it sits on the ship for most of a watch.
+
+This is an engine change, so the seed-42 story is retold: the
+30-day gate hash moves from cf1dffaeb4796f91 to ec4e0d23aa3bfde5
+(52,017 events over 4,320 ticks, 48 of them weather turns), and
+replay reproduces the new stream exactly. Earlier entries in
+this file that cite cf1dffaeb4796f91 describe the gate as it
+stood when they were written.
+
 ## Stores designed, build deferred (Oct 18, 2026)
 
 At the user's direction ("Design Stores first, build later"),

@@ -356,16 +356,24 @@ export const CONFIG = {
   weather: {
     /** Weather state names, in index order. */
     states: ["calm", "solar wind", "radiation storm"],
-    /** Ticks between weather rolls. 1 means the chain is rolled every tick. */
-    cadenceTicks: 1,
+    /**
+     * Ticks between weather rolls. 6 means the chain is rolled once per
+     * ship hour (a tick is ten minutes). Weather is a condition of the
+     * voyage, not a coin toss: episodes should last hours, so the chain
+     * rolls hourly and every state holds hard (Playtest Note #1).
+     */
+    cadenceTicks: 6,
     /**
      * Markov transition table. Row per current state: probability of moving
-     * to calm, solar wind, radiation storm, in state index order.
+     * to calm, solar wind, radiation storm, in state index order. Expected
+     * dwells at the hourly cadence: calm about 33 hours, solar wind about
+     * 12.5 hours, radiation storm about 6.7 hours. Storms stay rare out of
+     * calm and sit on the ship once they arrive.
      */
     transitions: [
-      [0.9, 0.08, 0.02],
-      [0.25, 0.65, 0.1],
-      [0.35, 0.25, 0.4],
+      [0.97, 0.025, 0.005],
+      [0.06, 0.92, 0.02],
+      [0.05, 0.1, 0.85],
     ],
   },
 };

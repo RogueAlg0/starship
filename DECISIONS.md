@@ -265,7 +265,13 @@ how late help arrives), and communications and runners (the comms
 system as the instant channel; with comms damaged, word travels by
 runner at walking speed and by voice range; between ships, signals
 take days and stale information is the galaxy's normal state).
-Future engine design only; no code was written for any of it.
+Also recorded the same day, in its own DESIGN.md section: away
+missions, episodic landing-party ground missions on a procedural
+map with the real roster, the squad sim's slow positional movement,
+destruction the map remembers, sensor beliefs that can be wrong,
+and consequences that flow back aboard; a major future engine
+system (a ground layer on the same kernel). Future engine design
+only; no code was written for any of it.
 
 ## Chronicle truth mode
 

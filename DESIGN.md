@@ -347,6 +347,54 @@ distress call is answered as it was described, not as things now
 stand. Stale information is the galaxy's normal state, and it pairs
 with the bounty design, whose posters are beliefs all the way down.
 
+## Away missions (future, major engine system)
+
+**Status: future design, post-v0. Not built.** Recorded Oct 18, 2026,
+at the user's direction. This is the big one: a ground layer on the
+same kernel, not a viewer trick and not a minigame bolted on.
+
+The structure is Star Trek's: ship life is the series, away missions
+are the episodes. Inside a voyage, the ship puts a landing party on
+a procedural ground map (a planet surface, ruins, a wreck, a
+colony), rendered top-down like the deck, and the witness watches
+the squad sim's pleasures in our clothes: a map worth reading, slow
+deliberate movement and positioning, and ground that changes under
+fire.
+
+- The away team is 4 to 6 drawn from the actual roster. Their faces,
+  traits, skills, and grudges come down with them; the party is the
+  crew, not a separate cast, and what they think of each other
+  matters more, not less, at the bottom of a gravity well.
+- Movement is the squad march: deliberate, positional, slow enough
+  that a bad position is a decision the witness watched happen.
+  Hazards are environmental first (terrain, weather, whatever lives
+  there, whatever the wreck is leaking) and sometimes combat, using
+  the body and wound model from the consequences chapter: harm per
+  body part, treatment as work, marks that last.
+- Destruction is real and the map remembers it for the rest of the
+  mission: cover breaks, structures burn, a wall the party sheltered
+  behind in the first hour is a gap in the third. The ground keeps
+  the score the way the ship's cause ledger does.
+- The party goes down on beliefs. Ship sensors believe there is a
+  distress call, or ruins, or nothing at all, and sensors can be
+  wrong, for every reason the evidence rules already give: range,
+  storms, decayed traces, a poster that lied days ago. The mission
+  the crew planned is the one their beliefs described; the ground
+  holds the truth.
+- Comms obey the runner and radio law: range and delay between ship
+  and surface, and beyond range the party is on its own: no
+  coordination, no testimony, no rescue that knows where to land.
+- What happens down there flows back aboard, because there is one
+  crew and one chronicle: the wounded go to sickbay and the body
+  model takes them from there; the dead go to an inquiry, and to
+  the grudges of the friends who stayed up ("you sent him down" is
+  a grudge with an address); salvage, samples, and survivors come
+  up into stores, sickbay, and the crew-flow chains.
+
+Determinism is unchanged: the ground layer runs on the same
+fixed-order loop, named streams, and event log, and an away mission
+replays from its decision log like any other part of the voyage.
+
 ## Version zero slice
 
 One ship. Twelve crew. Needs and relationships. One incident generator:

@@ -2,17 +2,21 @@
 //
 // A sector is 6 to 9 named ports scattered on a jittered grid, held
 // by 3 to 5 procedurally named factions (each with a home port) or
-// by nobody. The voyage is an itinerary generated whole at build,
-// the way traffic schedules are: a chartered first leg, then port
-// stays and further legs until the table covers the traffic
-// horizon. The ship's position is a pure function of the tick given
-// the itinerary — elapsed voyage-time over leg ticks, interpolated
-// between the two port positions — with one wrinkle: a ship dead
-// in space (fuel gone, see stores) makes way on momentum at a
-// quarter of her voyage clock, and the drift spans that record
-// those stretches are themselves deterministic run state, so
-// replay reproduces the same slow hours. Generation draws only
-// from the "galaxy" stream and is never in the tick loop.
+// by nobody. The voyage is a chartered first leg and, after that,
+// a future the ship decides as she sails: each stay is drawn as
+// its arrival lands, and the leg out of a stay is laid down only
+// when the Ship's Council has set the course for it (see the
+// Council chapter) — or, when no council can sit, by the old
+// itinerary rule kept as a fallback. The ship's position is a pure
+// function of the tick given the legs and stays laid down so far —
+// elapsed voyage-time over leg ticks, interpolated between the two
+// port positions — with one wrinkle: a ship dead in space (fuel
+// gone, see stores) makes way on momentum at a quarter of her
+// voyage clock, and the drift spans that record those stretches
+// are themselves deterministic run state, so replay reproduces the
+// same slow hours. Generation draws only from the "galaxy"
+// stream; the tick loop draws a stay's length as each arrival
+// lands, in arrival order, so the stream stays reproducible.
 
 import type { World } from "../engine/engine.ts";
 import type { Rng } from "../engine/rng.ts";
@@ -234,11 +238,15 @@ function legTicksFor(sector: Sector, from: number, to: number): number {
 }
 
 /**
- * Pick the next port of the itinerary: never the port the ship lies
- * in, never straight back to the port she came from when any
- * alternative exists, preferring the chartered band of reasonable
- * sails (and, like the charter, falling back to the port nearest
- * the band), and weighted toward ports this run has not visited.
+ * Pick the next port by the old itinerary rule: never the port the
+ * ship lies in, never straight back to the port she came from when
+ * any alternative exists, preferring the chartered band of
+ * reasonable sails (and, like the charter, falling back to the
+ * port nearest the band), and weighted toward ports this run has
+ * not visited. The Council sets the course now (see council.ts);
+ * this rule survives as the fallback for a ship with no council
+ * to sit — an ended ship, or a test harness that steps the voyage
+ * alone — so the ship is never stranded by an empty table.
  */
 function pickNextPort(
   rng: Rng,
@@ -285,21 +293,27 @@ function pickNextPort(
 }
 
 /**
- * The voyage: an itinerary, generated whole at build. Leg 1 is the
- * CHARTER: its destination is drawn from the ports a reasonable
- * sail away (the config band in days at cruise speed), and its
- * arrival is the voyage's Arrival — the `arrival` event, capital A.
- * Later legs are picked as the itinerary is laid down, and their
- * arrivals are plain `port_call` events. Between legs the ship lies
- * in port for a stay of one to three drawn days, bent a day by the
- * port's character.
+ * The voyage: a charter leg, then a route the ship decides as she
+ * sails. Leg 1 is the CHARTER: its destination is drawn from the
+ * ports a reasonable sail away (the config band in days at cruise
+ * speed), and its arrival is the voyage's Arrival — the `arrival`
+ * event, capital A. Later arrivals are plain `port_call` events.
+ * Between legs the ship lies in port for a stay of one to three
+ * drawn days, bent a day by the port's character; the stay is
+ * drawn as its arrival lands, and the leg out of it is laid down
+ * only once the Council has set the course (recordCourseDecision)
+ * — or, at the stay's last tick with no decision recorded, by the
+ * old itinerary rule, so the ship never waits on an empty table.
+ * The future is genuinely undecided until the sitting, and still
+ * reproducible from the seed: the only draws are stay lengths, in
+ * arrival order, on the "galaxy" stream.
  *
  * Positions read off the VOYAGE CLOCK: voyage-time is the tick
  * slowed by the spans the ship has spent dead in space (fuel gone;
  * the stores system opens and closes those drift spans, through
  * which the clock runs at the drift rate). With no drift the two
  * clocks are the same clock, and position is a pure function of
- * the tick given the itinerary.
+ * the tick given the legs and stays laid down so far.
  */
 export class Voyage {
   readonly sector: Sector;
@@ -307,6 +321,14 @@ export class Voyage {
   readonly stays: PortStay[] = [];
   /** The tick the charter arrival fired, or null while under way. */
   arrivedTick: number | null = null;
+  /** The generation stream, kept: stay lengths are drawn on it as
+   *  arrivals land, and the fallback rule draws on it too. */
+  private readonly rng: Rng;
+  /** Ports the ship has lain in or sailed to, charter first. */
+  private readonly visitedSet = new Set<number>();
+  /** Course decisions by stay index: the port the Council chose
+   *  for the leg out of that stay. Absent until the sitting. */
+  private readonly courseDecisions = new Map<number, number>();
   /** Legs whose arrival has been announced, in order. */
   private announcedLegs = 0;
   /** Real-tick spans during which the ship drifts on momentum:
@@ -317,8 +339,8 @@ export class Voyage {
 
   constructor(rng: Rng, sector: Sector) {
     this.sector = sector;
+    this.rng = rng;
     const g = CONFIG.galaxy;
-    const tpd = CONFIG.time.ticksPerDay;
     const origin = rng.int(sector.ports.length);
     const originPort = sector.portAt(origin);
     const inBand: number[] = [];
@@ -349,48 +371,124 @@ export class Voyage {
         sector.portAt(destination),
       ),
     });
+    this.visitedSet.add(origin);
+    this.visitedSet.add(destination);
+    // Nothing past the charter is laid down. Stays are drawn as
+    // arrivals land and later legs are decided in port (see the
+    // class comment): the table grows with the run, never ahead
+    // of the sittings that choose it.
+  }
 
-    // The rest of the itinerary, laid down until the table covers
-    // the traffic horizon: stays and legs alternating, each stay's
-    // length drawn and bent by its port's character.
-    const horizonTicks = CONFIG.traffic.scheduleHorizonDays * tpd;
-    const visited = new Set<number>([origin, destination]);
-    let current = destination;
-    let previous = origin;
-    let stayStart = charterTicks;
-    while (stayStart < horizonTicks) {
-      const character = sector.portAt(current).character;
-      const bend = g.stayDayModifier[character] ?? 0;
-      const days = Math.max(
-        1,
-        g.minStayDays +
-          rng.int(g.maxStayDays - g.minStayDays + 1) +
-          bend,
-      );
-      const departTick = stayStart + days * tpd;
-      this.stays.push({
-        index: this.stays.length,
-        port: current,
-        arriveTick: stayStart,
-        departTick,
+  /** Draw the stay that begins when the given leg arrives. */
+  private drawStay(leg: VoyageLeg): PortStay {
+    const g = CONFIG.galaxy;
+    const tpd = CONFIG.time.ticksPerDay;
+    const character = this.sector.portAt(leg.to).character;
+    const bend = g.stayDayModifier[character] ?? 0;
+    const days = Math.max(
+      1,
+      g.minStayDays + this.rng.int(g.maxStayDays - g.minStayDays + 1) + bend,
+    );
+    return {
+      index: this.stays.length,
+      port: leg.to,
+      arriveTick: leg.arriveTick,
+      departTick: leg.arriveTick + days * tpd,
+    };
+  }
+
+  /** Lay down the leg out of a stay, to a decided port. */
+  private buildLeg(stay: PortStay, to: number): void {
+    const ticks = legTicksFor(this.sector, stay.port, to);
+    this.legs.push({
+      from: stay.port,
+      to,
+      departTick: stay.departTick,
+      arriveTick: stay.departTick + ticks,
+      distanceLightDays: this.sector.distanceBetween(
+        this.sector.portAt(stay.port),
+        this.sector.portAt(to),
+      ),
+    });
+    this.visitedSet.add(to);
+  }
+
+  /**
+   * The chart for a course sitting at a port: the ports inside
+   * the chartered band of reasonable sails, plus the port the
+   * ship came from, admitted under its standing penalty rather
+   * than barred — a council may vote to go back, and the
+   * chronicle can say why. Ordered by distance, then index, so
+   * every reader lays the same chart. The current port is never
+   * on it.
+   */
+  courseCandidates(from: number, previous: number): number[] {
+    const g = CONFIG.galaxy;
+    const fromPort = this.sector.portAt(from);
+    const daysOf = (index: number): number =>
+      this.sector.distanceBetween(fromPort, this.sector.portAt(index)) /
+      g.cruiseLightDaysPerDay;
+    const pool = this.sector.ports
+      .map((p) => p.index)
+      .filter((index) => index !== from)
+      .filter((index) => {
+        const days = daysOf(index);
+        return days >= g.minLegDays && days <= g.maxLegDays;
       });
-      const next = pickNextPort(rng, sector, current, previous, visited);
-      const ticks = legTicksFor(sector, current, next);
-      this.legs.push({
-        from: current,
-        to: next,
-        departTick,
-        arriveTick: departTick + ticks,
-        distanceLightDays: sector.distanceBetween(
-          sector.portAt(current),
-          sector.portAt(next),
-        ),
-      });
-      visited.add(next);
-      previous = current;
-      current = next;
-      stayStart = departTick + ticks;
+    if (!pool.includes(previous)) pool.push(previous);
+    pool.sort((a, b) => daysOf(a) - daysOf(b) || a - b);
+    return pool;
+  }
+
+  /** The port the ship sailed from to reach a stay's port. */
+  previousPortForStay(stayIndex: number): number {
+    const leg = this.legs[stayIndex] as VoyageLeg;
+    return leg.from;
+  }
+
+  /** Whether the ship has lain in or sailed to a port yet. */
+  hasVisited(portIndex: number): boolean {
+    return this.visitedSet.has(portIndex);
+  }
+
+  /**
+   * Record the Council's course for the leg out of a stay. The
+   * port must be on that stay's chart: the invariant is enforced
+   * here, at the point of mutation, not reconciled later.
+   */
+  recordCourseDecision(stayIndex: number, portIndex: number): void {
+    const stay = this.stays[stayIndex] as PortStay | undefined;
+    if (stay === undefined) {
+      throw new Error(`course decision for unknown stay ${stayIndex}`);
     }
+    if (this.courseDecisions.has(stayIndex)) {
+      throw new Error(`course for stay ${stayIndex} already decided`);
+    }
+    const previous = this.previousPortForStay(stayIndex);
+    if (!this.courseCandidates(stay.port, previous).includes(portIndex)) {
+      throw new Error(
+        `course decision names port ${portIndex}, not on the chart from ${stay.port}`,
+      );
+    }
+    this.courseDecisions.set(stayIndex, portIndex);
+  }
+
+  /** The decided port for the leg out of a stay, or null. */
+  courseDecisionFor(stayIndex: number): number | null {
+    return this.courseDecisions.get(stayIndex) ?? null;
+  }
+
+  /** The old itinerary rule's pick for a stay: the fallback when
+   *  no council can sit to decide. */
+  fallbackCourseFor(stayIndex: number): number {
+    const stay = this.stays[stayIndex] as PortStay;
+    return pickNextPort(
+      this.rng,
+      this.sector,
+      stay.port,
+      this.previousPortForStay(stayIndex),
+      this.visitedSet,
+    );
   }
 
   /** The charter leg's origin port index. */
@@ -575,15 +673,29 @@ export class Voyage {
   }
 
   /**
-   * The voyage system: arrivals fire exactly once each, in
-   * itinerary order. The charter's arrival is `arrival`; every
-   * later one is a `port_call`.
+   * The voyage system: arrivals fire exactly once each, in leg
+   * order. The charter's arrival is `arrival`; every later one is
+   * a `port_call`. Each arrival draws its stay as it lands, and
+   * the leg out of a stay is laid down once the Council's course
+   * for it stands recorded — or, at the stay's last tick with no
+   * decision, by the old itinerary rule.
    */
   step(w: World): void {
     const vt = this.voyageTimeAt(w.tick);
+    // Stays are drawn as their arrivals land, in arrival order,
+    // before anything announces them: readers this same tick (the
+    // stores call opening, the council's course trigger) see the
+    // stay whole.
+    while (
+      this.stays.length < this.legs.length &&
+      vt >= (this.legs[this.stays.length] as VoyageLeg).arriveTick
+    ) {
+      const leg = this.legs[this.stays.length] as VoyageLeg;
+      this.stays.push(this.drawStay(leg));
+    }
     while (this.announcedLegs < this.legs.length) {
       const leg = this.legs[this.announcedLegs] as VoyageLeg;
-      if (vt < leg.arriveTick) return;
+      if (vt < leg.arriveTick) break;
       const index = this.announcedLegs;
       this.announcedLegs++;
       const port = this.sector.portAt(leg.to);
@@ -596,10 +708,9 @@ export class Voyage {
           distance: r3(this.distanceLightDays),
         });
       } else {
-        // The stay that begins with this arrival is the one the
-        // itinerary laid down after this leg (absent only past the
-        // table's horizon end, where no run sails).
-        const stay = this.stays[index] as PortStay | undefined;
+        // The stay that begins with this arrival was drawn above,
+        // on this tick or an earlier one.
+        const stay = this.stays[index] as PortStay;
         const faction = this.sector.factionOf(port);
         w.emit("port_call", [], {
           port: port.name,
@@ -609,14 +720,22 @@ export class Voyage {
           days: r3(
             (leg.arriveTick - leg.departTick) / CONFIG.time.ticksPerDay,
           ),
-          stayDays:
-            stay === undefined
-              ? 0
-              : r3(
-                  (stay.departTick - stay.arriveTick) /
-                    CONFIG.time.ticksPerDay,
-                ),
+          stayDays: r3(
+            (stay.departTick - stay.arriveTick) / CONFIG.time.ticksPerDay,
+          ),
         });
+      }
+    }
+    // The leg out of the current stay: laid down when the course
+    // for it stands decided, and no later than the stay's last
+    // tick, when the fallback rule speaks for an empty table.
+    const stay = this.stayAt(w.tick);
+    if (stay !== null && this.legs.length === stay.index + 1) {
+      const decided = this.courseDecisions.get(stay.index);
+      if (decided !== undefined) {
+        this.buildLeg(stay, decided);
+      } else if (vt >= stay.departTick - 1) {
+        this.buildLeg(stay, this.fallbackCourseFor(stay.index));
       }
     }
   }

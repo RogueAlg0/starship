@@ -219,16 +219,25 @@ export class StarMapView {
     const pos = this.voyage.positionAt(tick);
     const ship = this.project(pos.x, pos.y);
     // The leg being sailed now (the charter's dashed line is in the
-    // static layer; later legs draw their own here).
+    // static layer; later legs draw their own here). In port, the
+    // leg drawn is the one that brought her here, and the course
+    // the council has set out of this stay — once set, and not
+    // before — draws as the next leg's dash.
     const leg = this.voyage.currentLegAt(tick);
-    const legFrom =
-      leg === null
-        ? this.voyage.originPort
-        : this.sector.portAt(leg.from);
-    const legTo =
-      leg === null
-        ? this.voyage.destinationPort
-        : this.sector.portAt(leg.to);
+    const stay = this.voyage.stayAt(tick);
+    let legFrom = this.voyage.originPort;
+    let legTo = this.voyage.destinationPort;
+    let decidedTo: Port | null = null;
+    if (leg !== null) {
+      legFrom = this.sector.portAt(leg.from);
+      legTo = this.sector.portAt(leg.to);
+    } else if (stay !== null) {
+      const arrived = this.voyage.legs[stay.index];
+      if (arrived !== undefined) legFrom = this.sector.portAt(arrived.from);
+      legTo = this.sector.portAt(stay.port);
+      const decided = this.voyage.courseDecisionFor(stay.index);
+      if (decided !== null) decidedTo = this.sector.portAt(decided);
+    }
     const from = this.project(legFrom.x, legFrom.y);
     const to = this.project(legTo.x, legTo.y);
 
@@ -239,6 +248,26 @@ export class StarMapView {
     ctx.moveTo(from.px, from.py);
     ctx.lineTo(ship.px, ship.py);
     ctx.stroke();
+
+    // The decided next course, dashed from the berth, its port
+    // breathing while the ship still lies in port.
+    if (decidedTo !== null) {
+      const next = this.project(decidedTo.x, decidedTo.y);
+      ctx.strokeStyle = "rgba(219, 228, 240, 0.4)";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      ctx.moveTo(ship.px, ship.py);
+      ctx.lineTo(next.px, next.py);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      const pulse = 9 + 3 * Math.sin(nowMs / 350);
+      ctx.strokeStyle = "rgba(232, 163, 61, 0.55)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(next.px, next.py, pulse, 0, Math.PI * 2);
+      ctx.stroke();
+    }
 
     // The destination breathes while it is still ahead.
     if (!this.voyage.inPortAt(tick)) {

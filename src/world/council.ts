@@ -21,9 +21,11 @@
 // quartermaster proposes, the council disposes; the captain's
 // emergency imposition expires unratified), discipline short of
 // inquiry, emergency powers with expiring grants and harder
-// renewals, and relief of the captain. Deferred, with their
-// inputs unbuilt: admissions and course/port decisions (crew
-// arrivals and distress calls do not exist yet).
+// renewals, relief of the captain, and course: at every port
+// after the charter, the council sets the course the ship sails
+// (the departure decision). Deferred, with their inputs
+// unbuilt: admissions (crew arrivals do not exist yet) and the
+// distress-call half of course (no distress calls exist yet).
 
 import type { World } from "../engine/engine.ts";
 import type { CrewMember } from "../entities/crew.ts";
@@ -40,7 +42,15 @@ import type { Sector, Voyage } from "./galaxy.ts";
 import type { HealthState } from "./health.ts";
 import { ledgerSummary } from "./health.ts";
 import type { Ship } from "./ship.ts";
-import { daysOf, type StoresState } from "./stores.ts";
+import {
+  consumptionMilliPerDay,
+  dailyUseMilli,
+  daysOf,
+  productionMilliPerDay,
+  STORE_KEYS,
+  type StoreKey,
+  type StoresState,
+} from "./stores.ts";
 
 export interface SeatDef {
   key: string;
@@ -76,12 +86,32 @@ export interface VoteMotion {
   days?: number;
   /** Emergency severity in [0, 1], for emergency motions. */
   severity?: number;
+  /** The port the captain tables, for course motions. */
+  portIndex?: number | null;
+  /** The port the ship lies in, for course motions. */
+  fromPortIndex?: number | null;
+}
+
+/**
+ * The course table's arithmetic, computed once per sitting: each
+ * officer's price for each candidate port, in candidate order.
+ * Course votes are read off these prices (the motion's port
+ * against the officer's own best alternative), so the four terms
+ * stay inspectable: portfolio and trait leans, trust in the
+ * navigator's recommendation, and the common chart terms are all
+ * priced into the table by scoreCourseCandidates.
+ */
+export interface CourseVoteContext {
+  candidates: readonly number[];
+  scores: ReadonlyMap<string, readonly number[]>;
 }
 
 interface OfficerContext {
   crew: readonly CrewMember[];
   /** The security chief's holder, whose presentation is testimony. */
   securityId: string | null;
+  /** The course table's prices; present only for course votes. */
+  course?: CourseVoteContext;
 }
 
 /**
@@ -169,21 +199,50 @@ export function computeVote(
     if (proposer !== undefined && proposer !== officer) {
       trustTerm += trustOf(officer.beliefs, proposer.id) * 0.2;
     }
+  } else if (kind === "course") {
+    // The vote is the officer's own arithmetic, read off the
+    // course table's prices: what the captain's port is worth to
+    // them, against the best other port on the chart. Portfolio,
+    // trait, and trust terms are already priced into the table
+    // (see scoreCourseCandidates); the evidence the record
+    // carries is how far the motion stands from their best
+    // alternative, centred on a coin flip.
+    const cc = ctx.course;
+    const mine = cc?.scores.get(officer.id);
+    if (cc !== undefined && mine !== undefined && motion.portIndex !== null && motion.portIndex !== undefined) {
+      const motionAt = cc.candidates.indexOf(motion.portIndex);
+      if (motionAt >= 0) {
+        const motionPrice = mine[motionAt] as number;
+        let bestAlt = Number.NEGATIVE_INFINITY;
+        for (let i = 0; i < mine.length; i++) {
+          if (i !== motionAt) bestAlt = Math.max(bestAlt, mine[i] as number);
+        }
+        if (bestAlt === Number.NEGATIVE_INFINITY) bestAlt = motionPrice;
+        evidence = Math.max(0, Math.min(1, 0.5 + (motionPrice - bestAlt)));
+        evidenceTerm = motionPrice - bestAlt;
+      }
+    }
   }
 
   // A meticulous officer weighs the evidence term harder.
   if (officer.traits.includes("meticulous")) evidenceTerm *= 1.2;
 
+  // Course prices its own leans into the table; the standing
+  // tables below are for the binary motions.
   const leanTable =
-    kind === "ratification" || kind === "lift"
-      ? CONFIG.council.portfolioLean.rationing
-      : CONFIG.council.portfolioLean[kind];
+    kind === "course"
+      ? undefined
+      : kind === "ratification" || kind === "lift"
+        ? CONFIG.council.portfolioLean.rationing
+        : CONFIG.council.portfolioLean[kind];
   let lean = leanTable?.[seatKey] ?? 0;
   if (kind === "lift") lean = -lean;
   const traitFamily =
     kind === "inquiry" || kind === "discipline" ? "guilty" : "motion";
-  for (const trait of officer.traits) {
-    lean += CONFIG.council.traitLean[traitFamily][trait] ?? 0;
+  if (kind !== "course") {
+    for (const trait of officer.traits) {
+      lean += CONFIG.council.traitLean[traitFamily][trait] ?? 0;
+    }
   }
 
   const score = evidenceTerm + trustTerm + lean;
@@ -223,6 +282,8 @@ interface PendingSitting {
   movers: string[];
   renewal: number;
   subjectId: string | null;
+  /** The stay a course sitting sets the course out of. */
+  stayIndex?: number;
 }
 
 export interface CouncilState {
@@ -247,6 +308,8 @@ export interface CouncilState {
   foRejected: string[];
   sittingsHeld: number;
   reliefMotions: number;
+  /** Course sittings held: one per stay the council decided. */
+  courseSittings: number;
 }
 
 /** Seat the council from the roster's roles, as the ship sails. */
@@ -276,6 +339,7 @@ export function createCouncil(crew: readonly CrewMember[]): CouncilState {
     foRejected: [],
     sittingsHeld: 0,
     reliefMotions: 0,
+    courseSittings: 0,
   };
 }
 
@@ -400,9 +464,13 @@ function runVote(
   crew: readonly CrewMember[],
   frame: SittingFrame,
   motion: VoteMotion,
+  course?: CourseVoteContext,
 ): { votes: VoteRecord[]; forCount: number; againstCount: number; strength: number } {
   const secId = state.seats["security chief"] ?? null;
-  const ctx: OfficerContext = { crew, securityId: secId };
+  const ctx: OfficerContext =
+    course === undefined
+      ? { crew, securityId: secId }
+      : { crew, securityId: secId, course };
   const captainEntry = frame.sitting.find((s) => s.seatKey === "captain");
   const voters = frame.sitting.filter(
     (s) => motion.kind === "relief" || s.seatKey !== "captain",
@@ -1105,6 +1173,648 @@ function runMotionSitting(
   });
 }
 
+/** One candidate on the course chart, as the table prices it. */
+interface CourseCandidate {
+  index: number;
+  character: string;
+  legDays: number;
+  visited: boolean;
+  isPrevious: boolean;
+}
+
+/**
+ * The public snapshots a course sitting reads: the stores
+ * counters, the ship's condition, the crew's state, as the table
+ * is entitled to know them. Course business reads the same
+ * public face as rationing does (the counters as tabled), not
+ * the belief stores: there is no believed-stores model aboard,
+ * and the chart is a public document by the chapter's design.
+ */
+interface CourseSnapshot {
+  days: Record<"food" | "water" | "oxygen" | "fuel" | "parts", number>;
+  /** Net days of supply gained per day under way, at the ship's
+   *  present production: negative where a store drains at sea. */
+  netRateDays: Record<StoreKey, number>;
+  worstCondition: number;
+  worstKind: string;
+  meanMorale: number;
+  hurtShare: number;
+  recentTheft: boolean;
+}
+
+/** What the quartermaster counts: how well a port's character
+ *  answers the stores' needs, needs weighted by shortness. */
+function storesFit(cand: CourseCandidate, snap: CourseSnapshot): number {
+  const cfg = CONFIG.council.course;
+  const supply = CONFIG.stores.port.supply[cand.character] ?? {};
+  let fit = 0;
+  for (const key of ["food", "water", "oxygen", "fuel", "parts"] as const) {
+    const need = Math.max(
+      0,
+      Math.min(1, (cfg.shortLineDays - snap.days[key]) / cfg.shortLineDays),
+    );
+    // Parts are the repair economy: the worse the ship, the more
+    // a parts-filling port is worth, whether or not the locker
+    // has run dry yet.
+    const weight = key === "parts" ? 1 + (1 - snap.worstCondition) : 1;
+    fit += need * weight * (supply[key] ?? 0);
+  }
+  return fit * cfg.storesFitScale;
+}
+
+/** The store whose shortness a port answers best, for the clause. */
+function shortestAnswered(
+  cand: CourseCandidate,
+  snap: CourseSnapshot,
+): string | null {
+  const cfg = CONFIG.council.course;
+  const supply = CONFIG.stores.port.supply[cand.character] ?? {};
+  let best: string | null = null;
+  let bestGain = 0.02;
+  for (const key of ["food", "water", "oxygen", "fuel", "parts"] as const) {
+    const need = Math.max(
+      0,
+      Math.min(1, (cfg.shortLineDays - snap.days[key]) / cfg.shortLineDays),
+    );
+    const gain = need * (supply[key] ?? 0);
+    if (gain > bestGain) {
+      bestGain = gain;
+      best = key;
+    }
+  }
+  return best;
+}
+
+/**
+ * How deep the ship's emergency stands, on [0, 1]: zero on a
+ * sound ship with a full locker. It rises with system damage,
+ * and with a short parts locker on a worn ship — the two shapes
+ * of the same emergency, repairs stopping. The damage factor
+ * saturates at the crisis line: a short locker is an emergency
+ * in proportion to how much ship there is to repair.
+ */
+function courseCrisis(snap: CourseSnapshot): number {
+  const cfg = CONFIG.council.course;
+  const conditionCrisis = Math.max(
+    0,
+    Math.min(
+      1,
+      (cfg.crisisConditionLine - snap.worstCondition) /
+        cfg.crisisConditionLine,
+    ),
+  );
+  const partsCrisis =
+    Math.max(
+      0,
+      Math.min(
+        1,
+        (cfg.crisisPartsLineDays - snap.days.parts) /
+          cfg.crisisPartsLineDays,
+      ),
+    ) *
+    Math.max(
+      0,
+      Math.min(1, (1 - snap.worstCondition) / (1 - cfg.crisisConditionLine)),
+    );
+  return Math.max(conditionCrisis, partsCrisis);
+}
+
+/**
+ * One officer's price for one candidate, from their seat. The
+ * four terms, priced per candidate: the chart's common terms
+ * (the tank's reach, the standing penalty on going back, the
+ * pull of new sky), the portfolio term (the seat's own
+ * arithmetic), the trait term, and trust in the navigator,
+ * priced on the navigator's own recommendation. The First
+ * Officer is priced separately, from the table's centre.
+ */
+function coursePrice(
+  seatKey: string,
+  member: CrewMember,
+  cand: CourseCandidate,
+  snap: CourseSnapshot,
+  table: { motionIndex: number; navPickIndex: number; proposerId: string | null },
+): number {
+  const cfg = CONFIG.council.course;
+  let price = 0;
+  // The chart's common terms. The crisis stands computed here
+  // because it bends two of them: the backtrack penalty yields
+  // as the crisis rises, and time at sea is priced in it.
+  const crisis = courseCrisis(snap);
+  if (cand.legDays > snap.days.fuel) price -= cfg.fuelShortfallPenalty;
+  if (cand.isPrevious) price -= cfg.previousPortPenalty * (1 - crisis);
+  if (!cand.visited) price += cfg.unvisitedLean;
+  if (crisis > 0) price -= crisis * cand.legDays * cfg.crisisDistancePerDay;
+  // The leg's own burn, by projection: where each store stands
+  // on arrival day if the ship sails this leg at her present
+  // production. Every officer prices it; it is the chart's
+  // arithmetic, not a portfolio opinion.
+  let shortfall = 0;
+  for (const key of STORE_KEYS) {
+    const projected = snap.days[key] + cand.legDays * snap.netRateDays[key];
+    shortfall += Math.max(0, cfg.projectionSafeLineDays - projected);
+  }
+  price -= Math.min(cfg.projectionRiskCap, shortfall * cfg.projectionRiskWeight);
+  // The damage report: a hurt ship's chart is priced by how
+  // well each port can answer damage (its parts supply), before
+  // any portfolio speaks.
+  if (crisis > 0) {
+    const partsSupply =
+      CONFIG.stores.port.supply[cand.character]?.parts ?? 0;
+    price += crisis * cfg.crisisWeight * (partsSupply - cfg.crisisSupplyCentre);
+  }
+  // The portfolio term.
+  const damage = 1 - snap.worstCondition;
+  switch (seatKey) {
+    case "quartermaster":
+      price += storesFit(cand, snap);
+      break;
+    case "chief engineer":
+      if (cand.character === "shipyard") price += cfg.shipyardPull * damage;
+      price -= cand.legDays * damage * cfg.distanceRiskPerDay;
+      if (damage < 0.15) price += cand.legDays * 0.002;
+      break;
+    case "chief medical officer":
+      price +=
+        (cfg.leaveValue[cand.character] ?? 0) * (0.25 + (1 - snap.meanMorale));
+      price -= cand.legDays * snap.hurtShare * cfg.distanceRiskPerDay;
+      break;
+    case "science officer":
+      if (!cand.visited) price += 0.1;
+      if (cand.character === "listening post") price += 0.1;
+      if (cand.character === "shrine") price += 0.03;
+      break;
+    case "security chief":
+      price += cfg.securityLean[cand.character] ?? 0;
+      if (cand.character === "free port" && snap.recentTheft) {
+        price += cfg.recentTheftFreePortLean;
+      }
+      break;
+    case "captain":
+      price += storesFit(cand, snap) * 0.8;
+      if (!cand.visited) price += 0.05;
+      price += (cfg.leaveValue[cand.character] ?? 0) * 0.3;
+      if (cand.isPrevious) price -= cfg.previousPortPenalty * 0.5;
+      price -= cand.legDays * cfg.captainDistancePerDay;
+      break;
+    case "navigator":
+      if (!cand.visited) price += 0.08;
+      if (cand.character === "listening post") price += 0.06;
+      price -= cand.legDays * 0.002;
+      break;
+    default:
+      break;
+  }
+  // The trait term.
+  for (const trait of member.traits) {
+    if (trait === "bold") price += cand.legDays * 0.004;
+    else if (trait === "cautious") price -= cand.legDays * 0.004;
+    else if (trait === "curious" && !cand.visited) price += 0.05;
+    else if (
+      trait === "methodical" &&
+      cand.character === "shipyard" &&
+      damage > 0.25
+    ) {
+      price += 0.04;
+    }
+  }
+  // Trust in the proposer and the loyal lean toward the
+  // captain's tabled course are priced in a second pass, once
+  // the recommendation and the motion stand named (see
+  // priceCourseTable): both are the officer's read of the
+  // motion's people, not of the ports.
+  return price;
+}
+
+/** The one clause an officer speaks for their best port. */
+function courseClause(
+  seatKey: string,
+  member: CrewMember,
+  cand: CourseCandidate,
+  snap: CourseSnapshot,
+  portName: string,
+): string {
+  const damage = 1 - snap.worstCondition;
+  switch (seatKey) {
+    case "quartermaster": {
+      const store = shortestAnswered(cand, snap);
+      return store === null
+        ? "the counters are healthy; any port feeds her"
+        : `the ${store} count is shortest, and ${portName} fills it`;
+    }
+    case "chief engineer":
+      if (cand.character === "shipyard" && damage > 0.25) {
+        return `the yards can mend the ${snap.worstKind}`;
+      }
+      return damage > 0.25
+        ? "a hurt ship wants a short leg"
+        : "the ship is sound; distance is cheap";
+    case "chief medical officer":
+      if (snap.hurtShare > 0.25) return "the hurt want a short leg";
+      return snap.meanMorale < 0.55
+        ? `the crew needs leave, and ${portName} grants it`
+        : "the crew is well; any course serves";
+    case "science officer":
+      if (!cand.visited) return "unvisited sky";
+      if (cand.character === "listening post") return "a listening post hears far";
+      return "the chart is known water, and sound";
+    case "security chief":
+      if (cand.character === "free port") return "free ports breed thieves";
+      if (cand.character === "company town") return "an orderly port";
+      return "a quiet port, on a clean record";
+    case "first officer":
+      return "the room's centre";
+    default:
+      return member.traits.includes("bold")
+        ? "a bold course"
+        : "a steady course";
+  }
+}
+
+/**
+ * Price the whole course table: the navigator's recommendation,
+ * the captain's tabled course (their own best price), and every
+ * seated officer's prices, the First Officer's read off the
+ * table's centre once the others stand priced. Pure: no RNG, no
+ * world writes, the same inputs give the same table.
+ */
+function priceCourseTable(
+  state: CouncilState,
+  crew: readonly CrewMember[],
+  snap: CourseSnapshot,
+  candidates: readonly CourseCandidate[],
+  proposer: CrewMember | undefined,
+): {
+  prices: Map<string, number[]>;
+  motionPort: number;
+  navPick: number;
+} {
+  const prices = new Map<string, number[]>();
+  const table = { motionIndex: -1, navPickIndex: -1, proposerId: proposer?.id ?? null };
+  const priceAll = (
+    seatKey: string,
+    member: CrewMember,
+  ): number[] =>
+    candidates.map((cand) => coursePrice(seatKey, member, cand, snap, table));
+
+  // The navigator's recommendation first: trust is priced on it.
+  let navPick = (candidates[0] as CourseCandidate).index;
+  if (proposer !== undefined) {
+    const navPrices = priceAll("navigator", proposer);
+    prices.set(proposer.id, navPrices);
+    let best = Number.NEGATIVE_INFINITY;
+    candidates.forEach((cand, i) => {
+      if ((navPrices[i] as number) > best) {
+        best = navPrices[i] as number;
+        navPick = cand.index;
+      }
+    });
+  }
+  table.navPickIndex = candidates.findIndex((c) => c.index === navPick);
+
+  // The captain tables their own best course as the motion. With
+  // no captain seated, the chair's prices stand in (in practice
+  // the First Officer's, whose seat the succession fills first).
+  const captain = byId(crew, captainId(state));
+  let motionPort = navPick;
+  if (captain !== undefined && alive(captain)) {
+    const captainPrices = priceAll("captain", captain);
+    prices.set(captain.id, captainPrices);
+    let best = Number.NEGATIVE_INFINITY;
+    candidates.forEach((cand, i) => {
+      if ((captainPrices[i] as number) > best) {
+        best = captainPrices[i] as number;
+        motionPort = cand.index;
+      }
+    });
+  }
+  table.motionIndex = candidates.findIndex((c) => c.index === motionPort);
+
+  // The people's terms are priced in a second pass, once the
+  // recommendation and the motion stand named: trust in the
+  // navigator, on the port they recommend, and the loyal lean
+  // toward the captain's tabled course. (The captain and the
+  // navigator do not price trust in themselves.)
+  const peoplePrice = (member: CrewMember, base: number[]): number[] => {
+    if (proposer === undefined || member.id === proposer.id) return base;
+    const trust = Math.max(0, trustOf(member.beliefs, proposer.id));
+    if (trust <= 0 || table.navPickIndex < 0) return base;
+    const out = [...base];
+    out[table.navPickIndex] =
+      (out[table.navPickIndex] as number) +
+      trust * CONFIG.council.course.trustInProposerWeight;
+    // The loyal lean: toward the captain's tabled course.
+    if (member.traits.includes("loyal") && table.motionIndex >= 0) {
+      out[table.motionIndex] = (out[table.motionIndex] as number) + 0.05;
+    }
+    return out;
+  };
+
+  const officerPrices = new Map<string, number[]>();
+  for (const def of SEATS) {
+    if (def.key === "captain" || def.key === "first officer") continue;
+    const holder = byId(crew, state.seats[def.key] ?? null);
+    if (!alive(holder) || holder === undefined) continue;
+    if (prices.has(holder.id)) {
+      // The navigator holds a seat too (the science chair, when
+      // the scientist is gone): their seat prices are the
+      // navigator's prices, already tabled.
+      officerPrices.set(holder.id, prices.get(holder.id) as number[]);
+      continue;
+    }
+    officerPrices.set(holder.id, peoplePrice(holder, priceAll(def.key, holder)));
+  }
+  // The First Officer, the swing seat: the table's centre, plus a
+  // cohesion lean toward the captain's course.
+  const fo = byId(crew, state.seats["first officer"] ?? null);
+  if (alive(fo) && fo !== undefined) {
+    const others = [...officerPrices.values()];
+    const foPrices = candidates.map((cand, i) => {
+      let centre = 0;
+      if (others.length > 0) {
+        for (const pricesRow of others) centre += pricesRow[i] as number;
+        centre /= others.length;
+      }
+      if (i === table.motionIndex) centre += 0.04;
+      return centre;
+    });
+    officerPrices.set(fo.id, peoplePrice(fo, foPrices));
+  }
+  for (const [id, row] of officerPrices) prices.set(id, row);
+  return { prices, motionPort, navPick };
+}
+
+/** Run a course sitting: the council sets the course out of a stay. */
+function runCourseSitting(
+  w: World,
+  state: CouncilState,
+  ship: Ship,
+  crew: readonly CrewMember[],
+  stores: StoresState,
+  galaxy: { sector: Sector; voyage: Voyage },
+  pending: PendingSitting,
+): void {
+  const { sector, voyage } = galaxy;
+  const stayIndex = pending.stayIndex as number;
+  const stay = voyage.stays[stayIndex];
+  if (stay === undefined) return;
+  const from = stay.port;
+  const previous = voyage.previousPortForStay(stayIndex);
+  const candidateIndexes = voyage.courseCandidates(from, previous);
+  const fromPort = sector.portAt(from);
+  const candidates: CourseCandidate[] = candidateIndexes.map((index) => {
+    const port = sector.portAt(index);
+    return {
+      index,
+      character: port.character,
+      legDays:
+        sector.distanceBetween(fromPort, port) /
+        CONFIG.galaxy.cruiseLightDaysPerDay,
+      visited: voyage.hasVisited(index),
+      isPrevious: index === previous,
+    };
+  });
+
+  // The snapshots the table reads: the counters as tabled, the
+  // ship's hurt, the crew's temper, the recent log's thieving.
+  const living = crew.filter((m) => alive(m));
+  let worst = ship.systems[0] as (typeof ship.systems)[number];
+  for (const system of ship.systems) {
+    if (system.condition < worst.condition) worst = system;
+  }
+  const windowStart =
+    w.tick - CONFIG.council.course.recentTheftWindowDays * CONFIG.time.ticksPerDay;
+  const netRateDays = {} as Record<StoreKey, number>;
+  for (const key of STORE_KEYS) {
+    const netMilli =
+      productionMilliPerDay(stores, ship, crew, key, w.tick) -
+      consumptionMilliPerDay(stores, key, true);
+    netRateDays[key] = netMilli / dailyUseMilli(stores, key);
+  }
+  const snap: CourseSnapshot = {
+    days: {
+      food: daysOf(stores, "food"),
+      water: daysOf(stores, "water"),
+      oxygen: daysOf(stores, "oxygen"),
+      fuel: daysOf(stores, "fuel"),
+      parts: daysOf(stores, "parts"),
+    },
+    netRateDays,
+    worstCondition: worst.condition,
+    worstKind: worst.kind,
+    meanMorale:
+      living.length > 0
+        ? living.reduce((sum, m) => sum + m.needs.morale, 0) / living.length
+        : 1,
+    hurtShare:
+      living.length > 0
+        ? living.filter((m) => m.body.health < 0.8).length / living.length
+        : 0,
+    recentTheft: w.events.events.some(
+      (e) => e.type === "theft" && e.tick >= windowStart,
+    ),
+  };
+
+  // The navigator proposes: the crew member who holds the role,
+  // or the science chair when no navigator sails.
+  const proposer =
+    crew.find((m) => m.roleKey === "navigator" && alive(m)) ??
+    byId(crew, state.seats["science officer"] ?? null);
+  const { prices, motionPort } = priceCourseTable(
+    state,
+    crew,
+    snap,
+    candidates,
+    proposer !== undefined && alive(proposer) ? proposer : undefined,
+  );
+  const motion: VoteMotion = {
+    kind: "course",
+    proposerId: proposer !== undefined && alive(proposer) ? proposer.id : null,
+    portIndex: motionPort,
+    fromPortIndex: from,
+  };
+  const frame = frameSitting(state, crew, motion);
+  const chosenName = (): string => sector.portAt(chosen).name;
+  let chosen = motionPort;
+  let carried = true;
+  let votes: VoteRecord[] = [];
+  let forCount = 0;
+  let againstCount = 0;
+  let strength = 0;
+
+  if (frame.sitting.length === 0) {
+    // No council can sit: the course falls to the old itinerary
+    // rule, recorded like any other, so the ship is never left
+    // waiting on an empty table.
+    chosen = voyage.fallbackCourseFor(stayIndex);
+    voyage.recordCourseDecision(stayIndex, chosen);
+    state.courseSittings++;
+    w.emit("course_decided", [], {
+      from: fromPort.name,
+      fromIndex: from,
+      port: chosenName(),
+      portIndex: chosen,
+      character: sector.portAt(chosen).character,
+      distance: r3(
+        sector.distanceBetween(fromPort, sector.portAt(chosen)),
+      ),
+      legDays: r3(
+        sector.distanceBetween(fromPort, sector.portAt(chosen)) /
+          CONFIG.galaxy.cruiseLightDaysPerDay,
+      ),
+      motion: null,
+      carried: false,
+      noCouncil: true,
+      candidates: candidates.map((c) => ({
+        port: sector.portAt(c.index).name,
+        portIndex: c.index,
+        legDays: r3(c.legDays),
+      })),
+      leanings: [],
+      votes: [],
+      forCount: 0,
+      againstCount: 0,
+      proposer: motion.proposerId,
+    });
+    return;
+  }
+
+  emitConvened(w, ship, frame, "course", {
+    accused: null,
+    subject: null,
+    from: fromPort.name,
+    candidates: candidates.map((c) => sector.portAt(c.index).name),
+    motion: sector.portAt(motionPort).name,
+    proposer: motion.proposerId,
+  });
+  state.sittingsHeld++;
+  state.courseSittings++;
+  const courseCtx: CourseVoteContext = {
+    candidates: candidateIndexes,
+    scores: prices,
+  };
+  const result = runVote(state, crew, frame, motion, courseCtx);
+  votes = result.votes;
+  forCount = result.forCount;
+  againstCount = result.againstCount;
+  strength = result.strength;
+  carried = forCount > againstCount;
+  if (!carried) {
+    // The motion falls: the course is the port the whole table's
+    // prices favour in aggregate — every voter's arithmetic,
+    // the abstainers' weak preferences included, so a refusal
+    // cannot hand the ship to a minority of one. The tabled
+    // port is excluded (the council refused it); ties break by
+    // the captain's own prices, then chart order.
+    const captainRow =
+      captainId(state) !== null ? prices.get(captainId(state) as string) : undefined;
+    const tableIds = votes
+      .filter((v) => v.member !== captainId(state))
+      .map((v) => v.member);
+    let bestPick: number | null = null;
+    let bestTotal = Number.NEGATIVE_INFINITY;
+    let bestCaptainPrice = Number.NEGATIVE_INFINITY;
+    for (const cand of candidates) {
+      if (cand.index === motionPort) continue;
+      const at = candidateIndexes.indexOf(cand.index);
+      let total = 0;
+      for (const id of tableIds) {
+        total += prices.get(id)?.[at] ?? 0;
+      }
+      const captainPrice =
+        captainRow !== undefined ? (captainRow[at] as number) : 0;
+      if (
+        total > bestTotal ||
+        (total === bestTotal && captainPrice > bestCaptainPrice)
+      ) {
+        bestTotal = total;
+        bestCaptainPrice = captainPrice;
+        bestPick = cand.index;
+      }
+    }
+    if (bestPick !== null) chosen = bestPick;
+  }
+  voyage.recordCourseDecision(stayIndex, chosen);
+
+  // Each voter's stated leaning: their best port, in one clause.
+  const leanings = frame.sitting
+    .filter((s) => s.seatKey !== "captain")
+    .map((s) => {
+      const row = prices.get(s.member.id);
+      let bestAt = candidateIndexes.indexOf(chosen);
+      if (row !== undefined) {
+        bestAt = 0;
+        for (let i = 1; i < row.length; i++) {
+          if ((row[i] as number) > (row[bestAt] as number)) bestAt = i;
+        }
+      }
+      const cand = candidates[bestAt] as CourseCandidate;
+      return {
+        member: s.member.id,
+        seat: s.seatKey,
+        port: sector.portAt(cand.index).name,
+        clause: courseClause(
+          s.seatKey,
+          s.member,
+          cand,
+          snap,
+          sector.portAt(cand.index).name,
+        ),
+      };
+    });
+
+  const chosenPort = sector.portAt(chosen);
+  const proposerId = motion.proposerId ?? null;
+  const captainNow = captainId(state);
+  w.emit(
+    "course_decided",
+    [
+      ...(proposerId !== null ? [proposerId] : []),
+      ...(captainNow !== null ? [captainNow] : []),
+    ],
+    {
+      from: fromPort.name,
+      fromIndex: from,
+      port: chosenPort.name,
+      portIndex: chosen,
+      character: chosenPort.character,
+      distance: r3(sector.distanceBetween(fromPort, chosenPort)),
+      legDays: r3(
+        sector.distanceBetween(fromPort, chosenPort) /
+          CONFIG.galaxy.cruiseLightDaysPerDay,
+      ),
+      motion: sector.portAt(motionPort).name,
+      motionIndex: motionPort,
+      carried,
+      noCouncil: false,
+      candidates: candidates.map((c) => ({
+        port: sector.portAt(c.index).name,
+        portIndex: c.index,
+        legDays: r3(c.legDays),
+      })),
+      leanings,
+      votes,
+      forCount,
+      againstCount,
+      proposer: motion.proposerId,
+    },
+  );
+  w.emit("council_finding", [], {
+    kind: "course",
+    accused: null,
+    victim: null,
+    cause: "course",
+    truthCause: null,
+    truthCulprit: null,
+    convicted: carried,
+    votes,
+    strength: r3(strength),
+    consequence: `course set for ${chosenPort.name}`,
+    chair: frame.chairId,
+    legitimacy: r3(state.legitimacy),
+  });
+}
+
 /** Qualification for a seat, by portfolio: who aboard could hold it. */
 function qualification(
   seatKey: string,
@@ -1445,6 +2155,35 @@ export function stepCouncil(
     }
   }
 
+  // Course: a stay whose leg out has no decided course convenes
+  // the council early in the call, while there is still sea-room
+  // to argue. One sitting per stay; the voyage's fallback rule
+  // covers any stay the table never reaches.
+  const stay = galaxy.voyage.stayAt(w.tick);
+  if (
+    stay !== null &&
+    galaxy.voyage.courseDecisionFor(stay.index) === null &&
+    w.tick >= stay.arriveTick + cfg.course.conveneAfterTicks &&
+    w.tick < stay.departTick - 2 &&
+    !state.pending.some((p) => p.kind === "course")
+  ) {
+    state.pending.push({
+      kind: "course",
+      atTick: w.tick,
+      accusedId: null,
+      accuserId: null,
+      victimId: null,
+      truthCulprit: null,
+      causeKind: "course",
+      store: null,
+      level: null,
+      movers: [],
+      renewal: 0,
+      subjectId: null,
+      stayIndex: stay.index,
+    });
+  }
+
   // Due sittings, in the order they were called. Inquiry boards
   // are set-pieces: a board that would sit too soon after the
   // last one waits for its gap, in the queue.
@@ -1462,6 +2201,8 @@ export function stepCouncil(
     if (pending.kind === "inquiry" || pending.kind === "discipline") {
       state.lastInquiryTick = w.tick;
       runJudicialSitting(w, state, ship, crew, health, pending);
+    } else if (pending.kind === "course") {
+      runCourseSitting(w, state, ship, crew, stores, galaxy, pending);
     } else {
       runMotionSitting(w, state, ship, crew, stores, pending);
     }

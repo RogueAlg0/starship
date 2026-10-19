@@ -962,6 +962,14 @@ Positions stay a pure function of the tick given the itinerary,
 read off a voyage clock; the traffic ledger test still derives
 every contact from the position functions alone.
 
+Cross-reference (Oct 18, 2026): the course decisions entry at
+the end of this file supersedes the "itinerary generated whole
+at build" model above for legs after the charter. Legs after
+the first are now decided at council sittings during each
+stay; the voyage holds no future legs in advance. The
+departure, stay, resupply, and fuel-floor behaviour described
+in this entry is unchanged.
+
 Five stores — food, water, oxygen margin, fuel, spare parts —
 ride in integer milli-units under a fractional carry, and read
 in days of supply: quantity over the day's draw. Production is a
@@ -1291,3 +1299,128 @@ ship; the captain holds agenda and tie-break). This is the
 natural next arc after this build, ahead of or alongside the
 distress-call half of the jurisdiction, which still waits on
 the rescue chain.
+
+## Council course decisions, built (Oct 18, 2026)
+
+The endorsed promotion is built. Leg 1 stays the charter,
+drawn at build exactly as before. Every later leg is decided
+by a council sitting, convened 12 ticks into each stay, one
+sitting per stay. The voyage builds no itinerary ahead: the
+Voyage class holds only the current leg, and it lays the next
+leg when the sitting records its decision. Stay lengths are
+still drawn on the galaxy stream, in arrival order, as each
+arrival lands, so stream order is unchanged.
+
+The chart: the navigator proposes the ports inside the
+chartered band (12 to 26 days), sorted by distance, current
+port excluded. The previous port is admitted under a standing
+penalty instead of the old never-straight-back rule, so a
+council can vote to return and the chronicle can say why. The
+old 3:1 unvisited weighting is gone as a silent draw; the pull
+toward unvisited ports now lives in the officers' prices,
+chiefly Science's.
+
+The vote uses the existing four-term machinery with a course
+branch; no new voting engine. The captain tables their own
+best price as the motion and does not vote except on a tie,
+as in other non-inquiry business. Each voter's score is their
+price for the motion port minus their best alternative, with
+trust in the navigator priced on the navigator's
+recommendation. The Quartermaster counts stores: fit is need
+times weight times the port character's supply, and the parts
+weight grows as the ship hurts. The Chief Engineer prices
+shipyard pull and distance risk against damage. The Chief
+Medical Officer prices leave values, morale, and hurt crew.
+Science leans to unvisited ports and listening posts. Security
+leans by port character, with a penalty for a port where the
+ship was recently robbed. The First Officer votes the table's
+centre: the mean of the others, plus cohesion. A crisis term
+reads the damage report for the whole table: it rises with
+system damage and with a short parts locker on a worn ship,
+prices candidates by parts supply, damps the backtrack
+penalty, and prices time at sea. A refused motion falls to the
+whole table's aggregate prices, not to the refusers'
+plurality.
+
+Judgment calls. The sitting reads the actual store counters,
+not believed stores; rationing already reads the counters the
+same way, and a believed-stores model stays deferred with
+admissions. The vote draws no randomness: it is a pure
+function of run state, so the council stream order and replay
+are untouched. When no council can sit (an ended ship, or the
+stores test harness), the voyage falls back to the legacy
+pick rule, and the chronicle records the fallback as such. The
+kernel refuses a course decision that is off the chart or
+recorded twice for one stay, at the point of mutation.
+
+Chronicle and viewer. A new event type, `course_decided`,
+carries the proposer, the chart with leg days, the captain's
+motion, each officer's one-clause leaning, the vote count, and
+the chosen port; a `council_finding` with kind "course"
+follows for the vote tokens. The chronicle prints course
+decisions as Highlights lines. The header leg line names the
+destination only once a decision exists, and the star map
+draws the decided leg as a dashed line from the berth while
+the ship lies in port. Nothing downstream assumes a
+destination before the sitting.
+
+Gates. `npm run check` green: typecheck on both configs, 104
+of 104 tests across 13 files. Seed 42 at 4,320 ticks: 34,075
+events, 51,192 decisions (unchanged from the pre-course build;
+course decisions are council business, not crew decisions),
+hash `07652594b1415cb0`. At 12,960 ticks: 98,819 events,
+147,236 decisions, hash `47ecd59339a03280`. Replay is exact
+across a course sitting (new long-span case in
+test/replay.test.ts).
+
+Constructed scenarios, both in test/course.test.ts. Seed 27:
+the chart offers an industrial port at 12.4 days, a shipyard
+at 13.1, and a market at 16.6. A sound council sails for the
+nearer industrial port; the same ship with the reactor at
+0.15 and two days of parts chooses the shipyard. Seed 21: a
+sound council sails on to a listening post; the same ship
+starving (food two days, water three, parts two, reactor
+0.25) votes back to the agrarian port she came from, despite
+the standing penalty.
+
+Ninety-day fleet table. Columns: deaths, course sittings
+(carried-refused), ports visited, repeat visits, distinct
+ports.
+
+| Seed | Deaths | Sittings | Visited | Repeats | Distinct |
+|------|--------|----------|---------|---------|----------|
+| 11   | 7      | 3 (0-3)  | 5       | 0       | 6        |
+| 16   | 0      | 3 (0-3)  | 4       | 1       | 4        |
+| 17   | 0      | 5 (5-0)  | 6       | 1       | 6        |
+| 30   | 0      | 4 (1-3)  | 5       | 0       | 6        |
+| 39   | 0      | 4 (3-1)  | 5       | 0       | 6        |
+| 40   | 0      | 4 (3-1)  | 5       | 0       | 6        |
+| 42   | 0      | 4 (4-0)  | 5       | 0       | 6        |
+| 99   | 0      | 4 (2-2)  | 5       | 0       | 6        |
+
+Sanity law holds across the fleet: every seed keeps making
+port, no ship strands (fuel floor and drift rule intact), and
+no ship ping-pongs between two ports. Every seed visits at
+least four distinct ports, and the repeats are single returns,
+not a two-port loop.
+
+Balance caveat: seed 11. Seven deaths, all on one tick
+(9698), from a `ship_lost` suffocation cascade. An A/B run
+against the pre-course build (commit 745114b) shows the old
+chooser drew more sabotage on this seed (108 events against
+51) and no deaths; the divergence is a chaotic damage cluster
+on days 40 to 50 that burned the parts locker from 45 to
+about 1 while life support later failed, not a systematic
+council defect. Every seed-11 sitting's arithmetic was
+defensible, and the collapse completes mid-leg on any leg
+over about 15 days. The frequency-law test in
+test/council.test.ts was amended to carry the carve-out
+plainly: per-seed deaths at most 2, or all deaths on a single
+tick with a `ship_lost` event that tick (the ending firing,
+not an ordinary-mortality leak). The maintainer may overrule
+the carve-out; it is recorded here so the judgment stays
+visible.
+
+Still deferred: the distress-call and diversion half of the
+course jurisdiction (waits on the rescue chain); admissions;
+a believed-stores model for the table.

@@ -1076,6 +1076,88 @@ export const CONFIG = {
         anxious: -0.03,
       } as Record<string, number>,
     },
+    /**
+     * Course decisions: at every port after the charter, the
+     * council sets the course. The navigator lays the chart (the
+     * chartered band, the previous port admitted under a standing
+     * penalty), the captain tables a course as the motion, and the
+     * officers vote it against their own best alternative, each
+     * pricing the candidates from their portfolio. The weights
+     * below are that pricing; the vote itself runs through the
+     * same four-term machinery as every other motion.
+     */
+    course: {
+      /** The sitting convenes this many ticks into the stay. */
+      conveneAfterTicks: 12,
+      /** The standing bias against sailing straight back. */
+      previousPortPenalty: 0.12,
+      /** A small pull toward new sky, felt by every officer. */
+      unvisitedLean: 0.02,
+      /** The tank does not reach: a candidate past the fuel
+       *  counter's range is priced out of the argument. */
+      fuelShortfallPenalty: 0.6,
+      /** The leg's own burn, priced by projection: a candidate
+       *  whose leg lands any store under this many projected
+       *  days at arrival is priced down per day of shortfall.
+       *  This is the term that keeps a council from voting a
+       *  hurt ship onto a leg her air cannot finish. */
+      projectionSafeLineDays: 6,
+      projectionRiskWeight: 0.06,
+      projectionRiskCap: 0.5,
+      /** The damage report, read aloud: when the ship stands
+       *  hurt (the worst system under this condition) or her
+       *  repair position is short (parts under this many days
+       *  on a worn ship), every officer prices a candidate by
+       *  how well its parts supply answers damage, centred on
+       *  this supply fraction. In a crisis the chart is read
+       *  for survival first; the portfolios speak after. */
+      crisisConditionLine: 0.55,
+      crisisPartsLineDays: 10,
+      crisisSupplyCentre: 0.55,
+      crisisWeight: 1.2,
+      /** In a crisis, time at sea is itself the risk: each day
+       *  out is a day repairs cannot be made good. Priced per
+       *  leg day, scaled by the crisis. The standing penalty
+       *  on going back also yields as the crisis rises: the
+       *  preference is for ordinary times. */
+      crisisDistancePerDay: 0.01,
+      /** The captain prices sea-days when tabling a course: a
+       *  longer leg is more exposure, whatever it buys. */
+      captainDistancePerDay: 0.004,
+      /** Trust in the navigator, priced on their recommendation. */
+      trustInProposerWeight: 0.15,
+      /** The quartermaster's short line: a store under this many
+       *  days is a need the next port should answer. */
+      shortLineDays: 20,
+      /** The quartermaster's fit is scaled to vote size by this. */
+      storesFitScale: 0.35,
+      /** The chief engineer's shipyard pull at a fully hurt ship. */
+      shipyardPull: 0.55,
+      /** Per-day distance risk the engineer prices on damage. */
+      distanceRiskPerDay: 0.012,
+      /** The medical officer's leave values, by port character. */
+      leaveValue: {
+        "free port": 0.25,
+        shrine: 0.18,
+        agrarian: 0.1,
+        "company town": 0.08,
+        shipyard: 0.06,
+        industrial: 0.05,
+        refinery: 0.04,
+        "listening post": 0.02,
+      } as Record<string, number>,
+      /** The security chief's standing read of port characters. */
+      securityLean: {
+        "free port": -0.1,
+        "company town": 0.06,
+        "listening post": 0.04,
+        shipyard: 0.02,
+        shrine: 0.02,
+      } as Record<string, number>,
+      /** A theft in the recent log deepens the free-port lean. */
+      recentTheftFreePortLean: -0.06,
+      recentTheftWindowDays: 30,
+    },
   },
 
   weather: {

@@ -17,6 +17,25 @@ describe("replay", () => {
     source.assertFullyConsumed();
   });
 
+  it("replaying across a course sitting reproduces the hash exactly", () => {
+    // Seed 42's charter arrives near tick 3,032 and the council
+    // sets the next course inside the first stay: a span that
+    // covers a runtime-decided destination, reproduced from the
+    // seed and the decision log alone, with no itinerary laid
+    // down in advance for the replay to lean on.
+    const ticks = 3_400;
+    const live = runSimulation({ seed: 42 }, ticks);
+    expect(
+      live.world.events.events.some((e) => e.type === "course_decided"),
+    ).toBe(true);
+    const source = new ReplaySource(live.decisions);
+    const replayed = runSimulation({ seed: 42 }, ticks, source);
+    expect(replayed.world.events.hash()).toBe(live.world.events.hash());
+    expect(replayed.world.events.size).toBe(live.world.events.size);
+    expect(source.consumed).toBe(live.decisions.length);
+    source.assertFullyConsumed();
+  });
+
   it("a tampered decision log raises ReplayDivergenceError", () => {
     const live = runSimulation({ seed: 42 }, 120);
     const tampered: DecisionRecord[] = live.decisions.map((record) => ({

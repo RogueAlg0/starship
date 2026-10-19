@@ -819,9 +819,21 @@ things feel like law.
   stranger's face. Refused: put off at the next port with
   supplies. Admitted: signed on under a probationary eye.
 - **Course and port.** The captain navigates; the council decides
-  two questions: whether to answer a distress call off the
-  planned leg, and whether to put in at an unplanned port. Both
-  are stores-and-risk questions wearing navigation clothes.
+  where the ship sails next. At a sitting in each stay after
+  the charter leg, the navigator proposes the ports inside the
+  chartered band; the previous port stays on the chart under a
+  standing penalty, so a council can vote to go back and the
+  chronicle can say why. Each officer prices the motion from
+  their portfolio: the Quartermaster counts stores against port
+  character, the Engineer prices distance against damage, the
+  doctor reads the crew, Science leans to unvisited ports and
+  listening posts, Security to ports the ship's record is clean
+  with, and the First Officer holds the centre. The captain
+  tables their own best price as the motion and holds the
+  tie-break. Built: the departure decision. Still deferred:
+  whether to answer a distress call off the planned leg, and
+  whether to put in at an unplanned port; both wait on the
+  rescue chain.
 - **Emergency powers.** On the captain's declaration (reactor
   casualty, hull breach, plague signs), the council may grant
   emergency powers by simple majority: unrestricted system

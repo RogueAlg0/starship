@@ -1397,6 +1397,7 @@ const HIGHLIGHT_TYPES: ReadonlySet<string> = new Set([
   "carried_to_medbay",
   "death", // the ledger come due
   "council_convened", // the council sits: a set-piece
+  "course_decided", // the council sets the course out of a port
   "council_testimony",
   "council_finding", // verdicts, apart from the truth
   "council_sentence",
@@ -1885,6 +1886,12 @@ function updateRoute(): void {
     text =
       `In port at ${port.name} · day ${dayOfStay} of ${stayDays} · ` +
       `sails day ${sails.day}, ${sails.time}`;
+    // The next course is named only once the council has set it:
+    // before the sitting, the header assumes nothing.
+    const decided = voyage.courseDecisionFor(stay.index);
+    if (decided !== null) {
+      text += ` · for ${sector.portAt(decided).name}`;
+    }
   } else {
     const leg = voyage.currentLegAt(tick);
     if (leg !== null) {

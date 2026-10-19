@@ -151,7 +151,19 @@ describe("the voyage leg", () => {
       x: destination.x,
       y: destination.y,
     });
-    // Through the whole first stay the ship sits on the destination.
+    expect(voyage.progressAt(-5)).toBe(0);
+    expect(voyage.progressAt(voyage.legTicks + 5)).toBe(1);
+    expect(voyage.inPortAt(voyage.legTicks - 1)).toBe(false);
+    expect(voyage.inPortAt(voyage.legTicks)).toBe(true);
+  });
+
+  it("through the first stay the ship sits on the destination", () => {
+    // The stay is drawn as the arrival lands, so this reads a
+    // run's voyage, not a bare one.
+    const run = createRun({ seed: 42 });
+    run.run(run.galaxy.voyage.legTicks + 2);
+    const voyage = run.galaxy.voyage;
+    const destination = voyage.destinationPort;
     const stay = voyage.stays[0] as (typeof voyage.stays)[number];
     const midStay = Math.floor((stay.arriveTick + stay.departTick) / 2);
     expect(voyage.positionAt(midStay)).toEqual({
@@ -159,49 +171,67 @@ describe("the voyage leg", () => {
       y: destination.y,
     });
     expect(voyage.portIndexAt(midStay)).toBe(voyage.destination);
-    expect(voyage.progressAt(-5)).toBe(0);
-    expect(voyage.progressAt(voyage.legTicks + 5)).toBe(1);
-    expect(voyage.inPortAt(voyage.legTicks - 1)).toBe(false);
-    expect(voyage.inPortAt(voyage.legTicks)).toBe(true);
+    expect(stay.port).toBe(voyage.destination);
+    expect(stay.arriveTick).toBe(voyage.legTicks);
   });
 });
 
-describe("the itinerary", () => {
-  it("the charter is leg one, and legs and stays chain without gaps", () => {
+describe("the route as sailed", () => {
+  it("at build, only the charter is laid down: the future is undecided", () => {
     for (const seed of SAMPLE_SEEDS) {
       const voyage = voyageFor(seed);
+      expect(voyage.legs.length).toBe(1);
+      expect(voyage.stays.length).toBe(0);
       const charter = voyage.legs[0] as (typeof voyage.legs)[number];
       expect(charter.from).toBe(voyage.origin);
       expect(charter.to).toBe(voyage.destination);
       expect(charter.departTick).toBe(0);
       expect(charter.arriveTick).toBe(voyage.legTicks);
-      expect(voyage.stays.length).toBe(voyage.legs.length - 1);
-      for (let i = 1; i < voyage.legs.length; i++) {
-        const prev = voyage.legs[i - 1] as (typeof voyage.legs)[number];
-        const leg = voyage.legs[i] as (typeof voyage.legs)[number];
-        const stay = voyage.stays[i - 1] as (typeof voyage.stays)[number];
-        expect(leg.from).toBe(prev.to);
-        expect(stay.port).toBe(prev.to);
-        expect(stay.arriveTick).toBe(prev.arriveTick);
-        expect(stay.departTick).toBe(leg.departTick);
-        expect(leg.arriveTick).toBeGreaterThan(leg.departTick);
-        const exact =
-          (leg.distanceLightDays / CONFIG.galaxy.cruiseLightDaysPerDay) *
-          CONFIG.time.ticksPerDay;
-        expect(Math.abs(leg.arriveTick - leg.departTick - exact)).toBeLessThanOrEqual(0.5);
-      }
-      // The table covers the horizon the traffic schedules promise.
-      const last = voyage.legs[voyage.legs.length - 1] as (typeof voyage.legs)[number];
-      expect(last.arriveTick).toBeGreaterThanOrEqual(
-        CONFIG.traffic.scheduleHorizonDays * CONFIG.time.ticksPerDay,
-      );
+      expect(voyage.courseDecisionFor(0)).toBeNull();
     }
   });
 
-  it("stays run one to three drawn days, bent by the port's character", () => {
-    const g = CONFIG.galaxy;
-    for (const seed of SAMPLE_SEEDS) {
-      const voyage = voyageFor(seed);
+  it(
+    "legs and stays chain without gaps as the run sails them",
+    () => {
+      for (const seed of [42, 17]) {
+        const run = createRun({ seed });
+        run.run(12_960); // 90 days: several stays, decided in port.
+        const voyage = run.galaxy.voyage;
+        expect(voyage.legs.length).toBeGreaterThan(2);
+        // The table ends either under way (one more leg than
+        // stays) or in port (a stay whose leg is not yet laid).
+        expect(
+          voyage.stays.length === voyage.legs.length ||
+            voyage.stays.length === voyage.legs.length - 1,
+        ).toBe(true);
+        for (let i = 1; i < voyage.legs.length; i++) {
+          const prev = voyage.legs[i - 1] as (typeof voyage.legs)[number];
+          const leg = voyage.legs[i] as (typeof voyage.legs)[number];
+          const stay = voyage.stays[i - 1] as (typeof voyage.stays)[number];
+          expect(leg.from).toBe(prev.to);
+          expect(stay.port).toBe(prev.to);
+          expect(stay.arriveTick).toBe(prev.arriveTick);
+          expect(stay.departTick).toBe(leg.departTick);
+          expect(leg.arriveTick).toBeGreaterThan(leg.departTick);
+          const exact =
+            (leg.distanceLightDays / CONFIG.galaxy.cruiseLightDaysPerDay) *
+            CONFIG.time.ticksPerDay;
+          expect(Math.abs(leg.arriveTick - leg.departTick - exact)).toBeLessThanOrEqual(0.5);
+        }
+      }
+    },
+    60_000,
+  );
+
+  it(
+    "stays run one to three drawn days, bent by the port's character",
+    () => {
+      const g = CONFIG.galaxy;
+      const run = createRun({ seed: 42 });
+      run.run(12_960);
+      const voyage = run.galaxy.voyage;
+      expect(voyage.stays.length).toBeGreaterThan(2);
       for (const stay of voyage.stays) {
         const days = (stay.departTick - stay.arriveTick) / CONFIG.time.ticksPerDay;
         const character = voyage.sector.portAt(stay.port).character;
@@ -210,35 +240,22 @@ describe("the itinerary", () => {
         expect(days - bend).toBeGreaterThanOrEqual(g.minStayDays);
         expect(days - bend).toBeLessThanOrEqual(g.maxStayDays);
       }
-    }
-  });
+    },
+    60_000,
+  );
 
-  it("no leg sails straight back when the band offers an alternative", () => {
-    const g = CONFIG.galaxy;
-    for (const seed of SAMPLE_SEEDS) {
-      const voyage = voyageFor(seed);
-      const sector = voyage.sector;
-      for (let i = 1; i < voyage.legs.length; i++) {
-        const leg = voyage.legs[i] as (typeof voyage.legs)[number];
-        const previous = (voyage.legs[i - 1] as (typeof voyage.legs)[number]).from;
-        if (leg.to === previous) {
-          // Backtracking is lawful only when no other port sits in
-          // the chartered band from here.
-          const alternative = sector.ports.some((port) => {
-            if (port.index === leg.from || port.index === previous) {
-              return false;
-            }
-            const days =
-              sector.distanceBetween(sector.portAt(leg.from), port) /
-              g.cruiseLightDaysPerDay;
-            return days >= g.minLegDays && days <= g.maxLegDays;
-          });
-          expect(alternative, `seed ${seed} leg ${i}`).toBe(false);
-        }
-        expect(leg.to).not.toBe(leg.from);
-      }
-    }
-  });
+  it(
+    "the route is reproducible: a second run lays down the same legs and stays",
+    () => {
+      const first = createRun({ seed: 42 });
+      first.run(12_960);
+      const second = createRun({ seed: 42 });
+      second.run(12_960);
+      expect(second.galaxy.voyage.legs).toEqual(first.galaxy.voyage.legs);
+      expect(second.galaxy.voyage.stays).toEqual(first.galaxy.voyage.stays);
+    },
+    60_000,
+  );
 
   it(
     "arrivals in a run match the itinerary arithmetic, leg for leg",

@@ -470,6 +470,7 @@ class Renderer implements ChronicleRenderer {
           emergency: "a sitting on emergency powers",
           relief: "a sitting on a motion of no confidence",
           appointment: "a sitting to ratify an appointment",
+          course: "a sitting to set the course",
         };
         let text =
           `${ts} — The council convenes ${kindWords[kind] ?? "a sitting"} in the ${room(num(data, "room"))}. ` +
@@ -490,7 +491,64 @@ class Renderer implements ChronicleRenderer {
         if (accused !== "") {
           text += ` The accused: ${person(accused)}.`;
         }
+        if (kind === "course") {
+          const chart = Array.isArray(data.candidates) ? data.candidates : [];
+          if (chart.length > 0) {
+            text +=
+              ` The chart from ${str(data, "from")} offers: ` +
+              chart
+                .map((entry) =>
+                  typeof entry === "string"
+                    ? entry
+                    : str(asRecord(entry), "port"),
+                )
+                .join(", ") +
+              ".";
+          }
+        }
         line(text, true);
+        break;
+      }
+      case "course_decided": {
+        const from = str(data, "from");
+        const port = str(data, "port");
+        if (data.noCouncil === true) {
+          line(
+            `${ts} — No council can sit to set the course from ${from}; ` +
+              `the old charter rule lays it, and the ${this.shipName} sails for ${port}.`,
+            true,
+          );
+          break;
+        }
+        const proposer = str(data, "proposer");
+        const chart = Array.isArray(data.candidates) ? data.candidates : [];
+        const chartText = chart
+          .map((entry) => {
+            const c = asRecord(entry);
+            return `${str(c, "port")} (${oneDecimal(num(c, "legDays"))} days)`;
+          })
+          .join(", ");
+        const leanings = Array.isArray(data.leanings) ? data.leanings : [];
+        const leaningText = leanings
+          .map((entry) => {
+            const l = asRecord(entry);
+            return `${person(str(l, "member"))} backs ${str(l, "port")} — ${str(l, "clause")}`;
+          })
+          .join("; ");
+        const carried = data.carried === true;
+        line(
+          `${ts} — The course from ${from} is set. ` +
+            (proposer !== ""
+              ? `${person(proposer)} lays the chart: ${chartText}. `
+              : `The chart: ${chartText}. `) +
+            `The captain tables ${str(data, "motion")}. ` +
+            (leaningText !== "" ? `${leaningText}. ` : "") +
+            (carried
+              ? `The vote carries the captain's course, ${num(data, "forCount")} to ${num(data, "againstCount")}: `
+              : `The vote refuses the captain's course, ${num(data, "againstCount")} to ${num(data, "forCount")}: `) +
+            `the ${this.shipName} sails for ${port}, ${oneDecimal(num(data, "legDays"))} days out.`,
+          true,
+        );
         break;
       }
       case "council_testimony": {
@@ -562,6 +620,7 @@ class Renderer implements ChronicleRenderer {
             emergency: "the grant of emergency powers",
             relief: "the motion of no confidence",
             appointment: "the First Officer's appointment",
+            course: "the captain's course",
           };
           line(
             `${ts} — The council votes on ${words[kind] ?? kind}: ` +

@@ -10,11 +10,12 @@
 //
 // The stores system also runs the port call: the manifest in the
 // first hours, shore leave in rotations, harbour news once, and
-// the small dishonesties scarcity breeds — rationing imposed by
-// the quartermaster as an emergency act (the Council that should
-// dispose of his proposal is not built yet; see DECISIONS), and
-// theft by a hoarding hand, which the beliefs machinery hears
-// about only through witnesses and tallies, never through truth.
+// the small dishonesties scarcity breeds — theft by a hoarding
+// hand, which the beliefs machinery hears about only through
+// witnesses and tallies, never through truth. Rationing used to
+// be imposed here as the quartermaster's interim emergency act;
+// the Council owns it now (src/world/council.ts), and this system
+// only reads the disposed level in its consumption arithmetic.
 
 import type { World } from "../engine/engine.ts";
 import type { CrewMember } from "../entities/crew.ts";
@@ -97,6 +98,11 @@ export interface StoresState {
   initialMilli: Record<StoreKey, number>;
   crewCount: number;
   rationing: Record<"food" | "water", boolean>;
+  /** The council's disposed level per rationed store, when the
+   *  Council has set one: "reduced" or "strict". Null when the
+   *  store is not rationed. Owned by the council system; the
+   *  stores flows only read the level's consumption factor. */
+  rationLevel: Record<"food" | "water", "reduced" | "strict" | null>;
   /** Food hidden away per member, in milli-units. Not ship state
    *  the crew can see: it exists so the accounting reconciles. */
   caches: Record<string, number>;
@@ -149,6 +155,7 @@ export function createStores(crewCount: number): StoresState {
     initialMilli: {} as Record<StoreKey, number>,
     crewCount,
     rationing: { food: false, water: false },
+    rationLevel: { food: null, water: null },
     caches: {},
     cacheEatenMilli: 0,
     discrepancies: [],
@@ -282,12 +289,20 @@ export function consumptionMilliPerDay(
     case "food":
       return (
         dailyUseMilli(state, key) *
-        (state.rationing.food ? cfg.rationing.consumptionFactor : 1)
+        (state.rationing.food
+          ? state.rationLevel.food === "strict"
+            ? cfg.rationing.strictFactor
+            : cfg.rationing.consumptionFactor
+          : 1)
       );
     case "water":
       return (
         dailyUseMilli(state, key) *
-        (state.rationing.water ? cfg.rationing.consumptionFactor : 1)
+        (state.rationing.water
+          ? state.rationLevel.water === "strict"
+            ? cfg.rationing.strictFactor
+            : cfg.rationing.consumptionFactor
+          : 1)
       );
     case "oxygen":
       return dailyUseMilli(state, key);
@@ -307,7 +322,7 @@ export function consumptionMilliPerDay(
  * and a jury-rigged crawl at the shortfall floor when it is empty.
  * Called from the crew's repair branch, the one repair door.
  */
-export function gateRepairDelta(ship: Ship, delta: number): number {
+export function gateRepairDelta(ship: Ship, delta: number, tick = -1): number {
   const state = ship.stores;
   if (state === null || delta <= 0) return delta;
   const cfg = CONFIG.stores;
@@ -324,7 +339,12 @@ export function gateRepairDelta(ship: Ship, delta: number): number {
     state.totals.parts.chargedMilli -= paid;
     return paid / cfg.repairPartsMilliPerCondition;
   }
-  return delta * cfg.repairPartsShortfallFloor;
+  // Under the council's emergency powers, stores seizure and
+  // unrestricted access raise the jury-rig floor: a ship fighting
+  // for her life strips fittings a calmer ship would spare.
+  const emergency =
+    ship.councilPublic !== null && tick < ship.councilPublic.emergencyUntil;
+  return delta * (emergency ? 0.7 : cfg.repairPartsShortfallFloor);
 }
 
 export interface ManifestEntry {
@@ -372,39 +392,6 @@ export function applyResupply(
 
 function quartermaster(crew: readonly CrewMember[]): CrewMember | undefined {
   return crew.find((m) => m.roleKey === "quartermaster");
-}
-
-/** The rationing trigger for this quartermaster: his traits bend
- *  it, by the one table in config. */
-function rationTriggerDays(qm: CrewMember | undefined): number {
-  const cfg = CONFIG.stores.rationing;
-  if (qm === undefined) return cfg.triggerDays;
-  let shift = 0;
-  for (const trait of qm.traits) shift += cfg.traitTriggerShift[trait] ?? 0;
-  return cfg.triggerDays + shift;
-}
-
-function rationLiftDays(qm: CrewMember | undefined): number {
-  const cfg = CONFIG.stores.rationing;
-  if (qm === undefined) return cfg.liftDays;
-  let shift = 0;
-  for (const trait of qm.traits) shift += cfg.traitTriggerShift[trait] ?? 0;
-  return cfg.liftDays + shift;
-}
-
-function liftRationing(
-  w: World,
-  state: StoresState,
-  key: "food" | "water",
-  reason: "recovered" | "arrival",
-): void {
-  if (!state.rationing[key]) return;
-  state.rationing[key] = false;
-  w.emit("rationing_lifted", [], {
-    store: key,
-    days: r3(daysOf(state, key)),
-    reason,
-  });
 }
 
 /** Harbour news for a call: a ship berthed here, a ship lately
@@ -492,9 +479,9 @@ function beginCall(
     assistSystemId: null,
     assistAnnounced: false,
   };
-  // Arrival lifts rationing: the emergency ends at the dock.
-  liftRationing(w, state, "food", "arrival");
-  liftRationing(w, state, "water", "arrival");
+  // Arrival does not lift rationing by itself any more: the
+  // Council disposes of rations now, and its daily lift vote reads
+  // the resupplied counters like any other recovery.
 }
 
 function closeCall(state: StoresState, crew: readonly CrewMember[]): void {
@@ -797,22 +784,13 @@ export function stepStores(
     }
   }
 
-  // ---- rationing: the quartermaster's emergency act (interim;
-  // the Council chapter's dispose step is future work).
+  // ---- rationing belongs to the Council now (see council.ts):
+  // the quartermaster proposes, the council disposes, and the
+  // captain's solo imposition is an emergency act that expires
+  // unratified. The interim imposition that stood here until the
+  // Council landed is retired. What remains in this system is
+  // rationing's price, paid in morale while it stands.
   const qm = quartermaster(crew);
-  for (const key of ["food", "water"] as const) {
-    const days = daysOf(state, key);
-    if (!state.rationing[key] && days < rationTriggerDays(qm)) {
-      state.rationing[key] = true;
-      w.emit("rationing_imposed", qm === undefined ? [] : [qm.id], {
-        by: qm === undefined ? null : qm.id,
-        store: key,
-        days: r3(days),
-      });
-    } else if (state.rationing[key] && days > rationLiftDays(qm)) {
-      liftRationing(w, state, key, "recovered");
-    }
-  }
   if (state.rationing.food || state.rationing.water) {
     for (const member of crew) {
       member.needs.morale = clamp01(
@@ -845,8 +823,11 @@ export function stepStores(
     });
   }
 
-  // ---- zero stores: needs-level consequences only. Nobody dies
-  // of an empty store in this build (see DECISIONS).
+  // ---- zero stores: needs-level pressure here (morale, a
+  // straining life support). The bodily consequences of an empty
+  // store (starvation, dehydration, suffocation) are booked to
+  // the cause ledger by the health system, under the Consequences
+  // chapter's model and nothing else.
   if (state.byKey.food.qtyMilli <= 0) {
     for (const member of crew) {
       member.needs.morale = clamp01(

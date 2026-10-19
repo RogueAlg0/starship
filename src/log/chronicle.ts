@@ -323,12 +323,409 @@ class Renderer implements ChronicleRenderer {
       }
       case "rationing_imposed": {
         const by = str(data, "by");
+        const via = str(data, "via");
+        const level = str(data, "level");
+        const levelWord = level !== "" ? ` (${level})` : "";
+        if (via === "council") {
+          line(
+            `${ts} — The council adopts the quartermaster's proposal: ${str(data, "store")} ` +
+              `rationing${levelWord}, at ${oneDecimal(num(data, "days"))} days.`,
+            true,
+          );
+        } else if (via === "captain_emergency") {
+          line(
+            `${ts} — ${person(by)} imposes emergency rationing alone: ${str(data, "store")}${levelWord} ` +
+              `stands at ${oneDecimal(num(data, "days"))} days. The council must ratify it within a day.`,
+            true,
+          );
+        } else {
+          line(
+            by !== ""
+              ? `${ts} — ${person(by)} imposes rationing: ${str(data, "store")} stands at ` +
+                  `${oneDecimal(num(data, "days"))} days.`
+              : `${ts} — Rationing is imposed: ${str(data, "store")} stands at ` +
+                  `${oneDecimal(num(data, "days"))} days.`,
+            true,
+          );
+        }
+        break;
+      }
+      case "rationing_ratified": {
         line(
-          by !== ""
-            ? `${ts} — ${person(by)} imposes rationing: ${str(data, "store")} stands at ` +
-                `${oneDecimal(num(data, "days"))} days.`
-            : `${ts} — Rationing is imposed: ${str(data, "store")} stands at ` +
-                `${oneDecimal(num(data, "days"))} days.`,
+          `${ts} — The council ratifies the emergency rationing of ${str(data, "store")}.`,
+          true,
+        );
+        break;
+      }
+      case "injury": {
+        const causeWords: Record<string, string> = {
+          accident: "an accident at work",
+          violence: "an attack",
+        };
+        const cause = str(data, "cause");
+        const who = person(str(data, "person"));
+        line(
+          `${ts} — ${who} is injured: a ${str(data, "part")} wound, ` +
+            `${causeWords[cause] ?? cause} in the ${room(num(data, "room"))}.`,
+          true,
+        );
+        break;
+      }
+      case "infection": {
+        line(
+          `${ts} — The wound in ${person(str(data, "person"))}'s ${str(data, "part")} has turned infected.`,
+          true,
+        );
+        break;
+      }
+      case "sickness": {
+        line(
+          `${ts} — ${person(str(data, "person"))} is sick, and worsening.`,
+          true,
+        );
+        break;
+      }
+      case "treatment_started": {
+        line(
+          data.lay === true
+            ? `${ts} — ${person(str(data, "medic"))}, no doctor, tends ${person(str(data, "person"))}'s wounds in the ${room(num(data, "room"))}.`
+            : `${ts} — ${person(str(data, "medic"))} tends ${person(str(data, "person"))}'s wounds in the ${room(num(data, "room"))}.`,
+          false,
+        );
+        break;
+      }
+      case "carried_to_medbay": {
+        line(
+          `${ts} — ${person(str(data, "carrier"))} carries ${person(str(data, "person"))} to the Medbay.`,
+          true,
+        );
+        break;
+      }
+      case "lasting_mark": {
+        line(
+          `${ts} — The wound leaves ${person(str(data, "person"))} with a ${str(data, "mark")}.`,
+          true,
+        );
+        break;
+      }
+      case "attack": {
+        line(
+          `${ts} — ${person(str(data, "attacker"))} attacks ${person(str(data, "victim"))} in the ${room(num(data, "room"))}.`,
+          true,
+        );
+        break;
+      }
+      case "death": {
+        const who = person(str(data, "person"));
+        line(
+          `${ts} — ${who} has died in the ${room(num(data, "room"))}.`,
+          true,
+        );
+        if (this.knowsTruth) {
+          const ledger = Array.isArray(data.ledger) ? data.ledger : [];
+          const parts = ledger.map((entry) => {
+            const e = asRecord(entry);
+            return `${str(e, "cause")} ${oneDecimal(num(e, "amount"))}`;
+          });
+          if (parts.length > 0) {
+            line(
+              `${ts} — (The log's ledger records the truth of it: ${parts.join(", ")}.)`,
+              true,
+            );
+          }
+          const attacker = str(data, "attacker");
+          if (attacker !== "") {
+            line(
+              `${ts} — (The log records what the crew must prove: the hand was ${person(attacker)}'s.)`,
+              true,
+            );
+          }
+        }
+        break;
+      }
+      case "council_convened": {
+        const seatTitles: Record<string, string> = {
+          captain: "Captain",
+          "first officer": "First Officer",
+          "chief engineer": "Chief Engineer",
+          "chief medical officer": "Chief Medical Officer",
+          "security chief": "Security Chief",
+          "science officer": "Science Officer",
+          quartermaster: "Quartermaster",
+        };
+        const kind = str(data, "kind");
+        const seats = Array.isArray(data.seats) ? data.seats : [];
+        const sat = seats
+          .map((entry) => {
+            const s = asRecord(entry);
+            return `${person(str(s, "member"))} (${seatTitles[str(s, "seat")] ?? str(s, "seat")})`;
+          })
+          .join(", ");
+        const kindWords: Record<string, string> = {
+          inquiry: "a board of inquiry",
+          discipline: "a discipline hearing",
+          rationing: "a sitting on rationing",
+          lift: "a sitting on lifting rationing",
+          ratification: "a sitting to ratify emergency rationing",
+          emergency: "a sitting on emergency powers",
+          relief: "a sitting on a motion of no confidence",
+          appointment: "a sitting to ratify an appointment",
+        };
+        let text =
+          `${ts} — The council convenes ${kindWords[kind] ?? "a sitting"} in the ${room(num(data, "room"))}. ` +
+          `Sitting: ${sat}.`;
+        const recused = Array.isArray(data.recused) ? data.recused : [];
+        if (recused.length > 0) {
+          text +=
+            " Recused: " +
+            recused
+              .map((entry) => {
+                const r = asRecord(entry);
+                return `${person(str(r, "member"))} (${str(r, "reason")})`;
+              })
+              .join(", ") +
+            ".";
+        }
+        const accused = str(data, "accused");
+        if (accused !== "") {
+          text += ` The accused: ${person(accused)}.`;
+        }
+        line(text, true);
+        break;
+      }
+      case "council_testimony": {
+        const witness = person(str(data, "witness"));
+        const about = person(str(data, "about"));
+        line(
+          `${ts} — Testimony: ${witness} names ${about}.` +
+            (str(data, "kind") === "scapegoat" && this.knowsTruth
+              ? ` (The log records: ${witness} is the culprit, naming a scapegoat.)`
+              : ""),
+          true,
+        );
+        break;
+      }
+      case "council_finding": {
+        const kind = str(data, "kind");
+        const votes = Array.isArray(data.votes) ? data.votes : [];
+        const voteWords = (choice: string): string =>
+          votes
+            .filter((entry) => str(asRecord(entry), "choice") === choice)
+            .map((entry) => person(str(asRecord(entry), "member")))
+            .join(", ");
+        const forList = voteWords("for");
+        const againstList = voteWords("against");
+        const abstainList = voteWords("abstain");
+        let voteText = "";
+        if (votes.length > 0) {
+          voteText =
+            ` Votes — for: ${forList || "none"}; against: ${againstList || "none"}` +
+            (abstainList !== "" ? `; abstaining: ${abstainList}` : "") +
+            ".";
+        }
+        if (kind === "inquiry" || kind === "discipline") {
+          const accused = str(data, "accused");
+          let text: string;
+          if (accused === "") {
+            text =
+              `${ts} — The board finds a cause — ${str(data, "cause")} — and no culprit. ` +
+              `The evidence pointed at no one the board could name.`;
+          } else if (data.convicted === true) {
+            text =
+              `${ts} — The board finds: cause, ${str(data, "cause")}; ${person(accused)} is found culpable. ` +
+              `Consequence: ${str(data, "consequence")}.`;
+          } else {
+            text =
+              `${ts} — The board finds: cause, ${str(data, "cause")}; ${person(accused)} is acquitted.`;
+          }
+          line(text + voteText, true);
+          if (this.knowsTruth) {
+            const truthCause = str(data, "truthCause");
+            const truthCulprit = str(data, "truthCulprit");
+            if (truthCause !== "" || truthCulprit !== "") {
+              line(
+                `${ts} — (The log records the truth apart from the verdict: ` +
+                  `cause ${truthCause || "as found"}` +
+                  (truthCulprit !== ""
+                    ? `; the hand was ${person(truthCulprit)}'s`
+                    : "; no hand but circumstance") +
+                  `.)`,
+                true,
+              );
+            }
+          }
+        } else {
+          const words: Record<string, string> = {
+            rationing: "the rationing proposal",
+            lift: "the motion to lift rationing",
+            ratification: "the ratification of emergency rationing",
+            emergency: "the grant of emergency powers",
+            relief: "the motion of no confidence",
+            appointment: "the First Officer's appointment",
+          };
+          line(
+            `${ts} — The council votes on ${words[kind] ?? kind}: ` +
+              `${data.convicted === true ? "carried" : "refused"}.${voteText}`,
+            true,
+          );
+        }
+        break;
+      }
+      case "council_sentence": {
+        const sentenceWords: Record<string, string> = {
+          brig: "confined to the brig",
+          quarters: "confined to quarters",
+          restriction: "restricted from the ship's systems",
+          mess_ban: "denied mess privileges",
+          extra_duties: "given extra duties",
+        };
+        const kind = str(data, "sentence");
+        line(
+          `${ts} — Sentence: ${person(str(data, "member"))} is ${sentenceWords[kind] ?? kind}, ` +
+            `until ${stamp(num(data, "untilTick"))}.`,
+          true,
+        );
+        break;
+      }
+      case "council_seat_vacated": {
+        const seatTitles: Record<string, string> = {
+          captain: "Captain's",
+          "first officer": "First Officer's",
+          "chief engineer": "Chief Engineer's",
+          "chief medical officer": "Chief Medical Officer's",
+          "security chief": "Security Chief's",
+          "science officer": "Science Officer's",
+          quartermaster: "Quartermaster's",
+        };
+        line(
+          `${ts} — The ${seatTitles[str(data, "seat")] ?? str(data, "seat")} seat stands empty: ` +
+            `${person(str(data, "member"))} (${str(data, "reason")}).`,
+          true,
+        );
+        break;
+      }
+      case "council_appointment": {
+        const seatTitles: Record<string, string> = {
+          "first officer": "First Officer",
+          "chief engineer": "Chief Engineer",
+          "chief medical officer": "Chief Medical Officer",
+          "security chief": "Security Chief",
+          "science officer": "Science Officer",
+          quartermaster: "Quartermaster",
+        };
+        line(
+          `${ts} — ${person(str(data, "by"))} appoints ${person(str(data, "member"))} ` +
+            `as ${seatTitles[str(data, "seat")] ?? str(data, "seat")}.`,
+          true,
+        );
+        break;
+      }
+      case "council_succession": {
+        line(
+          `${ts} — Succession: ${person(str(data, "member"))} takes the Captain's seat.`,
+          true,
+        );
+        break;
+      }
+      case "appointment_ratified": {
+        line(
+          `${ts} — The council ratifies ${person(str(data, "member"))} as First Officer.`,
+          true,
+        );
+        break;
+      }
+      case "appointment_refused": {
+        line(
+          `${ts} — The council refuses to ratify ${person(str(data, "member"))} as First Officer. The seat stands empty again.`,
+          true,
+        );
+        break;
+      }
+      case "captain_forgiveness": {
+        line(
+          `${ts} — The captain forgives ${person(str(data, "member"))}: the confinement is lifted, the finding stands.`,
+          true,
+        );
+        break;
+      }
+      case "emergency_declared": {
+        line(
+          `${ts} — ${person(str(data, "by"))} declares an emergency and asks the council for emergency powers.`,
+          true,
+        );
+        break;
+      }
+      case "emergency_granted": {
+        line(
+          `${ts} — Emergency powers are granted, until ${stamp(num(data, "untilTick"))}` +
+            (num(data, "renewal") > 0
+              ? ` (renewal ${num(data, "renewal")}).`
+              : "."),
+          true,
+        );
+        break;
+      }
+      case "emergency_refused": {
+        line(`${ts} — The council refuses emergency powers.`, true);
+        break;
+      }
+      case "emergency_expired": {
+        line(`${ts} — The emergency powers expire.`, true);
+        break;
+      }
+      case "relief_motion": {
+        const movers = Array.isArray(data.movers)
+          ? data.movers.map((id) => person(String(id)))
+          : [];
+        line(
+          `${ts} — A motion of no confidence in the captain is tabled by ${movers.join(", ")}. The vote is recorded, not secret.`,
+          true,
+        );
+        break;
+      }
+      case "captain_relieved": {
+        line(
+          `${ts} — The motion carries. ${person(str(data, "member"))} is relieved of command; ` +
+            `${person(str(data, "newCaptain"))} takes the ship.`,
+          true,
+        );
+        break;
+      }
+      case "relief_failed": {
+        const movers = Array.isArray(data.movers)
+          ? data.movers.map((id) => person(String(id)))
+          : [];
+        line(
+          `${ts} — The motion of no confidence fails. The movers are marked: ${movers.join(", ")}.`,
+          true,
+        );
+        break;
+      }
+      case "put_off": {
+        line(
+          `${ts} — ${person(str(data, "member"))} is put off at ${str(data, "port")}, under the board's sentence.`,
+          true,
+        );
+        break;
+      }
+      case "ship_lost": {
+        const survivors = Array.isArray(data.survivors)
+          ? data.survivors.map((id) => person(String(id)))
+          : [];
+        const lost = Array.isArray(data.lost)
+          ? data.lost.map((id) => person(String(id)))
+          : [];
+        line(
+          `${ts} — The ${this.shipName} is lost: her ${str(data, "cause")} took her past saving. ` +
+            `Reached the pods: ${survivors.join(", ") || "no one"}. Lost with her: ${lost.join(", ") || "no one"}.`,
+          true,
+        );
+        break;
+      }
+      case "crew_collapse": {
+        line(
+          `${ts} — Too few able crew remain to work the ${this.shipName}. She drifts, ` +
+            `and the log grows quieter, and then stops.`,
           true,
         );
         break;

@@ -207,6 +207,69 @@ function pruneGames(): void {
   if (changed) rebuildGameSeats();
 }
 
+/** A council sitting in progress, from its council_convened event. */
+interface ActiveSitting {
+  room: number;
+  /** Officer ids in seat order (the convened record's own order). */
+  seats: Array<{ member: string; seat: string }>;
+  accused: string | null;
+  untilTick: number;
+}
+
+/**
+ * A sitting is an instant in the engine and a set-piece on the
+ * deck: the officers hold the mess for about three hours of ship
+ * time while the chronicle prints the sitting in full.
+ */
+const SITTING_TICKS = (CONFIG.time.ticksPerDay / 24) * 3;
+const activeSittings: ActiveSitting[] = [];
+/** Officer id to their chair at the sitting's table. */
+const councilSeatByMember = new Map<string, { room: number; seat: number }>();
+/** Member id to their standing slot at the open end (0 accused, 1 security). */
+const councilStandByMember = new Map<string, { room: number; slot: number }>();
+
+function rebuildCouncilSeats(): void {
+  councilSeatByMember.clear();
+  councilStandByMember.clear();
+  for (const sitting of activeSittings) {
+    sitting.seats.forEach((entry, seat) => {
+      // The security chief does not sit when there is an accused
+      // to stand beside: they take the open end with them.
+      if (
+        sitting.accused !== null &&
+        entry.seat === "security chief" &&
+        entry.member !== sitting.accused
+      ) {
+        councilStandByMember.set(entry.member, {
+          room: sitting.room,
+          slot: 1,
+        });
+        return;
+      }
+      councilSeatByMember.set(entry.member, { room: sitting.room, seat });
+    });
+    if (sitting.accused !== null) {
+      councilStandByMember.set(sitting.accused, {
+        room: sitting.room,
+        slot: 0,
+      });
+    }
+  }
+}
+
+/** Retire finished sittings; called on the frame clock. */
+function pruneSittings(): void {
+  if (activeSittings.length === 0) return;
+  let changed = false;
+  for (let i = activeSittings.length - 1; i >= 0; i--) {
+    if (run.tick >= (activeSittings[i] as ActiveSitting).untilTick) {
+      activeSittings.splice(i, 1);
+      changed = true;
+    }
+  }
+  if (changed) rebuildCouncilSeats();
+}
+
 /**
  * Members carrying a prop in transit, derived from move events:
  * "tool" toward a room holding a damaged or failed system the
@@ -433,6 +496,61 @@ function feedAlert(event: SimEvent): void {
             `${personName(actor)}'s trust in ` +
             `${personName(eventStr(event, "with"))} is broken.`,
           focus: { personId: actor },
+        },
+        now,
+      );
+      break;
+    }
+    case "death": {
+      if (actor === undefined) break;
+      alertStack.post(
+        {
+          tier: "critical",
+          category: "death",
+          text: `${personName(actor)} has died.`,
+          focus: { personId: actor },
+        },
+        now,
+      );
+      break;
+    }
+    case "ship_lost":
+    case "crew_collapse": {
+      alertStack.post(
+        {
+          tier: "critical",
+          category: "ending",
+          text:
+            event.type === "ship_lost"
+              ? `The ${run.ship.name} is lost.`
+              : `Too few able crew remain: the ${run.ship.name} drifts.`,
+          focus: {},
+        },
+        now,
+      );
+      break;
+    }
+    case "captain_relieved": {
+      const member = eventStr(event, "member");
+      alertStack.post(
+        {
+          tier: "major",
+          category: "relief",
+          text: `${personName(member)} has been relieved of command.`,
+          focus: { personId: member },
+        },
+        now,
+      );
+      break;
+    }
+    case "injury": {
+      const person = eventStr(event, "person");
+      alertStack.post(
+        {
+          tier: "major",
+          category: "injury",
+          text: `${personName(person)} is injured: a ${eventStr(event, "part")} wound.`,
+          focus: { personId: person },
         },
         now,
       );
@@ -824,6 +942,45 @@ function buildDossier(member: CrewMember): void {
     needs.appendChild(cell);
   }
   personDossierEl.appendChild(needs);
+
+  // The body, as the consequences chapter keeps it: one health
+  // figure, the open wounds by part, the sickness, and the marks
+  // that stay. The dead keep their record; the roster says why
+  // they are gone.
+  if (member.dead) {
+    personDossierEl.appendChild(
+      dossierRow("Body", "Deceased. The ledger is closed."),
+    );
+  } else if (member.leftShip) {
+    personDossierEl.appendChild(
+      dossierRow("Body", "Put off the ship under the board's sentence."),
+    );
+  } else if (member.body !== undefined) {
+    const body = member.body;
+    const parts = [
+      ["head", "Head"],
+      ["torso", "Torso"],
+      ["arms", "Arms"],
+      ["legs", "Legs"],
+    ] as const;
+    const woundLines = parts
+      .filter(([key]) => body.wounds[key].severity > 0)
+      .map(([key, label]) => {
+        const wound = body.wounds[key];
+        return (
+          `${label} ${pct(wound.severity)}` +
+          (wound.infected ? ", infected" : "")
+        );
+      });
+    let bodyText = `Health ${pct(body.health)}`;
+    if (woundLines.length > 0) bodyText += `. Wounds: ${woundLines.join("; ")}`;
+    if (body.sick >= 0.15) bodyText += `. Sick ${pct(body.sick)}`;
+    if (body.marks.length > 0) bodyText += `. Marks: ${body.marks.join(", ")}`;
+    if (woundLines.length === 0 && body.sick < 0.15 && body.marks.length === 0) {
+      bodyText += ". Unmarked.";
+    }
+    personDossierEl.appendChild(dossierRow("Body", bodyText));
+  }
 
   // Closest relationships first: bond, with trust beside it.
   const others = run.crew
@@ -1232,6 +1389,34 @@ const HIGHLIGHT_TYPES: ReadonlySet<string> = new Set([
   "stores_critical",
   "stores_discrepancy", // the tally that does not tally
   "dead_in_space", // an empty tank, under way
+  "injury", // consequences: a body hurt at its work
+  "infection",
+  "sickness",
+  "attack", // a grudge made physical
+  "lasting_mark", // the wound that stays
+  "carried_to_medbay",
+  "death", // the ledger come due
+  "council_convened", // the council sits: a set-piece
+  "council_testimony",
+  "council_finding", // verdicts, apart from the truth
+  "council_sentence",
+  "council_seat_vacated",
+  "council_appointment",
+  "council_succession",
+  "appointment_ratified",
+  "appointment_refused",
+  "captain_forgiveness",
+  "emergency_declared",
+  "emergency_granted",
+  "emergency_refused",
+  "emergency_expired",
+  "rationing_ratified",
+  "relief_motion", // the terminal motion, tabled
+  "captain_relieved",
+  "relief_failed",
+  "put_off", // a sentence carried out at the dock
+  "ship_lost", // an ending
+  "crew_collapse", // the other ending
 ]);
 
 function linePasses(entry: LogLine): boolean {
@@ -1384,6 +1569,63 @@ function drainEvents(): void {
         rebuildGameSeats();
       }
     }
+    // A council sitting stages itself in the mess: the officers
+    // cross the ship and take their seats, the accused stands at
+    // the open end with Security beside them.
+    if (event.type === "council_convened") {
+      const seatsRaw = event.data.seats;
+      if (Array.isArray(seatsRaw)) {
+        const seats = seatsRaw
+          .filter(
+            (s): s is { member: string; seat: string } =>
+              typeof s === "object" &&
+              s !== null &&
+              typeof (s as { member?: unknown }).member === "string" &&
+              typeof (s as { seat?: unknown }).seat === "string",
+          )
+          .map((s) => ({ member: s.member, seat: s.seat }));
+        const accusedRaw = event.data.accused;
+        activeSittings.push({
+          room: eventNum(event, "room"),
+          seats,
+          accused: typeof accusedRaw === "string" ? accusedRaw : null,
+          untilTick: event.tick + SITTING_TICKS,
+        });
+        rebuildCouncilSeats();
+      }
+    }
+    // The vote: tokens rise over the voters' heads in seat order,
+    // read off the finding's own recorded votes.
+    if (event.type === "council_finding" && deck !== null) {
+      const votesRaw = event.data.votes;
+      if (Array.isArray(votesRaw) && votesRaw.length > 0) {
+        const sitting = activeSittings[activeSittings.length - 1];
+        const order = new Map<string, number>(
+          (sitting?.seats ?? []).map((s, i) => [s.member, i]),
+        );
+        const votes = votesRaw
+          .filter(
+            (v): v is { member: string; choice: string } =>
+              typeof v === "object" &&
+              v !== null &&
+              typeof (v as { member?: unknown }).member === "string",
+          )
+          .slice()
+          .sort(
+            (a, b) =>
+              (order.get(a.member) ?? 99) - (order.get(b.member) ?? 99),
+          );
+        const runRef = run;
+        const deckRef = deck;
+        votes.forEach((vote, i) => {
+          window.setTimeout(() => {
+            if (run === runRef && deck === deckRef) {
+              deckRef.stageVote(vote.member, String(vote.choice));
+            }
+          }, 500 + i * 450);
+        });
+      }
+    }
     if (event.type === "move") {
       const actor = event.actors[0];
       if (actor !== undefined) updateCarry(actor, event);
@@ -1448,6 +1690,9 @@ function startVoyage(seed: number, opts?: { daily?: boolean }): void {
   workSystemByMember.clear();
   activeGames.length = 0;
   gameSeatByMember.clear();
+  activeSittings.length = 0;
+  councilSeatByMember.clear();
+  councilStandByMember.clear();
   carryByMember.clear();
   alertStack.reset();
   chronicleEl.replaceChildren();
@@ -1680,6 +1925,12 @@ interface StoreCell {
 }
 
 const storeCells = new Map<StoreKey, StoreCell>();
+/** The sixth, unnumbered store: the council's legitimacy. */
+const legitimacyCell: {
+  fill: HTMLDivElement | null;
+  value: HTMLSpanElement | null;
+  sig: string;
+} = { fill: null, value: null, sig: "" };
 {
   const strip = must<HTMLElement>("stores-strip");
   for (const key of STORE_KEYS) {
@@ -1698,6 +1949,25 @@ const storeCells = new Map<StoreKey, StoreCell>();
     strip.appendChild(cell);
     storeCells.set(key, { fill, value, sig: "" });
   }
+  // Legitimacy gets a cell of the same shape at the strip's end:
+  // no days, no trend, just how far the crew believes its own
+  // council. It is the chapter's light surface; the chronicle
+  // carries the detail.
+  const cell = document.createElement("div");
+  cell.className = "store-cell";
+  const label = document.createElement("span");
+  label.className = "slabel";
+  label.textContent = "Council";
+  const bar = document.createElement("div");
+  bar.className = "sbar";
+  const fill = document.createElement("div");
+  bar.appendChild(fill);
+  const value = document.createElement("span");
+  value.className = "sval";
+  cell.append(label, bar, value);
+  strip.appendChild(cell);
+  legitimacyCell.fill = fill;
+  legitimacyCell.value = value;
 }
 
 /**
@@ -1729,6 +1999,19 @@ function updateStoresStrip(): void {
     cell.fill.className = band;
     cell.value.textContent = `${whole}d ${arrow}`;
   }
+  const legitimacy = Math.round(run.council.legitimacy * 100);
+  const legSig = `${legitimacy}`;
+  if (
+    legitimacyCell.sig !== legSig &&
+    legitimacyCell.fill !== null &&
+    legitimacyCell.value !== null
+  ) {
+    legitimacyCell.sig = legSig;
+    legitimacyCell.fill.style.width = `${legitimacy}%`;
+    legitimacyCell.fill.className =
+      legitimacy < 30 ? "crit" : legitimacy < 50 ? "warn" : "";
+    legitimacyCell.value.textContent = `${legitimacy}%`;
+  }
 }
 
 function updateSlowUi(): void {
@@ -1755,9 +2038,13 @@ function updateSlowUi(): void {
   for (const member of run.crew) {
     const ui = crewUi.get(member.id);
     if (ui === undefined) continue;
-    const roleText = member.ashore
-      ? `${member.title} · Ashore`
-      : member.title;
+    const roleText = member.dead
+      ? `${member.title} · Deceased`
+      : member.leftShip
+        ? `${member.title} · Put off the ship`
+        : member.ashore
+          ? `${member.title} · Ashore`
+          : member.title;
     if (ui.roleEl.textContent !== roleText) {
       ui.roleEl.textContent = roleText;
     }
@@ -1843,6 +2130,7 @@ function frame(nowMs: number): void {
     }
   } else if (deck !== null && deckDue) {
     pruneGames();
+    pruneSittings();
     const deckDtMs = lastDeckMs === 0 ? dtMs : nowMs - lastDeckMs;
     lastDeckMs = nowMs;
     const tickMs = playing
@@ -1850,8 +2138,25 @@ function frame(nowMs: number): void {
       : Number.POSITIVE_INFINITY;
     // Crew ashore at a port call are not on the deck at all: their
     // dots, their windows, and their minimap marks stay at the port.
-    const aboard = run.crew.filter((m) => !m.ashore);
-    deck.frame(aboard, {
+    // The dead are not on the deck either, and neither is anyone
+    // the council has put off the ship: the roster keeps their
+    // names and their markers, the deck keeps only the living.
+    const aboard = run.crew.filter((m) => !m.ashore && !m.dead && !m.leftShip);
+    // While a sitting lasts, its people are presented in the mess:
+    // presentation copies with the sitting's room, so the deck
+    // walks the officers across the ship to their seats. The sim's
+    // own members are never touched.
+    const presented =
+      activeSittings.length === 0
+        ? aboard
+        : aboard.map((m) => {
+            const seat = councilSeatByMember.get(m.id);
+            const stand = councilStandByMember.get(m.id);
+            const spot = seat ?? stand;
+            if (spot === undefined || spot.room === m.room) return m;
+            return { ...m, room: spot.room, activity: "socialize" };
+          });
+    deck.frame(presented, {
       now: nowMs,
       dtMs: deckDtMs,
       tickMs,
@@ -1859,6 +2164,8 @@ function frame(nowMs: number): void {
       selectedId: selectedCrew,
       workSystem: workSystemByMember,
       gameSeat: gameSeatByMember,
+      councilSeat: councilSeatByMember,
+      councilStand: councilStandByMember,
       carry: carryByMember,
       dayMinutes:
         (run.tick % CONFIG.time.ticksPerDay) * CONFIG.time.minutesPerTick,
@@ -1888,7 +2195,7 @@ function frame(nowMs: number): void {
     nowMs - lastMinimapMs > 250
   ) {
     lastMinimapMs = nowMs;
-    const aboard = run.crew.filter((m) => !m.ashore);
+    const aboard = run.crew.filter((m) => !m.ashore && !m.dead && !m.leftShip);
     minimap.draw(
       run.ship,
       aboard,

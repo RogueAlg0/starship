@@ -74,12 +74,6 @@ function setCondition(h: Harness, kind: string, condition: number): void {
   }
 }
 
-function quartermaster(h: Harness): CrewMember {
-  const qm = h.crew.find((m) => m.roleKey === "quartermaster");
-  if (qm === undefined) throw new Error("no quartermaster aboard");
-  return qm;
-}
-
 describe("stores arithmetic", () => {
   it("production is the system's rate times its condition", () => {
     const h = harness();
@@ -211,58 +205,56 @@ describe("resupply", () => {
 });
 
 describe("rationing", () => {
-  it("the quartermaster imposes it below the trigger and lifts it past the lift line", () => {
+  // Rationing belongs to the Council now (see council.ts and
+  // test/council.test.ts): the quartermaster proposes, the council
+  // disposes, and the captain's emergency imposition expires
+  // unratified. The stores system only prices the levels and pays
+  // the morale cost. These tests pin that boundary from the
+  // stores side: stepped alone, stores never imposes and never
+  // lifts, whatever the tallies say.
+  it("stores alone never imposes rationing below the trigger", () => {
     const h = harness();
-    const qm = quartermaster(h);
-    qm.traits.splice(0, qm.traits.length);
     setCondition(h, "hydroponics rig", 0);
-    // Eleven and a half days: under the trigger, above the low line.
+    // Eleven and a half days: under the old interim trigger.
     h.stores.byKey.food.qtyMilli = Math.round(11.5 * dailyUseMilli(h.stores, "food"));
-    h.engine.run(10);
-    expect(h.stores.rationing.food).toBe(true);
-    const imposed = h.world.events.events.filter(
-      (e) => e.type === "rationing_imposed",
-    );
-    expect(imposed.length).toBe(1);
-    expect(imposed[0]?.data.by).toBe(qm.id);
-    expect(imposed[0]?.data.store).toBe("food");
-
-    // Fifteen days is inside the hysteresis band: still rationed.
-    setCondition(h, "hydroponics rig", 1);
-    h.stores.byKey.food.qtyMilli = Math.round(15 * dailyUseMilli(h.stores, "food"));
-    h.engine.run(10);
-    expect(h.stores.rationing.food).toBe(true);
-    // Production at 1.06 against rationed consumption at 0.7 climbs
-    // through the lift line in a few days; the lift speaks once.
-    h.engine.run(12 * TPD);
+    h.engine.run(2 * TPD);
     expect(h.stores.rationing.food).toBe(false);
-    const lifted = h.world.events.events.filter(
-      (e) => e.type === "rationing_lifted",
-    );
-    expect(lifted.length).toBe(1);
-    expect(lifted[0]?.data.reason).toBe("recovered");
+    expect(
+      h.world.events.events.filter((e) => e.type === "rationing_imposed"),
+    ).toEqual([]);
   });
 
-  it("the quartermaster's traits bend the trigger both ways", () => {
-    const anxious = harness();
-    const aqm = quartermaster(anxious);
-    aqm.traits.splice(0, aqm.traits.length, "anxious");
-    setCondition(anxious, "hydroponics rig", 0);
-    anxious.stores.byKey.food.qtyMilli = Math.round(
-      13.5 * dailyUseMilli(anxious.stores, "food"),
-    );
-    anxious.engine.run(10);
-    expect(anxious.stores.rationing.food).toBe(true);
+  it("stores alone never lifts rationing past the lift line", () => {
+    const h = harness();
+    // As the council leaves it: imposed, reduced level.
+    h.stores.rationing.food = true;
+    h.stores.rationLevel.food = "reduced";
+    setCondition(h, "hydroponics rig", 1);
+    h.stores.byKey.food.qtyMilli = Math.round(20 * dailyUseMilli(h.stores, "food"));
+    h.engine.run(2 * TPD);
+    expect(h.stores.rationing.food).toBe(true);
+    expect(
+      h.world.events.events.filter((e) => e.type === "rationing_lifted"),
+    ).toEqual([]);
+  });
 
-    const kind = harness();
-    const kqm = quartermaster(kind);
-    kqm.traits.splice(0, kqm.traits.length, "kind");
-    setCondition(kind, "hydroponics rig", 0);
-    kind.stores.byKey.food.qtyMilli = Math.round(
-      11 * dailyUseMilli(kind.stores, "food"),
+  it("the strict level bends consumption harder than the reduced level", () => {
+    const h = harness();
+    const daily = dailyUseMilli(h.stores, "food");
+    h.stores.rationing.food = true;
+    h.stores.rationLevel.food = "reduced";
+    expect(consumptionMilliPerDay(h.stores, "food", true)).toBeCloseTo(
+      daily * CONFIG.stores.rationing.consumptionFactor,
+      6,
     );
-    kind.engine.run(10);
-    expect(kind.stores.rationing.food).toBe(false);
+    h.stores.rationLevel.food = "strict";
+    expect(consumptionMilliPerDay(h.stores, "food", true)).toBeCloseTo(
+      daily * CONFIG.stores.rationing.strictFactor,
+      6,
+    );
+    expect(CONFIG.stores.rationing.strictFactor).toBeLessThan(
+      CONFIG.stores.rationing.consumptionFactor,
+    );
   });
 });
 

@@ -214,8 +214,9 @@ export function stepSociety(w: World, crew: readonly CrewMember[]): void {
   }
 
   for (const holder of crew) {
+    if (holder.dead || holder.leftShip) continue;
     for (const other of crew) {
-      if (other === holder) continue;
+      if (other === holder || other.dead || other.leftShip) continue;
       const trust = trustOf(holder.beliefs, other.id);
       // A grudge is not forever: if trust has genuinely recovered, it eases.
       const grudgeIndex = holder.beliefs.grudges.indexOf(other.id);
@@ -248,10 +249,11 @@ export function stepSociety(w: World, crew: readonly CrewMember[]): void {
   for (const accuser of crew) {
     // Accusations are spoken aboard, in company. A member ashore
     // at a port call holds their tongue until they are back.
-    if (accuser.ashore) continue;
+    if (accuser.ashore || accuser.dead || accuser.leftShip) continue;
+    if (w.tick < accuser.confinedUntil) continue;
     const threshold = accusationThresholdFor(accuser);
     for (const other of crew) {
-      if (other === accuser) continue;
+      if (other === accuser || other.dead || other.leftShip) continue;
       const suspicion = suspicionOf(accuser.beliefs, other.id);
       if (suspicion < threshold) continue;
       const last = accuser.beliefs.accusationsMade[other.id];

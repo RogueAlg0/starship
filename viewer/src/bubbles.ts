@@ -28,6 +28,8 @@ export type BubbleIcon =
   | "anger"
   | "question"
   | "bang"
+  | "aye"
+  | "nay"
   | "dots";
 
 const ICONS: Record<BubbleIcon, SpriteDef> = {
@@ -112,6 +114,33 @@ const ICONS: Record<BubbleIcon, SpriteDef> = {
       ".......",
       ".......",
       "..rr...",
+    ],
+    pal: { r: "#e03c31" },
+  },
+  // Council vote tokens: a green tick for a vote for the motion,
+  // a red cross against. They rise in seat order when a finding
+  // lands (main.ts staggers them); the bubble itself is the token.
+  aye: {
+    rows: [
+      ".......",
+      "......g",
+      ".....gg",
+      "g...gg.",
+      "gg.gg..",
+      ".ggg...",
+      "..g....",
+    ],
+    pal: { g: "#4fae62" },
+  },
+  nay: {
+    rows: [
+      "r.....r",
+      ".r...r.",
+      "..r.r..",
+      "...r...",
+      "..r.r..",
+      ".r...r.",
+      "r.....r",
     ],
     pal: { r: "#e03c31" },
   },

@@ -39,6 +39,18 @@ import {
   stepStores,
   type StoresState,
 } from "./world/stores.ts";
+import {
+  checkCouncilState,
+  createCouncil,
+  stepCouncil,
+  type CouncilState,
+} from "./world/council.ts";
+import {
+  checkHealthState,
+  createHealthState,
+  stepHealth,
+  type HealthState,
+} from "./world/health.ts";
 import { checkShipState, stepSystems } from "./world/systems.ts";
 import { Weather } from "./world/weather.ts";
 
@@ -52,6 +64,10 @@ export interface BuiltWorld {
   galaxy: { sector: Sector; voyage: Voyage; traffic: Traffic };
   /** What the ship eats, burns, and breathes: the five stores. */
   stores: StoresState;
+  /** Bodies, harm, and the cause ledger (the Consequences chapter). */
+  health: HealthState;
+  /** The Ship's Council: seats, sittings, legitimacy. */
+  council: CouncilState;
   /** Records of the live source; empty when a replay source was supplied. */
   readonly decisions: DecisionRecord[];
   /**
@@ -101,6 +117,12 @@ export function buildWorld(
   // no draws, so the loading cannot shift any other stream.
   const stores = createStores(crew.length);
   ship.stores = stores;
+  // Bodies and the council draw nothing at generation: health is
+  // state the tick loop accrues, and the council's seats follow
+  // the roster's roles. Neither can shift another stream.
+  const health = createHealthState();
+  const council = createCouncil(crew);
+  ship.councilPublic = { cmoFilled: true, emergencyUntil: -1 };
   const weather = new Weather();
   const ctx: CrewContext = {
     ship,
@@ -149,6 +171,15 @@ export function buildWorld(
     name: "systems",
     step: (w) => stepSystems(w, ship, weather, crew),
   });
+  engine.addSystem({
+    name: "health",
+    step: (w) => stepHealth(w, health, ship, crew, weather),
+  });
+  engine.addSystem({
+    name: "council",
+    step: (w) =>
+      stepCouncil(w, council, ship, crew, health, stores, { sector, voyage }),
+  });
   engine.addInvariant("crew state in range", () => checkCrewState(crew, ship));
   engine.addInvariant("ship state in range", () => checkShipState(ship));
   engine.addInvariant("voyage state in range", () =>
@@ -159,6 +190,12 @@ export function buildWorld(
   );
   engine.addInvariant("stores within their tanks", () =>
     checkStoresState(stores),
+  );
+  engine.addInvariant("bodies and ledgers reconcile", () =>
+    checkHealthState(crew),
+  );
+  engine.addInvariant("council state in range", () =>
+    checkCouncilState(council, crew),
   );
 
   let started = false;
@@ -182,6 +219,8 @@ export function buildWorld(
     crew,
     galaxy: { sector, voyage, traffic },
     stores,
+    health,
+    council,
     get decisions() {
       return decisions instanceof UtilitySource ? decisions.records : [];
     },
@@ -211,6 +250,10 @@ export interface RunContext {
   readonly galaxy: { sector: Sector; voyage: Voyage; traffic: Traffic };
   /** What the ship eats, burns, and breathes: the five stores. */
   readonly stores: StoresState;
+  /** Bodies, harm, and the cause ledger (the Consequences chapter). */
+  readonly health: HealthState;
+  /** The Ship's Council: seats, sittings, legitimacy. */
+  readonly council: CouncilState;
   /** Records of the live source; empty when a replay source was supplied. */
   readonly decisions: DecisionRecord[];
   /** The current tick (ticks completed so far). */
@@ -234,6 +277,8 @@ export function createRun(
     crew: built.crew,
     galaxy: built.galaxy,
     stores: built.stores,
+    health: built.health,
+    council: built.council,
     get decisions() {
       return built.decisions;
     },

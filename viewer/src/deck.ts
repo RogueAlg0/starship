@@ -1161,6 +1161,20 @@ export interface DeckFrameOpts {
    */
   gameSeat: ReadonlyMap<string, { room: number; seat: number }>;
   /**
+   * Members seated at a council sitting, from council_convened
+   * events (main.ts): their seat index at the mess tables, in seat
+   * order. Presentation only, like the game seats; main.ts passes
+   * presentation copies of the officers with their room set to the
+   * mess, so the deck walks them across the ship to the sitting.
+   */
+  councilSeat: ReadonlyMap<string, { room: number; seat: number }>;
+  /**
+   * Members standing at a council sitting's open end: slot 0 the
+   * accused, slot 1 the security chief beside them. Same room
+   * convention as councilSeat.
+   */
+  councilStand: ReadonlyMap<string, { room: number; slot: number }>;
+  /**
    * Members carrying a prop in transit, derived in main.ts from
    * move events: "tool" toward a damaged system's room, "crate"
    * out of the cargo bay. Empty hands draw nothing.
@@ -1454,6 +1468,14 @@ export class DeckView {
   /** An accusation was just spoken: bubble over the accuser. */
   speech(id: string): void {
     this.bubbles.speech(id, "bang");
+  }
+
+  /** A council vote lands: the voter's token rises over their head. */
+  stageVote(id: string, choice: string): void {
+    this.bubbles.speech(
+      id,
+      choice === "for" ? "aye" : choice === "against" ? "nay" : "dots",
+    );
   }
 
   // ------------------------------------------------------- feel pass
@@ -1788,6 +1810,8 @@ export class DeckView {
     seatIndex: number,
     gameSeat: { room: number; seat: number } | undefined,
     exIndex: number,
+    councilSeat: { room: number; seat: number } | undefined,
+    councilStand: { room: number; slot: number } | undefined,
   ): {
     point: { x: number; y: number };
     key: string;
@@ -1822,6 +1846,43 @@ export class DeckView {
         fx: 0,
         lying: true,
         seated: false,
+      };
+    }
+    if (
+      councilStand !== undefined &&
+      councilStand.room === member.room
+    ) {
+      // The open end of the mess: the accused stands facing the
+      // table, the security chief a step beside them. The point is
+      // read off the room's own rectangle, south edge inside.
+      const rect = room.rect;
+      return {
+        point: {
+          x: rect.x + rect.w / 2 - 0.9 + councilStand.slot * 1.8,
+          y: rect.y + rect.h - 1.3,
+        },
+        key: `cs:${member.room}:${councilStand.slot}`,
+        fx: 0,
+        lying: false,
+        seated: false,
+      };
+    }
+    if (
+      councilSeat !== undefined &&
+      councilSeat.room === member.room &&
+      room.seats.length > 0
+    ) {
+      // A council sitting: the officers take the mess chairs in
+      // seat order for the sitting's span (main.ts holds the
+      // roster from the convened event).
+      const idx = councilSeat.seat % room.seats.length;
+      const seat = room.seats[idx] as { x: number; y: number };
+      return {
+        point: { x: seat.x, y: seat.y },
+        key: `cc:${member.room}:${councilSeat.seat}`,
+        fx: 0,
+        lying: false,
+        seated: true,
       };
     }
     if (
@@ -2101,6 +2162,8 @@ export class DeckView {
         seatSlot.get(member.id) ?? -1,
         opts.gameSeat.get(member.id),
         exSlot.get(member.id) ?? -1,
+        opts.councilSeat.get(member.id),
+        opts.councilStand.get(member.id),
       );
       const homeDeck = shipLayout.deckOfRoom[member.room] ?? 0;
       if (st === undefined) {
@@ -2626,11 +2689,23 @@ export class DeckView {
       const seated = st.seated && !st.moving;
       const exercising =
         member.activity === "exercise" && !st.moving && !seated;
+      // The wounded stand hunched: any open wound severity, or a
+      // sickness past the point of hiding it, swaps the standing
+      // frame for the hurt one. Seated, working, and walking keep
+      // their own frames; a body in a bunk is the lying pass below.
+      const hurt =
+        !st.moving &&
+        !seated &&
+        member.body !== undefined &&
+        (Object.values(member.body.wounds).some((w) => w.severity > 0) ||
+          member.body.sick >= 0.4);
       let sprite = sprites.idle;
       if (st.moving) {
         sprite = Math.floor(st.walkPhase * 1.6) % 2 === 0 ? sprites.walk : sprites.idle;
       } else if (seated) {
         sprite = sprites.seated;
+      } else if (hurt) {
+        sprite = sprites.hurt;
       } else if (working) {
         sprite = Math.floor(now / 170) % 2 === 0 ? sprites.work : sprites.idle;
       } else if (exercising) {

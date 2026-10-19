@@ -32,6 +32,17 @@ export class Ship {
    * test harness may sail without them.
    */
   stores: StoresState | null = null;
+  /**
+   * The council's public face, attached by the run builder: whether
+   * the medical seat is filled and whether emergency powers stand.
+   * Other systems read these two facts; the council owns the rest.
+   */
+  councilPublic: { cmoFilled: boolean; emergencyUntil: number } | null = null;
+  /**
+   * An ending has been reached (ship lost, crew collapse): the crew
+   * stop deciding, and the log quiets to the ship's own noises.
+   */
+  ended = false;
   private readonly systemsById: Map<string, ShipSystem>;
 
   constructor(name: string, rooms: Room[], systems: ShipSystem[]) {

@@ -34,6 +34,7 @@ import {
 } from "./routine.ts";
 import { applySabotage, sabotageCandidate } from "../plots/sabotage.ts";
 import { CONFIG } from "../scenario/config.ts";
+import { createBody, totalSeverity, type BodyState } from "../world/health.ts";
 import type { Ship } from "../world/ship.ts";
 import { gateRepairDelta } from "../world/stores.ts";
 import {
@@ -71,6 +72,26 @@ export class CrewMember {
    *  no acting, no witnessing, no deck dot — while the stores
    *  system's rotation holds. Set and cleared by that system. */
   ashore = false;
+  /** The body: wounds per part, sickness, marks, the cause ledger.
+   *  Owned by the health system (src/world/health.ts); the crew
+   *  step reads it (the wounded work slower, the carried are
+   *  moved) and never writes it. */
+  readonly body: BodyState = createBody();
+  /** Dead, through the ledger and nothing else. The dead do not
+   *  act, eat, witness, or hold a council seat. */
+  dead = false;
+  deathTick = -1;
+  /** Put off at a port, or evacuated at an ending: gone from the ship. */
+  leftShip = false;
+  /** Council sentences: confined to quarters until this tick. */
+  confinedUntil = -1;
+  /** Restricted from systems (repairs, sabotage) until this tick. */
+  restrictedUntil = -1;
+  /** Loss of mess privileges until this tick (a discipline sentence). */
+  messBanUntil = -1;
+  lastAttackTick = -1000000;
+  /** Person currently being treated by this member, for event dedupe. */
+  treatTarget: string | null = null;
   lastAccusationTick = -1000000;
   lastSabotageTick = -1000000;
   /** Tick of this person's last leisure event, for the leisure cooldown. */
@@ -324,7 +345,7 @@ function buildCandidates(
   // hunger still drags a sleeper toward the mess, and a failed system in
   // the member's own department ignores the schedule completely.
   const block: BlockKind = blockAt(member.routine, tick);
-  const workFactor =
+  let workFactor =
     block === "work"
       ? 1
       : block === "free"
@@ -332,8 +353,21 @@ function buildCandidates(
         : block === "meal"
           ? routine.mealWorkFactor
           : routine.sleepWorkFactor;
+  // Under emergency powers the watches dissolve: compulsory duties.
+  if (
+    ship.councilPublic !== null &&
+    tick < ship.councilPublic.emergencyUntil
+  ) {
+    workFactor = 1;
+  }
+  // The wounded and the sick work at the pace their bodies allow.
+  workFactor *= Math.max(
+    0.25,
+    1 - totalSeverity(member) * 0.45 - member.body.sick * 0.3,
+  );
+  if (member.body.health < 0.45) workFactor *= 0.6;
 
-  if (roomKind === "mess") {
+  if (roomKind === "mess" && tick >= member.messBanUntil) {
     candidates.push({
       key: "eat",
       base:
@@ -360,7 +394,7 @@ function buildCandidates(
     if (!member.affinity.includes(system.kind)) base *= 0.6;
     candidates.push({ key: `work:${system.id}`, base });
     for (const s of systemsHere) {
-      if (s.damaged && canRepair(member, s)) {
+      if (s.damaged && canRepair(member, s) && tick >= member.restrictedUntil) {
         candidates.push({
           key: `repair:${s.id}`,
           base:
@@ -377,6 +411,27 @@ function buildCandidates(
     });
   }
 
+  // Treatment is work: in the medbay, a member who can tend the
+  // medbay unit can tend the wounded lying there. The medic is
+  // best at it; anyone's hands are better than none (and the
+  // health system prices lay treatment at its own rate).
+  if (roomKind === "medbay") {
+    for (const other of crew) {
+      if (other === member || other.dead || other.ashore || other.leftShip) {
+        continue;
+      }
+      if (other.room !== member.room) continue;
+      if (totalSeverity(other) <= 0 && other.body.sick < 0.4) continue;
+      const skill = member.affinity.includes("medbay unit")
+        ? 0.6 + member.repairSkill
+        : 0.25;
+      candidates.push({
+        key: `treat:${other.id}`,
+        base: CONFIG.scores.repairBase * skill * workFactor + totalSeverity(other),
+      });
+    }
+  }
+
   // Nobody holds a conversation in their sleep; free time and meals are
   // when the ship talks.
   if (block !== "sleep") {
@@ -384,7 +439,7 @@ function buildCandidates(
       block === "free" || block === "meal" ? routine.freeSocialFactor : 1;
     for (const other of crew) {
       if (other === member || other.room !== member.room) continue;
-      if (other.ashore) continue;
+      if (other.ashore || other.dead || other.leftShip) continue;
       if (trustOf(member.beliefs, other.id) < CONFIG.relationships.socializeMinTrust) {
         continue;
       }
@@ -418,7 +473,10 @@ function buildCandidates(
     }
   }
 
-  const sabotage = sabotageCandidate(member, ship, crew, tick);
+  const sabotage =
+    tick < member.restrictedUntil
+      ? null
+      : sabotageCandidate(member, ship, crew, tick);
   if (sabotage !== null) candidates.push(sabotage);
 
   // Travel: one candidate per destination room worth reaching.
@@ -609,6 +667,30 @@ function applyChoice(
 ): void {
   const { ship } = ctx;
   if (!key.startsWith("repair:")) member.repairTarget = null;
+  if (!key.startsWith("treat:")) member.treatTarget = null;
+  if (key.startsWith("treat:")) {
+    const target = crew.find((c) => c.id === key.slice("treat:".length));
+    member.activity = "treat";
+    member.needs.energy = clamp01(
+      member.needs.energy - CONFIG.needs.workEnergyCost,
+    );
+    if (target !== undefined && !target.dead) {
+      // The health system prices the treatment (medic's skill,
+      // medbay condition by place, lay hands when there is no
+      // doctor): here we only record whose hands are on them.
+      target.body.treatedUntil = w.tick + 1;
+      if (member.treatTarget !== target.id) {
+        member.treatTarget = target.id;
+        w.emit("treatment_started", [member.id], {
+          medic: member.id,
+          person: target.id,
+          room: member.room,
+          lay: !member.affinity.includes("medbay unit"),
+        });
+      }
+    }
+    return;
+  }
   if (key.startsWith("go:")) {
     const target = Number(key.slice("go:".length));
     const { prev } = ship.distancesFrom(member.room);
@@ -703,7 +785,7 @@ function applyChoice(
     applyConditionDelta(
       w,
       system,
-      gateRepairDelta(ship, amount),
+      gateRepairDelta(ship, amount, w.tick),
       member.id,
       "repair",
     );
@@ -970,6 +1052,10 @@ export function stepCrew(
   // before anyone acts in the new hour.
   flushMealService(w, ctx);
 
+  // An ended ship (lost, or crew collapsed) has no crew decisions
+  // left to make: the log quiets to the ship's own noises.
+  if (ctx.ship.ended) return;
+
   const snapshot: Record<string, number> = {};
   for (const member of crew) snapshot[member.id] = member.room;
   ctx.history.push(snapshot);
@@ -979,7 +1065,7 @@ export function stepCrew(
 
   const occupancy = new Array<number>(ctx.ship.roomCount).fill(0);
   for (const member of crew) {
-    if (member.ashore) continue;
+    if (member.ashore || member.dead || member.leftShip) continue;
     occupancy[member.room] = (occupancy[member.room] as number) + 1;
   }
 
@@ -994,6 +1080,29 @@ export function stepCrew(
       member.needs.social - CONFIG.needs.socialDecay,
     );
     updateMorale(w, member, ctx, occupancy[member.room] as number);
+
+    // The dead do not act, and the gone are gone. The confined sit
+    // in quarters under sentence: needs still run, no decision is
+    // drawn, and the room is the sentence's room.
+    if (member.dead) {
+      member.activity = "dead";
+      continue;
+    }
+    if (member.leftShip) {
+      member.activity = "gone";
+      continue;
+    }
+    if (w.tick < member.confinedUntil) {
+      const quarters = ctx.ship.firstRoomOfKind("quarters");
+      if (quarters >= 0) member.room = quarters;
+      member.activity = "confined";
+      // Confinement is not starvation: meals are brought, and a
+      // bunk in quarters rests, slowly. The sentence is the room
+      // and the idleness, not the body.
+      member.needs.hunger = clamp01(member.needs.hunger + 0.0018);
+      member.needs.energy = clamp01(member.needs.energy + 0.01);
+      continue;
+    }
 
     // Ashore on leave: the body is at the port, not the post. Needs
     // still decay (applied above), company and novelty restore the

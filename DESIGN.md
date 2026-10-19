@@ -182,7 +182,7 @@ Every arrival enters with empty relationships and a past the others
 cannot see. The chronicle introduces them the way the crew meets them:
 as a name and a knock on the airlock door.
 
-## Consequences, death, and endings (designed, post-v0)
+## Consequences, death, and endings (built Oct 18, 2026)
 
 Point three of the v0 honesty list, fleshed out: in v0 nobody can die
 and nothing can end. This layer fixes both, using the village sim's two
@@ -395,7 +395,7 @@ Determinism is unchanged: the ground layer runs on the same
 fixed-order loop, named streams, and event log, and an away mission
 replays from its decision log like any other part of the voyage.
 
-## Stores: the ship's economy (designed Oct 18, 2026, not built)
+## Stores: the ship's economy (built Oct 18, 2026)
 
 Playtest note (the user's, from watching v0): there is no economy.
 Crew hunger rises, a crew member walks to the mess, hunger resets,
@@ -705,7 +705,7 @@ its grammar from this chapter.
   witness at admissions and rationing sittings, which the
   council can ignore at the usual price.
 
-## The Ship's Council (designed Oct 18, 2026, not built)
+## The Ship's Council (built Oct 18, 2026)
 
 Stellaris gives a state a council: a ruler and a row of portfolio
 holders whose traits bend the whole empire, meeting over an

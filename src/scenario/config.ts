@@ -663,6 +663,8 @@ export const CONFIG = {
       triggerDays: 12,
       liftDays: 16,
       consumptionFactor: 0.7,
+      /** Strict rationing, the council's harder level. */
+      strictFactor: 0.55,
       hungerCap: 0.55,
       moralePerDay: 0.02,
       traitTriggerShift: { anxious: 2, kind: -2 } as Record<string, number>,
@@ -782,6 +784,298 @@ export const CONFIG = {
       { kind: "patrol cutter", cruiseFactor: 1.2 },
       { kind: "passenger transport", cruiseFactor: 1.0 },
     ],
+  },
+
+  /**
+   * Consequences: the body, harm, and the cause ledger (the
+   * Consequences chapter). Harm is modeled, never rolled out of
+   * nowhere: accident risk rides on work actually done, cascades
+   * ride on system condition, sickness rides on water, air, and
+   * crowding, and violence rides on grudges at their far end.
+   * Every point of harm is booked to a cause in the ledger at the
+   * moment it lands; death is health reaching zero through the
+   * ledger, and nothing else.
+   */
+  health: {
+    /** Body parts that carry wounds, in ledger order. */
+    parts: ["head", "torso", "arms", "legs"],
+    /**
+     * Accident risk per tick for a member at work, before the
+     * multipliers below. Work aboard is mostly safe; repair of a
+     * failed system in a storm, tired and hurried, is not. Tuned
+     * against the frequency law with the fleet table in DECISIONS:
+     * a healthy 90-day voyage should see a handful of injuries
+     * and zero to two deaths.
+     */
+    accidentPerTick: 0.00009,
+    /** Activity danger: repair is hands inside machinery. */
+    dangerRepair: 1.6,
+    dangerWork: 0.7,
+    /** System-kind danger for the room a member works in. */
+    dangerByKind: {
+      reactor: 1.7,
+      engines: 1.5,
+      "life support": 1.1,
+      "water recycler": 0.8,
+      "hydroponics rig": 0.6,
+      comms: 0.5,
+      "medbay unit": 0.3,
+    } as Record<string, number>,
+    stormFactor: 1.8,
+    /** A failed system in the room: failed lighting, live faults. */
+    failedRoomFactor: 1.7,
+    /** Any failed system aboard: the ship hurries. */
+    hurryFactor: 1.35,
+    fatigueLowEnergy: 0.3,
+    fatigueFactor: 1.9,
+    tiredFactor: 1.3,
+    tiredEnergy: 0.55,
+    /** A drawn accident's wound severity lands in this span. */
+    woundSeverityMin: 0.14,
+    woundSeverityMax: 0.55,
+    /** Immediate health booked when a wound lands, per severity. */
+    woundImpact: 0.22,
+    /** Bleeding: health per day per unit of wound severity. */
+    bleedPerDay: 0.16,
+    /** A treated wound bleeds at this fraction. */
+    treatedBleedFactor: 0.25,
+    /** Wound severity healed per day before treatment factors. */
+    healPerDay: 0.16,
+    treatedHealFactor: 1.6,
+    medbayHealFactor: 1.7,
+    restHealFactor: 1.4,
+    /** No Chief Medical Officer: lay treatment at this strength. */
+    layHealFactor: 0.55,
+    /** Quiet health recovery per day when unwounded and well. */
+    recoveryPerDay: 0.03,
+    /** Infection: daily chance per unit severity, untreated. */
+    infectionChancePerDay: 0.10,
+    treatedInfectionFactor: 0.3,
+    /** Infected wounds: health per day, and severity growth. */
+    infectionHarmPerDay: 0.11,
+    infectionGrowthPerDay: 0.05,
+    /** A wound at or above this severity can leave a lasting mark. */
+    markSeverity: 0.42,
+    /** Cascades: health per day at zero condition / zero store. */
+    airHarmPerDay: 0.11,
+    oxygenZeroHarmPerDay: 0.1,
+    radiationPerDay: 0.26,
+    dehydrationPerDay: 0.13,
+    starvationPerDay: 0.05,
+    /** System conditions below which the cascades begin. */
+    cascadeThreshold: 0.35,
+    reactorCascadeThreshold: 0.3,
+    /** Sickness: build-up per day from bad water, bad air, crowds. */
+    sickWaterPerDay: 0.14,
+    sickAirPerDay: 0.07,
+    sickCrowdPerDay: 0.02,
+    crowdSize: 5,
+    /** A sick member (sick above spreadLine) infects roommates. */
+    spreadLine: 0.6,
+    spreadPerDay: 0.1,
+    /** Sickness fades per day when the ship's water and air are sound. */
+    sickRecoveryPerDay: 0.2,
+    medbaySickFactor: 2.2,
+    /** Health harm per day from sickness above the harm line. */
+    sickHarmLine: 0.6,
+    sickHarmPerDay: 0.07,
+    /** Sickness onset is spoken once per crossing of this level. */
+    sickOnsetLine: 0.6,
+    /**
+     * Violence, the far end of a grudge: the holder's trust in the
+     * target at or below violenceTrust, morale at or below
+     * violenceMorale, both awake in one room, and this chance per
+     * tick on the "harm" stream. Rare by construction: all four
+     * gates must stand open at once.
+     */
+    violenceTrust: -0.85,
+    violenceMorale: 0.22,
+    violenceChancePerTick: 0.0007,
+    violenceTraitFactor: { bold: 0.6, "hot-tempered": 0.8 } as Record<
+      string,
+      number
+    >,
+    violenceCooldownTicks: 4320,
+    /** The grudge must have burned at least this long, too. */
+    violenceGrudgeAgeTicks: 288,
+    violenceWoundMin: 0.3,
+    violenceWoundMax: 0.62,
+    /** Witnesses of an attack take this suspicion of the attacker. */
+    violenceWitnessSuspicion: 0.55,
+    /** A wounded member whose total severity reaches this is
+     *  carried to the medbay by whoever stands with them. */
+    carrySeverity: 0.85,
+    /** Days of failed life support with an empty oxygen margin
+     *  (or a reactor at the floor) before the ship is lost. */
+    doomDays: 2,
+  },
+
+  /**
+   * The Ship's Council (the Council chapter): seven seats worn
+   * over roles, sittings that judge from beliefs, and votes
+   * computed from four inspectable terms with no dice at the
+   * table. The numbers below are those terms' weights.
+   */
+  council: {
+    /** Seats in sitting order, with the role that first wears each. */
+    seats: [
+      { key: "captain", seat: "Captain", role: "captain" },
+      { key: "first officer", seat: "First Officer", role: "executive officer" },
+      { key: "chief engineer", seat: "Chief Engineer", role: "chief engineer" },
+      { key: "chief medical officer", seat: "Chief Medical Officer", role: "medic" },
+      { key: "security chief", seat: "Security Chief", role: "security officer" },
+      { key: "science officer", seat: "Science Officer", role: "scientist" },
+      { key: "quartermaster", seat: "Quartermaster", role: "quartermaster" },
+    ],
+    /** A triggered sitting convenes this many ticks after its trigger. */
+    conveneDelayTicks: 36,
+    /** Ticks of each day at which the council's standing business runs. */
+    appointmentTickOfDay: 30,
+    rationTickOfDay: 60,
+    reliefTickOfDay: 90,
+    /** An inquiry into sabotage needs damage at or above this. */
+    sabotageInquiryDamage: 0.55,
+    /** A Security-certified accusation: the chief's own suspicion line. */
+    certifiedSuspicion: 0.9,
+    /** Discipline range for a Security accusation below certification. */
+    disciplineSuspicion: 0.72,
+    disciplineCooldownTicks: 2016,
+    /** Boards are set-pieces, not a drumbeat: two judicial sittings
+     *  sit at least this far apart, and one accused faces at most
+     *  one accusation-born inquiry per this span. */
+    inquiryGapTicks: 720,
+    inquiryAccusedCooldownTicks: 2880,
+    /** Vote score lines: at or above, for; at or below, against. */
+    voteForLine: 0.12,
+    voteAgainstLine: -0.12,
+    /** The science seat abstains when its evidence is thinner than this. */
+    scienceAbstainEvidence: 0.15,
+    /** Median evidence lines for finding strength. */
+    strengthStrong: 0.55,
+    strengthFair: 0.3,
+    /** Sentence lengths in ticks, by finding strength. */
+    brigStrongTicks: 720,
+    brigFairTicks: 432,
+    quartersWeakTicks: 288,
+    disciplineStrongTicks: 288,
+    disciplineWeakTicks: 144,
+    /** A bond at or above this recuses an officer from a case.
+     *  Shipboard bonds run warm here (a month of socializing puts
+     *  close shipmates near 0.7), so "closely bonded" is set at
+     *  the inner circle, or half the bench stands down at once. */
+    recuseBond: 0.8,
+    /** Same department plus this bond also recuses. */
+    recuseDeptBond: 0.5,
+    /** Scapegoat testimony: suspicion pushed on officers, discounted. */
+    scapegoatPush: 0.12,
+    /** Witness testimony: suspicion pushed per witness statement. */
+    testimonyPush: 0.07,
+    testimonyWitnessCap: 3,
+    /** Rationing: the council's lines, in days of supply. */
+    rationEmergencyDays: 6,
+    rationStrictDays: 8,
+    /** Days a refused proposal waits before it may be re-tabled. */
+    rationRefusalCooldownDays: 3,
+    /** Emergency ratification must come within this many ticks. */
+    ratifyWithinTicks: 144,
+    /** Emergency powers: grant length and the renewal share ladder. */
+    emergencyGrantTicks: 432,
+    emergencyRenewalShareStep: 0.17,
+    emergencyCooldownTicks: 432,
+    /** Relief: officers at or below this trust in the captain,
+     *  who also hold a settled grudge against them, may move. The
+     *  double gate is what keeps the terminal motion rare: distrust
+     *  alone is weather aboard a feuding ship. */
+    reliefTrustLine: -0.85,
+    reliefMoversNeeded: 3,
+    reliefCooldownTicks: 8640,
+    /** Legitimacy moves: per sitting, scaled by crew agreement. */
+    legitimacySwing: 0.06,
+    legitimacyStart: 0.7,
+    /** A seat holder below this health retires hurt at the daily check. */
+    retireHealth: 0.3,
+    /** Stores counts drift when the quartermaster's seat stands empty:
+     *  milli-units of food lost to bad counting, per day. Booked as
+     *  charged, so the stores identity still reconciles. */
+    qmVacancyDriftMilliPerDay: 50,
+    /**
+     * Portfolio leanings per motion kind and seat key: the standing
+     * bias the chronicle can name. Positive leans toward the motion
+     * (convict, adopt, grant, relieve), negative against.
+     */
+    portfolioLean: {
+      inquiry: {
+        "security chief": 0.18,
+        "chief engineer": 0.12,
+        "chief medical officer": -0.08,
+        "science officer": -0.1,
+        quartermaster: 0.02,
+        "first officer": 0,
+        captain: 0,
+      },
+      discipline: {
+        "security chief": 0.15,
+        "first officer": 0.08,
+        "chief medical officer": -0.06,
+        "science officer": -0.05,
+        quartermaster: 0,
+        "chief engineer": 0.04,
+        captain: 0,
+      },
+      rationing: {
+        quartermaster: 0.22,
+        "chief medical officer": -0.16,
+        "first officer": 0.06,
+        "security chief": 0.02,
+        "chief engineer": 0,
+        "science officer": 0,
+        captain: 0.04,
+      },
+      emergency: {
+        "chief engineer": 0.14,
+        "security chief": 0.1,
+        "first officer": 0.06,
+        "chief medical officer": -0.04,
+        "science officer": -0.06,
+        quartermaster: 0.02,
+        captain: 0.1,
+      },
+      relief: {
+        "first officer": 0.08,
+        "security chief": 0.04,
+        "chief medical officer": 0,
+        "science officer": -0.04,
+        "chief engineer": 0,
+        quartermaster: 0,
+        captain: 0,
+      },
+      appointment: {
+        "first officer": 0.05,
+        "security chief": 0,
+        "chief medical officer": 0,
+        "science officer": 0,
+        "chief engineer": 0,
+        quartermaster: 0,
+        captain: 0.08,
+      },
+    } as Record<string, Record<string, number>>,
+    /** Personal trait leanings at the table, by motion family. */
+    traitLean: {
+      guilty: {
+        kind: -0.12,
+        gentle: -0.1,
+        "hot-tempered": 0.06,
+        anxious: 0.05,
+        disciplined: -0.03,
+        bold: 0.04,
+      } as Record<string, number>,
+      motion: {
+        stubborn: -0.05,
+        disciplined: 0.03,
+        bold: 0.03,
+        anxious: -0.03,
+      } as Record<string, number>,
+    },
   },
 
   weather: {

@@ -43,7 +43,11 @@ export type AlertCategory =
   | "trust"
   | "repair"
   | "bond"
-  | "stores";
+  | "stores"
+  | "death"
+  | "ending"
+  | "relief"
+  | "injury";
 
 /** Where a click takes the viewer: a person, or a room to flash. */
 export interface AlertFocus {
@@ -506,6 +510,62 @@ const ICONS: Record<AlertCategory, SpriteDef> = {
       ".........",
     ],
     pal: { x: "#a8763e", o: "#e8a33d" },
+  },
+  death: {
+    rows: [
+      "....g....",
+      "...ggg...",
+      "....g....",
+      "....g....",
+      ".ggggggg.",
+      "....g....",
+      "....g....",
+      "....g....",
+      "..ggggg..",
+    ],
+    pal: { g: "#9aa7b8" },
+  },
+  ending: {
+    rows: [
+      ".........",
+      ".s...s...",
+      "..s.s....",
+      "...s..s..",
+      "....ss...",
+      "...s.....",
+      "..s...s..",
+      ".s.....s.",
+      ".........",
+    ],
+    pal: { s: "#e5534b" },
+  },
+  relief: {
+    rows: [
+      ".........",
+      ".g.g.g.g.",
+      "ggggggggg",
+      ".ggggggg.",
+      "..ggggg..",
+      ".........",
+      ".........",
+      ".........",
+      ".........",
+    ],
+    pal: { g: "#ffd76a" },
+  },
+  injury: {
+    rows: [
+      ".........",
+      "...www...",
+      "...www...",
+      ".wwwwwww.",
+      ".wwwrwww.",
+      ".wwwwwww.",
+      "...www...",
+      "...www...",
+      ".........",
+    ],
+    pal: { w: "#eef2f4", r: "#e5534b" },
   },
 };
 

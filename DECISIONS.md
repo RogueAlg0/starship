@@ -1094,3 +1094,155 @@ the step-2 code reads 2,243 against 2,170 ticks/sec, about a
 ticks, 102,785 events, hash b25d0ee3a83c6af1. Bundle grew
 362,414 -> 414,182 B (dist): the stores engine joins the
 viewer's imports.
+
+## Consequences and the Ship's Council, built (Oct 18, 2026)
+
+The ship can now hurt, sicken, die, and judge. Two new systems
+run last in the tick, health then council, and the boundary the
+Stores entry recorded is lifted on purpose, by this chapter's
+own model only: nobody dies except through the harm ledger.
+
+Health (src/world/health.ts). A body is wounds per part (head,
+torso, arms, legs) with severity, bleeding, and infection risk;
+sickness as a level; lasting marks (lame leg, ruined hand, lost
+eye, scarred torso) when a wound lands deep; and a per-cause
+ledger that is the ground truth of the body. Every point of
+harm is booked at the moment it lands, and bookHarm books only
+the effective amount after clamping, so the identity health =
+1 - sum(ledger) holds exactly and is invariant-checked. Harm
+arrives by modeled chains only: accidents over work actually
+done (scaled by danger, storm, failed lighting, fatigue,
+hurry); cascades (life support low is thin air shipwide, a red
+reactor is radiation in its room, an empty store is thirst,
+hunger, and no air); sickness from bad water, bad air, and
+crowding, spreading by co-location; and rare grudge violence
+behind a stack of gates (settled grudge, trust at the floor,
+morale and needs in despair, the grudge old). Treatment is
+work: a treat candidate in the medbay, the badly wounded
+carried there, healing in days. Endings: ship lost (life
+support failed with no oxygen margin, or the reactor at its
+floor, sustained two days; abandon ship drawn by distance and
+health) and crew collapse (fewer than three able crew).
+
+One bug the tests caught and this entry records plainly: the
+first build checked death at the end of the health pass, after
+the background recovery booking, so a body in a slow cascade
+oscillated at one tick's worth of health forever (harm to zero,
+recovery back, repeat) and nobody could die of thin air. Death
+is now checked between the harm bookings and the healing
+bookings: harm that brings a body to zero kills that tick.
+
+The Council (src/world/council.ts). Seven seats worn over
+roles, the cook excluded; seats follow roles, and vacancies
+are filled by the captain's appointment from the surviving
+crew (the First Officer seat alone needs a ratification vote).
+A vacant seat degrades its domain: no CMO is lay judgment at
+inquiries and slower, lay healing; no QM is drifting stores
+counts, booked as charged so the stores identity still
+reconciles. Jurisdiction built: boards of inquiry (every
+death, automatically; sabotage above a damage threshold;
+stores theft with a named suspect; a Security-certified
+accusation), discipline short of inquiry, rationing,
+emergency powers, and relief of the captain. Rationing
+REPLACES the Stores interim entire: the quartermaster
+proposes (their traits bend the trigger, as the interim's
+did), the council disposes, levels are reduced or strict, and
+the captain's emergency imposition below six days expires
+unratified within a day; a refusal of ratification lifts the
+rationing and leaves the blame with the captain. Votes are
+computed, never rolled: evidence as the officer holds it,
+trust in the motion's people, trait and portfolio leanings,
+and a bond-bloc second pass; the captain breaks ties, holds a
+veto over discipline only, and never votes on relief.
+Recusal: accused, accuser, victim, and the closely bonded
+stand down. "Closely bonded" is relative (among an officer's
+two closest bonds aboard, and warm in absolute terms),
+because shipboard bonds saturate: after a month, half of all
+pairs sit at 0.9 or above, and an absolute line stood down
+half the bench for any well-liked accused. Relief: three
+officers at the trust floor with settled grudges may table;
+carries on five of seven or two-thirds of sitting officers,
+votes recorded; the First Officer takes command and the
+relieved captain is confined a week. Legitimacy, the sixth
+unnumbered store, moves with crew agreement after findings.
+
+Judgment calls and tuning history, recorded honestly. The
+first fleet tuning ran an epidemic: sickness recovery applied
+only when its sources were zero, so the meal crowd's drip
+ratcheted the whole ship sick and deaths ran 4 to 9 per seed,
+all sickness. Recovery now always applies, weakened on a
+fouled ship, and the sickness numbers were retuned; sickness
+events went to zero fleet-wide, which is the other edge of the
+same knife and is recorded as such. Council fallout at first
+ignited the feud engine (testimony pushes plus directly
+pushed grudges manufactured sabotage, which manufactured
+sittings); fallout now drifts trust only, at roughly half the
+first magnitudes, testimony pushes halved, and judicial
+sittings sit behind a five-day gap. On seed 17 the council
+confined the engineers, life support and the reactor failed
+together, and the ship spiralled toward collapse; the air
+harm was halved so that spiral takes ten days instead of
+four, time for repairs, an emergency grant (which raises the
+parts-shortfall repair floor from 0.35 to 0.7 while it
+stands), or a port to matter. Confined crew are fed in
+quarters: confinement is the room and the idleness, not
+starvation. A note on drama levels: the late-voyage feud heat
+at 90 days is pre-existing, not a council regression; measured
+A/B on seed 42, the Stores-era code runs 103 sabotages and
+1,535 accusations over 90 days, this build 97 and 1,471.
+
+Balance, daily seeds plus 99 over 90 days, at the final
+tuning: deaths zero on every seed; injuries 2 to 7; attacks
+0 to 1 (seed 30); sittings 11 to 28, of which inquiries 4 to
+10; sentences 8 to 16; relief motions at most one per voyage,
+carried on the three hot seeds (16, 40, 99) and failed
+elsewhere. Zero deaths is inside the frequency law (zero to
+two per typical voyage) at its floor, and the same honesty
+applies as in the Stores entry: the death machinery is proven
+by constructed tests (a suffocation cascade that kills through
+the ledger, grudge violence in a health-only harness, the
+ledger reconciling on every death), not by the table.
+Legitimacy saturates at 1.00 on calm seeds: agreement with
+acquittals is near-unanimous aboard a quiet ship, so the
+store fills and stays; it moves on the hot seeds (0.97 on
+seed 99) and after contested findings.
+
+Deferred, with reasons. Admissions and course/port decisions
+are not built: their inputs (crew arrivals, distress calls)
+are unbuilt systems, and a jurisdiction with nothing to judge
+would be theatre. The designed Arrival ending assumed a final
+destination; the voyage is a circuit now, so no arrival
+ending is built and none is forced; the endings are ship lost
+and crew collapse. The Stores header and this chapter's
+headers in DESIGN.md are updated from designed to built; the
+Stores header had been stale since step 3 landed.
+
+The viewer. Sittings stage in the mess: the convened event
+seats the officers at the mess tables in seat order (main.ts
+holds the roster and passes presentation copies, so the deck
+walks officers across the ship without the sim being asked),
+the accused stands at the open end with the security chief
+beside them, and the finding raises vote tokens over heads in
+seat order (green tick, red cross, dots for abstention)
+through the bubble layer. The wounded stand hunched with a
+bandage painted into a new hurt sprite in bodies.ts; the dead
+and the put-off leave the deck and the minimap, and the
+roster marks them Deceased or Put off the ship. The person
+card gains a Body record: health, wounds by part with
+infection, sickness, lasting marks. Legitimacy rides the
+stores strip as a sixth cell (no days, no trend: a percentage
+and a band). Deaths, injuries, sittings, verdicts, relief,
+and the endings are highlight-class and alert-fed (death and
+the endings critical, relief and injury major).
+
+Gates: tests 95/95 (14 new: 6 in test/health.test.ts, 8 in
+test/council.test.ts; the two interim rationing tests in
+test/stores.test.ts rewritten to pin the new boundary, plus a
+strict-level arithmetic test), purity green, typecheck clean
+on both configs, viewer builds. Replay exact via the CLI
+against the regenerated runs/seed42. New seed-42 fingerprint:
+4,320 ticks, 34,072 events (7 fewer than the Stores build;
+the candidate lists changed, so the month's decisions
+re-deal), hash 7525905c8b5f6c32, about 3,060 ticks/sec
+through the CLI. The 90-day reference run: 12,960 ticks,
+99,407 events, hash 19330fe257de8ca9.

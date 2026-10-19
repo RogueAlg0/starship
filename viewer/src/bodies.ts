@@ -104,11 +104,32 @@ const SEATED_ROWS = [
   ".BB..BB.",
 ] as const;
 
+// Hurt: the head rides a row low (hunched, like the seated
+// figure), one arm hangs long, the legs stagger. The deck picks
+// this frame for a member whose body carries open severity or a
+// heavy sickness; paintBody adds the bandage pixels, so the mark
+// is part of the sprite, not an overlay.
+const HURT_ROWS = [
+  "........",
+  ".HHHHHH.",
+  "HSSSSSSH",
+  "HSESSESH",
+  ".SSSSSS.",
+  ".TTTTTT.",
+  "ATTTTTTA",
+  "ATTTTTTh",
+  ".TTTT...",
+  "...PP...",
+  "..P..P..",
+  "..B..B..",
+] as const;
+
 export interface BodySprites {
   idle: HTMLCanvasElement;
   walk: HTMLCanvasElement;
   work: HTMLCanvasElement;
   seated: HTMLCanvasElement;
+  hurt: HTMLCanvasElement;
 }
 
 /** Multiply a hex colour's channels by a factor (a paint-time tint). */
@@ -123,6 +144,7 @@ function paintBody(
   pants: string,
   dim = 1,
   headDy = 0,
+  bandage = false,
 ): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = 8;
@@ -193,6 +215,13 @@ function paintBody(
     const tone = mix(look.skinTone, look.hairTone, 0.35);
     for (const x of [1, 2, 5, 6]) set(x, headDy + 3, tone);
   }
+  // The hurt figure wears its bandage: white pixels across the
+  // torso and one at the temple, painted into the sprite itself.
+  if (bandage) {
+    set(2, headDy + 4, "#e8e6df");
+    set(3, headDy + 4, "#e8e6df");
+    set(6, headDy + 1, "#e8e6df");
+  }
   return canvas;
 }
 
@@ -222,6 +251,7 @@ export function getBodySprites(member: CrewMember, dim = 1): BodySprites {
     walk: paintBody(WALK_ROWS, look, pants, dim),
     work: paintBody(WORK_ROWS, look, pants, dim),
     seated: paintBody(SEATED_ROWS, look, pants, dim, 1),
+    hurt: paintBody(HURT_ROWS, look, pants, dim, 1, true),
   };
   bodyCache.set(key, sprites);
   return sprites;

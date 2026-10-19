@@ -11,6 +11,7 @@ import type { CrewMember } from "../entities/crew.ts";
 import { r3 } from "../log/events.ts";
 import { clamp01 } from "../world/systems.ts";
 import { CONFIG } from "../scenario/config.ts";
+import { bestSkillOf } from "../world/skills.ts";
 import { maybeGossipSpeech } from "./speech.ts";
 
 export interface Beliefs {
@@ -31,6 +32,16 @@ export interface Beliefs {
   gossipTips: Record<string, number>;
   /** Milestones already reported, keyed `${personId}:bond` / `:trust`. */
   milestones: Record<string, string>;
+  /** Believed skill: this person's belief about each crewmate's
+   *  level in each discipline (discipline keys as in
+   *  world/skills.ts), held per observer and corrected only by
+   *  work actually witnessed. The ledger holds the truth; this
+   *  holds what the ship thinks, and the two are not the same
+   *  number. Seeded at generation (skills' draw pass). */
+  skill: Record<string, Record<string, number>>;
+  /** Tick of the last believed-skill correction, keyed
+   *  `${personId}:${discipline}`: the standing gate's memory. */
+  skillSeen: Record<string, number>;
 }
 
 /** Blank beliefs about a roster: neutral until generation seeds them. */
@@ -43,6 +54,8 @@ export function createBeliefs(roster: readonly string[]): Beliefs {
     bond[id] = 0;
     suspicion[id] = 0;
   }
+  const skill: Record<string, Record<string, number>> = {};
+  for (const id of roster) skill[id] = {};
   return {
     trust,
     bond,
@@ -52,6 +65,8 @@ export function createBeliefs(roster: readonly string[]): Beliefs {
     accusationsMade: {},
     gossipTips: {},
     milestones: {},
+    skill,
+    skillSeen: {},
   };
 }
 
@@ -313,7 +328,9 @@ export function stepSociety(w: World, crew: readonly CrewMember[]): void {
       w.emit("accusation", [accuser.id], {
         accused: other.id,
         suspicion: Math.round(suspicion * 1000) / 1000,
-        means: r3(other.repairSkill),
+        // Means is the accused's capability on the ship's systems:
+        // the strongest competence their discipline levels cast.
+        means: r3(bestSkillOf(other)),
         motive: r3(Math.max(0, motive)),
         opportunity: r3(suspicion),
       });

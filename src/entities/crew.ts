@@ -36,6 +36,19 @@ import { applySabotage, sabotageCandidate } from "../plots/sabotage.ts";
 import { maybeSocialSpeech } from "../perception/speech.ts";
 import { CONFIG } from "../scenario/config.ts";
 import { createBody, totalSeverity, type BodyState } from "../world/health.ts";
+import {
+  bookXp,
+  createSkills,
+  difficultyOf,
+  disciplineOfSystem,
+  drawSkillsPass,
+  effectiveLevel,
+  isCover,
+  skillOf,
+  DISCIPLINES,
+  type Discipline,
+  type SkillsState,
+} from "../world/skills.ts";
 import type { Voyage } from "../world/galaxy.ts";
 import type { Ship } from "../world/ship.ts";
 import { gateRepairDelta } from "../world/stores.ts";
@@ -59,7 +72,10 @@ export class CrewMember {
   readonly roleKey: string;
   readonly title: string;
   readonly affinity: readonly string[];
-  readonly repairSkill: number;
+  /** The skills ledger: discipline levels booked from work
+   *  actually done (src/world/skills.ts). Owned by the skills
+   *  ledger's booking door, the way the body is owned by health. */
+  readonly skills: SkillsState;
   readonly traits: string[];
   room: number;
   readonly needs: Needs;
@@ -110,7 +126,7 @@ export class CrewMember {
     roleKey: string,
     title: string,
     affinity: readonly string[],
-    repairSkill: number,
+    skills: SkillsState,
     traits: string[],
     room: number,
     needs: Needs,
@@ -123,7 +139,7 @@ export class CrewMember {
     this.roleKey = roleKey;
     this.title = title;
     this.affinity = affinity;
-    this.repairSkill = repairSkill;
+    this.skills = skills;
     this.traits = traits;
     this.room = room;
     this.needs = needs;
@@ -202,13 +218,20 @@ export function generateCrew(
       CONFIG.crewGen.needMin +
       rng.next() * (CONFIG.crewGen.needMax - CONFIG.crewGen.needMin);
     const watch: WatchName = nightRoles.has(role.key) ? "night" : "day";
+    const skills = createSkills(role.key);
+    // One draw per member at this exact point on the stream: the
+    // slot the flat repair number's jitter used to draw from.
+    // It draws the passion now. The slot is a seed-identity
+    // contract — move it or drop it and the seed names a
+    // different crew (different traits, different beliefs).
+    skills.passion = DISCIPLINES[rng.int(DISCIPLINES.length)] as Discipline;
     return new CrewMember(
       roster[i] as string,
       `${firstNames[i]} ${lastNames[i]}`,
       role.key,
       role.title,
       role.affinity,
-      Math.min(1, role.repair + rng.next() * 0.1),
+      skills,
       traits,
       home >= 0 ? home : 0,
       {
@@ -254,6 +277,10 @@ export function generateCrew(
       break;
     }
   }
+  // The skills pass draws last on this stream (passions, minor
+  // disciplines, believed skill), after every identity draw, so
+  // the roster a seed names is the roster it has always named.
+  drawSkillsPass(rng, crew);
   return crew;
 }
 
@@ -319,8 +346,22 @@ function socialScore(member: CrewMember, other: CrewMember): number {
   );
 }
 
-function canRepair(member: CrewMember, system: ShipSystem): boolean {
-  return member.affinity.includes(system.kind) && member.repairSkill >= 0.2;
+/**
+ * Who may repair a system: an affinity holder whose discipline
+ * level clears the floor, or any hand whose practice in the
+ * system's discipline has outgrown the roster (level at the
+ * repair gate, affinity or none). Exported for the viewer, which
+ * applies the same test to judge a tool-carrying errand.
+ */
+export function canRepair(member: CrewMember, system: ShipSystem): boolean {
+  const discipline = disciplineOfSystem(system.kind);
+  if (discipline === null) return false;
+  const level = effectiveLevel(member, discipline);
+  return (
+    level >= CONFIG.skills.repairGateLevel ||
+    (member.affinity.includes(system.kind) &&
+      level >= CONFIG.skills.affinityGateLevel)
+  );
 }
 
 function pickWorkSystem(
@@ -431,8 +472,8 @@ function buildCandidates(
       if (other.room !== member.room) continue;
       if (totalSeverity(other) <= 0 && other.body.sick < 0.4) continue;
       const skill = member.affinity.includes("medbay unit")
-        ? 0.6 + member.repairSkill
-        : 0.25;
+        ? 0.6 + skillOf(member, "medicine")
+        : 0.25 + skillOf(member, "medicine") * 0.25;
       candidates.push({
         key: `treat:${other.id}`,
         base: CONFIG.scores.repairBase * skill * workFactor + totalSeverity(other),
@@ -694,7 +735,8 @@ function applyChoice(
       // medbay condition by place, lay hands when there is no
       // doctor): here we only record whose hands are on them.
       target.body.treatedUntil = w.tick + 1;
-      if (member.treatTarget !== target.id) {
+      const session = member.treatTarget !== target.id;
+      if (session) {
         member.treatTarget = target.id;
         w.emit("treatment_started", [member.id], {
           medic: member.id,
@@ -703,6 +745,23 @@ function applyChoice(
           lay: !member.affinity.includes("medbay unit"),
         });
       }
+      // Treatment teaches the treater, and the worse the hurt,
+      // the deeper the lesson.
+      bookXp(
+        w,
+        crew,
+        member,
+        "medicine",
+        CONFIG.skills.treatMilliPerTick,
+        {
+          task: `tending ${target.name}`,
+          cover: isCover(w.tick, member, "medbay unit", crew, ship),
+          session,
+          mentor: true,
+          difficulty:
+            1 + totalSeverity(target) * CONFIG.skills.treatSeverityFactor,
+        },
+      );
     }
     return;
   }
@@ -765,6 +824,7 @@ function applyChoice(
     return;
   }
   if (key.startsWith("work:")) {
+    const session = member.activity !== "work";
     member.activity = "work";
     member.needs.energy = clamp01(
       member.needs.energy - CONFIG.needs.workEnergyCost,
@@ -772,8 +832,11 @@ function applyChoice(
     const systemId = key.slice("work:".length);
     if (systemId !== "generic") {
       const system = ship.systemById(systemId);
+      const discipline = disciplineOfSystem(system.kind);
+      const before = system.condition;
       const factor =
-        (0.5 + member.repairSkill) * (1 + traitEffect(member, "maintain"));
+        (0.5 + (discipline !== null ? skillOf(member, discipline) : 0)) *
+        (1 + traitEffect(member, "maintain"));
       applyConditionDelta(
         w,
         system,
@@ -781,6 +844,42 @@ function applyChoice(
         member.id,
         "work",
       );
+      // Work teaches: the system's discipline books it, priced
+      // by how hard the work was when it began.
+      if (discipline !== null) {
+        bookXp(
+          w,
+          crew,
+          member,
+          discipline,
+          CONFIG.skills.maintainMilliPerTick,
+          {
+            task: `keeping the ${system.kind}`,
+            cover: isCover(w.tick, member, system.kind, crew, ship),
+            session,
+            mentor: session,
+            difficulty: difficultyOf(before),
+          },
+        );
+      }
+    } else {
+      // Unguided work teaches the room's trade, or the member's
+      // own where the room has none to teach.
+      const kind = ship.roomKind(member.room);
+      const discipline: Discipline =
+        kind === "mess" || kind === "cargo"
+          ? "husbandry"
+          : ((CONFIG.skills.primary[member.roleKey] ??
+              "operations") as Discipline);
+      bookXp(w, crew, member, discipline, CONFIG.skills.genericMilliPerTick, {
+        task:
+          kind === "mess"
+            ? "keeping the mess"
+            : kind === "cargo"
+              ? "handling the stores"
+              : "at their trade",
+        session,
+      });
     }
     driftWithCoworkers(w, member, crew);
     w.emit("work", [member.id], {
@@ -791,9 +890,14 @@ function applyChoice(
   }
   if (key.startsWith("repair:")) {
     const system = ship.systemById(key.slice("repair:".length));
+    const discipline = disciplineOfSystem(system.kind);
+    const before = system.condition;
+    const wasDamaged = system.damaged;
+    const partsBefore = ship.stores?.byKey.parts.qtyMilli ?? 0;
+    const session = member.repairTarget !== system.id;
     const amount =
       CONFIG.systems.repairPerTick *
-      (0.5 + member.repairSkill) *
+      (0.5 + (discipline !== null ? skillOf(member, discipline) : 0)) *
       (1 + traitEffect(member, "repair"));
     // A repair pays for the condition it restores out of the parts
     // locker; a short locker buys a smaller repair.
@@ -810,9 +914,42 @@ function applyChoice(
     );
     // One event per repair session, not per tick: the log records that a
     // repair began; system_repaired records that it finished.
-    if (member.repairTarget !== system.id) {
+    if (session) {
       member.repairTarget = system.id;
       w.emit("repair", [member.id], { system: system.id, room: member.room });
+    }
+    // Repair teaches its system's discipline, priced by the
+    // condition the system stood in when the work began; a repair
+    // that drew parts from the locker also teaches fabrication,
+    // and finishing a repair teaches most of all.
+    if (discipline !== null) {
+      const cover = isCover(w.tick, member, system.kind, crew, ship);
+      const difficulty = difficultyOf(before);
+      bookXp(w, crew, member, discipline, CONFIG.skills.repairMilliPerTick, {
+        task: `repairing the ${system.kind}`,
+        cover,
+        session,
+        mentor: true,
+        difficulty,
+      });
+      const partsAfter = ship.stores?.byKey.parts.qtyMilli ?? 0;
+      if (partsAfter < partsBefore) {
+        bookXp(
+          w,
+          crew,
+          member,
+          "fabrication",
+          CONFIG.skills.repairMilliPerTick * CONFIG.skills.fabricationFraction,
+          { task: "making the fix from stock", cover, difficulty },
+        );
+      }
+      if (wasDamaged && !system.damaged) {
+        bookXp(w, crew, member, discipline, CONFIG.skills.completionBonusMilli, {
+          task: `bringing the ${system.kind} back`,
+          cover,
+          mentor: true,
+        });
+      }
     }
     return;
   }
@@ -1034,7 +1171,11 @@ function notableTablePairing(
  * When a meal window closes, close its book: one summary event for the
  * whole window, naming how many sat down, rather than a line per eater.
  */
-function flushMealService(w: World, ctx: CrewContext): void {
+function flushMealService(
+  w: World,
+  crew: readonly CrewMember[],
+  ctx: CrewContext,
+): void {
   const state = ctx.meal;
   if (state === null) return;
   const day = Math.floor(w.tick / CONFIG.time.ticksPerDay);
@@ -1058,6 +1199,24 @@ function flushMealService(w: World, ctx: CrewContext): void {
     data.notableKind = state.notable.kind;
   }
   w.emit("meal_service", [], data);
+  // The window was served by someone's hands: the cook's
+  // husbandry books the service, or the quartermaster's when the
+  // cook is gone from the ship, at necessity's rate.
+  if (state.eaters.length > 0) {
+    const aboard = (m: CrewMember): boolean =>
+      !m.dead && !m.leftShip && !m.ashore;
+    const cook = crew.find((m) => m.roleKey === "cook" && aboard(m));
+    const hand =
+      cook ??
+      crew.find((m) => m.roleKey === "quartermaster" && aboard(m));
+    if (hand !== undefined) {
+      bookXp(w, crew, hand, "husbandry", CONFIG.skills.mealServiceMilli, {
+        task: `serving ${state.meal}`,
+        cover: cook === undefined,
+        session: true,
+      });
+    }
+  }
 }
 
 /** One tick of crew behaviour, in roster order. */
@@ -1068,7 +1227,7 @@ export function stepCrew(
 ): void {
   // A meal window that ended with the last tick gets its summary first,
   // before anyone acts in the new hour.
-  flushMealService(w, ctx);
+  flushMealService(w, crew, ctx);
 
   // An ended ship (lost, or crew collapsed) has no crew decisions
   // left to make: the log quiets to the ship's own noises.
@@ -1192,6 +1351,23 @@ export function checkCrewState(
         if (value < 0 || value > 1) {
           throw new Error(
             `${member.id} ${label} toward ${id} out of range: ${value}`,
+          );
+        }
+      }
+    }
+    for (const discipline of DISCIPLINES) {
+      const xp = member.skills.xpMilli[discipline];
+      if (!Number.isInteger(xp) || xp < 0) {
+        throw new Error(
+          `${member.id} ${discipline} experience out of range: ${xp}`,
+        );
+      }
+    }
+    for (const [id, record] of Object.entries(member.beliefs.skill)) {
+      for (const [discipline, value] of Object.entries(record)) {
+        if (value < 0 || value > 10) {
+          throw new Error(
+            `${member.id} believed ${discipline} of ${id} out of range: ${value}`,
           );
         }
       }

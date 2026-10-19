@@ -51,6 +51,7 @@ import {
   stepHealth,
   type HealthState,
 } from "./world/health.ts";
+import { stepSkills } from "./world/skills.ts";
 import { checkShipState, stepSystems } from "./world/systems.ts";
 import { Weather } from "./world/weather.ts";
 
@@ -122,7 +123,7 @@ export function buildWorld(
   // the roster's roles. Neither can shift another stream.
   const health = createHealthState();
   const council = createCouncil(crew);
-  ship.councilPublic = { cmoFilled: true, emergencyUntil: -1 };
+  ship.councilPublic = { cmoFilled: true, emergencyUntil: -1, acting: {} };
   const weather = new Weather();
   const ctx: CrewContext = {
     ship,
@@ -156,6 +157,8 @@ export function buildWorld(
       roleKey: member.roleKey,
       traits: member.traits,
       watch: member.watch,
+      passion: member.skills.passion,
+      boarding: member.skills.boarding,
     })),
   });
 
@@ -176,6 +179,7 @@ export function buildWorld(
     name: "health",
     step: (w) => stepHealth(w, health, ship, crew, weather),
   });
+  engine.addSystem({ name: "skills", step: (w) => stepSkills(w, crew) });
   engine.addSystem({
     name: "council",
     step: (w) =>

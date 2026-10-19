@@ -44,6 +44,12 @@ import type { HealthState } from "./health.ts";
 import { ledgerSummary } from "./health.ts";
 import type { Ship } from "./ship.ts";
 import {
+  believedSkill,
+  levelOf,
+  topDiscipline,
+  type Discipline,
+} from "./skills.ts";
+import {
   consumptionMilliPerDay,
   dailyUseMilli,
   daysOf,
@@ -705,6 +711,24 @@ function testimony(
   const statements: TestimonyStatement[] = [];
   const officers = frame.sitting.map((s) => s.member);
   if (officers.length === 0) return statements;
+  // Testimony is weighted by believed expertise: each officer
+  // hears the witness through what the officer holds about the
+  // witness's hands in the sitting's discipline (medicine at an
+  // inquest into a death, engineering over sabotage, husbandry
+  // over the stores). The doctor believed brilliant is heard as
+  // brilliant, until a public failure corrects the record.
+  const discipline: Discipline =
+    data.causeKind === "death"
+      ? "medicine"
+      : data.causeKind === "sabotage"
+        ? "engineering"
+        : data.causeKind === "theft"
+          ? "husbandry"
+          : "operations";
+  const expertise = (officer: CrewMember, witnessId: string): number =>
+    CONFIG.skills.testimonyBeliefBase +
+    CONFIG.skills.testimonyBeliefPerLevel *
+      believedSkill(officer, witnessId, discipline);
   let witnessIds: string[] = [];
   if (data.presentIds.length > 0) {
     witnessIds = data.presentIds.filter((id) => alive(byId(crew, id)));
@@ -763,7 +787,11 @@ function testimony(
         for (const officer of officers) {
           if (officer === witness) continue;
           const discount = 0.5 + 0.5 * Math.max(0, trustOf(officer.beliefs, witness.id));
-          driftSuspicion(officer.beliefs, scapegoat.id, cfg.scapegoatPush * discount);
+          driftSuspicion(
+            officer.beliefs,
+            scapegoat.id,
+            cfg.scapegoatPush * discount * expertise(officer, witness.id),
+          );
         }
         spokenAbout = scapegoat.id;
         statements.push({
@@ -791,7 +819,11 @@ function testimony(
         for (const officer of officers) {
           if (officer === witness) continue;
           const discount = 0.5 + 0.5 * Math.max(0, trustOf(officer.beliefs, witness.id));
-          driftSuspicion(officer.beliefs, about, cfg.testimonyPush * discount);
+          driftSuspicion(
+            officer.beliefs,
+            about,
+            cfg.testimonyPush * discount * expertise(officer, witness.id),
+          );
         }
         spokenAbout = about;
         statements.push({
@@ -1929,29 +1961,40 @@ function runCourseSitting(
   });
 }
 
-/** Qualification for a seat, by portfolio: who aboard could hold it. */
+/**
+ * Qualification for a seat, by portfolio: who aboard could hold
+ * it. The appointer judges by BELIEVED skill — the captain
+ * appoints by what they hold about a person's hands, not by the
+ * ledger's truth — so an appointment can be wrong, and the
+ * chronicle's record of it (the score) is the belief's price.
+ * Without an appointer (a bare harness), the truth stands in.
+ */
 function qualification(
   seatKey: string,
   member: CrewMember,
   crew: readonly CrewMember[],
   appointer: CrewMember | undefined,
 ): number {
+  const believed = (discipline: Discipline): number =>
+    appointer !== undefined
+      ? believedSkill(appointer, member.id, discipline) / 10
+      : levelOf(member, discipline) / 10;
   switch (seatKey) {
     case "chief engineer":
       return (
-        member.repairSkill *
+        believed("engineering") *
         (member.affinity.includes("reactor") || member.affinity.includes("engines")
           ? 1
           : 0.4)
       );
     case "chief medical officer":
       return member.affinity.includes("medbay unit")
-        ? 0.7 + member.repairSkill * 0.3
-        : member.repairSkill * 0.3;
+        ? 0.7 + believed("medicine") * 0.3
+        : believed("medicine") * 0.3;
     case "security chief":
       return member.roleKey === "security officer"
         ? 1
-        : member.repairSkill * 0.2 + (member.traits.includes("bold") ? 0.1 : 0);
+        : believed("operations") * 0.2 + (member.traits.includes("bold") ? 0.1 : 0);
     case "science officer":
       return member.roleKey === "scientist" ? 1 : 0.3;
     case "quartermaster":
@@ -1971,10 +2014,14 @@ function qualification(
       const medianTrust = count > 0 ? trustSum / count : 0;
       const captainBond =
         appointer !== undefined ? bondOf(appointer.beliefs, member.id) : 0;
-      return medianTrust * 0.5 + member.repairSkill * 0.2 + captainBond * 0.3;
+      return (
+        medianTrust * 0.5 +
+        believed(topDiscipline(member).discipline) * 0.2 +
+        captainBond * 0.3
+      );
     }
     default:
-      return member.repairSkill;
+      return believed(topDiscipline(member).discipline);
   }
 }
 
@@ -2207,6 +2254,16 @@ export function stepCouncil(
       const cmo = byId(crew, state.seats["chief medical officer"] ?? null);
       ship.councilPublic.cmoFilled = alive(cmo);
       ship.councilPublic.emergencyUntil = state.emergencyUntil;
+      // Seats held by appointment rather than by their native
+      // role: the skills ledger prices necessity from this.
+      const acting: Record<string, string> = {};
+      for (const def of SEATS) {
+        const holder = byId(crew, state.seats[def.key] ?? null);
+        if (holder !== undefined && holder.roleKey !== def.role) {
+          acting[def.key] = holder.id;
+        }
+      }
+      ship.councilPublic.acting = acting;
     }
   };
   syncPublic();

@@ -34,10 +34,17 @@ export class Ship {
   stores: StoresState | null = null;
   /**
    * The council's public face, attached by the run builder: whether
-   * the medical seat is filled and whether emergency powers stand.
-   * Other systems read these two facts; the council owns the rest.
+   * the medical seat is filled, whether emergency powers stand, and
+   * which seats are held by appointment rather than by the role
+   * that first wears them (seat key to member id) — the skills
+   * ledger reads the last of these to price necessity teaching.
+   * Other systems read these facts; the council owns the rest.
    */
-  councilPublic: { cmoFilled: boolean; emergencyUntil: number } | null = null;
+  councilPublic: {
+    cmoFilled: boolean;
+    emergencyUntil: number;
+    acting: Record<string, string>;
+  } | null = null;
   /**
    * An ending has been reached (ship lost, crew collapse): the crew
    * stop deciding, and the log quiets to the ship's own noises.

@@ -23,7 +23,17 @@ import type { SimEvent } from "../../src/log/events.ts";
 import { chatterText } from "../../src/perception/speech.ts";
 import { CONFIG } from "../../src/scenario/config.ts";
 import { createRun, type RunContext } from "../../src/sim.ts";
-import type { CrewMember } from "../../src/entities/crew.ts";
+import { canRepair, type CrewMember } from "../../src/entities/crew.ts";
+import {
+  believedSkill,
+  capFor,
+  DISCIPLINES,
+  DISCIPLINE_LABEL,
+  DISCIPLINE_SHORT,
+  levelOf,
+  levelProgress,
+  topDiscipline,
+} from "../../src/world/skills.ts";
 import {
   blockAt,
   mealWindowAt,
@@ -319,15 +329,11 @@ function updateCarry(memberId: string, event: SimEvent): void {
   if (member === undefined) return;
   const towards = eventNum(event, "towards");
   const from = eventNum(event, "from");
-  // The engine's own repair test (affinity plus skill), applied to
-  // the move's destination: an engineer heading to a failed system
-  // carries the tools for it.
+  // The engine's own repair test (affinity plus discipline
+  // level), applied to the move's destination: an engineer
+  // heading to a failed system carries the tools for it.
   const errand = run.ship.systems.find(
-    (s) =>
-      s.room === towards &&
-      (s.damaged || s.failed) &&
-      member.affinity.includes(s.kind) &&
-      member.repairSkill >= 0.2,
+    (s) => s.room === towards && (s.damaged || s.failed) && canRepair(member, s),
   );
   if (errand !== undefined) {
     carryByMember.set(memberId, "tool");
@@ -1370,6 +1376,55 @@ function buildDossier(member: CrewMember): void {
       bodyText += ". Unmarked.";
     }
     personDossierEl.appendChild(dossierRow("Body", bodyText));
+  }
+
+  // The hands: seven disciplines, the true levels with progress
+  // toward the next, the passion in prose, any cap a mark
+  // imposes, and the captain's believed level where it differs —
+  // the gap between the ledger and the appointment is the story.
+  if (member.skills !== undefined) {
+    personDossierEl.appendChild(dossierLabel("Skills"));
+    const passionForms = ["a gift for", "a hunger for", "a love of"];
+    const passion = member.skills.passion;
+    personDossierEl.appendChild(
+      dossierRow(
+        "Passion",
+        `${passionForms[DISCIPLINES.indexOf(passion) % passionForms.length]} ` +
+          DISCIPLINE_LABEL[passion],
+      ),
+    );
+    const captainId = run.council.seats["captain"] ?? null;
+    const captain =
+      captainId !== null && captainId !== member.id
+        ? crewById(captainId)
+        : undefined;
+    for (const discipline of DISCIPLINES) {
+      const level = levelOf(member, discipline);
+      const cap = capFor(member, discipline);
+      if (level === 0 && discipline !== passion && cap === null) continue;
+      const progress = levelProgress(member, discipline);
+      let text = `${level}`;
+      if (level < 10) {
+        text += ` · ${Math.round(progress.fraction * 100)}% to ${level + 1}`;
+      }
+      if (discipline === passion) text += " · passion";
+      if (cap !== null && level > cap) {
+        const mark =
+          discipline === "operations" ? "a lost eye" : "a ruined hand";
+        text += ` · capped at ${cap} by ${mark}`;
+      }
+      if (captain !== undefined) {
+        const believed = Math.round(
+          believedSkill(captain, member.id, discipline),
+        );
+        if (Math.abs(believed - level) >= 1) {
+          text += ` · the captain rates them ${believed}`;
+        }
+      }
+      personDossierEl.appendChild(
+        dossierRow(DISCIPLINE_LABEL[discipline], text),
+      );
+    }
   }
 
   // Closest relationships first: bond, with trust beside it.
@@ -2527,13 +2582,17 @@ function updateSlowUi(): void {
   for (const member of run.crew) {
     const ui = crewUi.get(member.id);
     if (ui === undefined) continue;
+    // The role line carries the primary discipline and its level:
+    // the roster is a glance, and one number is the glance.
+    const top = topDiscipline(member);
+    const skillText = `${DISCIPLINE_SHORT[top.discipline]} ${top.level}`;
     const roleText = member.dead
-      ? `${member.title} · Deceased`
+      ? `${member.title} · ${skillText} · Deceased`
       : member.leftShip
-        ? `${member.title} · Put off the ship`
+        ? `${member.title} · ${skillText} · Put off the ship`
         : member.ashore
-          ? `${member.title} · Ashore`
-          : member.title;
+          ? `${member.title} · ${skillText} · Ashore`
+          : `${member.title} · ${skillText}`;
     if (ui.roleEl.textContent !== roleText) {
       ui.roleEl.textContent = roleText;
     }

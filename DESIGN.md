@@ -1043,7 +1043,7 @@ flavour pool disconnected from the ship.
   highlights carry only notable lines (a tip, a rehearsal, a
   lie), capped per day in config.
 
-## Crew skills: the hands learn (designed Oct 18, 2026, not built)
+## Crew skills: the hands learn (built Oct 18, 2026)
 
 RuneScape gives a character a level per skill and raises it by
 doing the skill. RimWorld gives a colonist a row of skills, a

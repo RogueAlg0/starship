@@ -205,20 +205,22 @@ export const CONFIG = {
     needMax: 0.95,
   },
 
-  /** The twelve roles. affinity: system kinds the role tends and can repair. */
+  /** The twelve roles. affinity: system kinds the role tends and
+   *  can repair; starting discipline levels live in skills.boarding,
+   *  the table the old flat competence number was drawn from. */
   roles: [
-    { key: "captain", title: "Captain", home: "bridge", affinity: ["comms"], repair: 0.1 },
-    { key: "executive officer", title: "Executive Officer", home: "bridge", affinity: ["comms", "engines"], repair: 0.25 },
-    { key: "chief engineer", title: "Chief Engineer", home: "engineering", affinity: ["reactor", "engines", "life support", "water recycler"], repair: 0.95 },
-    { key: "engineer", title: "Engineer", home: "engineering", affinity: ["reactor", "engines", "life support", "water recycler"], repair: 0.85 },
-    { key: "medic", title: "Medic", home: "medbay", affinity: ["medbay unit"], repair: 0.35 },
-    { key: "cook", title: "Cook", home: "mess", affinity: ["water recycler"], repair: 0.2 },
-    { key: "botanist", title: "Botanist", home: "hydroponics", affinity: ["hydroponics rig"], repair: 0.4 },
-    { key: "pilot", title: "Pilot", home: "bridge", affinity: ["engines", "comms"], repair: 0.3 },
-    { key: "navigator", title: "Navigator", home: "bridge", affinity: ["comms"], repair: 0.2 },
-    { key: "security officer", title: "Security Officer", home: "quarters", affinity: [] as string[], repair: 0.15 },
-    { key: "scientist", title: "Scientist", home: "lab", affinity: ["comms"], repair: 0.25 },
-    { key: "quartermaster", title: "Quartermaster", home: "cargo", affinity: ["water recycler"], repair: 0.35 },
+    { key: "captain", title: "Captain", home: "bridge", affinity: ["comms"] },
+    { key: "executive officer", title: "Executive Officer", home: "bridge", affinity: ["comms", "engines"] },
+    { key: "chief engineer", title: "Chief Engineer", home: "engineering", affinity: ["reactor", "engines", "life support", "water recycler"] },
+    { key: "engineer", title: "Engineer", home: "engineering", affinity: ["reactor", "engines", "life support", "water recycler"] },
+    { key: "medic", title: "Medic", home: "medbay", affinity: ["medbay unit"] },
+    { key: "cook", title: "Cook", home: "mess", affinity: ["water recycler"] },
+    { key: "botanist", title: "Botanist", home: "hydroponics", affinity: ["hydroponics rig"] },
+    { key: "pilot", title: "Pilot", home: "bridge", affinity: ["engines", "comms"] },
+    { key: "navigator", title: "Navigator", home: "bridge", affinity: ["comms"] },
+    { key: "security officer", title: "Security Officer", home: "quarters", affinity: [] as string[] },
+    { key: "scientist", title: "Scientist", home: "lab", affinity: ["comms"] },
+    { key: "quartermaster", title: "Quartermaster", home: "cargo", affinity: ["water recycler"] },
   ],
 
   /**
@@ -1069,6 +1071,160 @@ export const CONFIG = {
     /** Days of failed life support with an empty oxygen margin
      *  (or a reactor at the floor) before the ship is lost. */
     doomDays: 2,
+  },
+
+  /**
+   * Crew skills (the "hands learn" chapter): seven disciplines,
+   * levels 0 to 10, experience booked from work actually done in
+   * integer milli-units, the way harm is booked to its ledger.
+   * The booking is pure arithmetic and draws nothing from any
+   * stream, so experience can never change a run's luck.
+   */
+  skills: {
+    /** Cumulative milli-XP needed to REACH each level, 1 to 10.
+     *  The gaps grow as they rise: the first levels of a new
+     *  discipline come in days, the last levels of a mastered
+     *  one take a voyage, and nobody reaches 10 in anything
+     *  they did not board near. */
+    thresholdsMilli: [
+      20000, 55000, 105000, 175000, 270000, 430000, 610000, 820000, 1060000,
+      1330000,
+    ],
+    /** The competence the old flat number's formulas read, per
+     *  effective level: a level 7 hand reads 0.98, the way the
+     *  chief engineer's rolled number read before the chapter. */
+    skillPerLevel: 0.14,
+    /** A hand at this level in a system's discipline can repair
+     *  that system whether or not their role lists it: practice
+     *  outranks the roster. */
+    repairGateLevel: 6,
+    /** An affinity holder needs at least this level in the
+     *  system's discipline to repair it (the old 0.2 floor). */
+    affinityGateLevel: 2,
+    /** Milli-XP per tick of work, before difficulty and rate
+     *  factors. Maintaining a system, repairing one, treating a
+     *  patient, and the unguided work of a room, per tick. */
+    maintainMilliPerTick: 50,
+    repairMilliPerTick: 60,
+    treatMilliPerTick: 55,
+    genericMilliPerTick: 45,
+    /** A meal window served books this to the cook's husbandry:
+     *  two windows a day, and the cook's primary trade has few
+     *  other teachers in this engine, so the service carries the
+     *  weight of a working day. Sized so a working cook gains
+     *  about a level of husbandry in 90 days of service. */
+    mealServiceMilli: 1150,
+    /** A port resupply books this to the quartermaster's
+     *  husbandry: the manifest and the loading are stores work,
+     *  and stores handling is husbandry's named trade. */
+    resupplyMilli: 2500,
+    /** A repair that brings a damaged system back books this
+     *  bonus to the hand that finished it. */
+    completionBonusMilli: 800,
+    /** Carrying a wounded crewmate to the medbay books this to
+     *  the carrier's medicine: beside the medic is a school. */
+    carryMilli: 440,
+    /** The lesson of a work accident: milli-XP booked in the
+     *  work's discipline, at the failure factor below. */
+    failureMilli: 300,
+    /** Difficulty of the work, from the system's condition when
+     *  the work began: in the red teaches most, work on a damaged
+     *  system next, routine maintenance least. Mirrors the
+     *  systems chapter's strain and damaged lines. */
+    difficultyRed: 2.5,
+    difficultyDamaged: 1.75,
+    difficultyRoutine: 1,
+    /** Treatment teaches with the patient's hurt: the rate
+     *  multiplier is 1 + total severity times this. */
+    treatSeverityFactor: 2,
+    /** A passion learns at this multiple of the booked rate. */
+    passionFactor: 2,
+    /** Necessity teaches at the passion rate: appointed cover,
+     *  or work no able native hand remains aboard to do. */
+    coverFactor: 2,
+    /** Failure teaches at this fraction of the work's rate. */
+    failureFactor: 0.5,
+    /** Co-presence teaches at this fraction of the worker's
+     *  booked lesson, to juniors standing with them. */
+    mentorFraction: 0.2,
+    /** A repair that draws parts from the locker also books
+     *  fabrication at this fraction of the repair's lesson: the
+     *  fabricator is not a system in this engine, and its work
+     *  is the parts a repair consumes (see DECISIONS). */
+    fabricationFraction: 0.2,
+    /** Rust: a discipline unpractised for this many days loses
+     *  this much milli-XP a day, down to the boarding level's
+     *  threshold and never below. Gains are all rust can eat. */
+    rustGraceDays: 7,
+    rustMilliPerDay: 250,
+    /** Marks cap the disciplines they touch at this effective
+     *  level: a ruined hand caps engineering and fabrication, a
+     *  lost eye caps operations. */
+    markCapLevel: 5,
+    /** Believed skill: at generation each observer's belief
+     *  about a crewmate's level starts offset by at most this
+     *  many levels, either way. */
+    beliefOffsetMax: 2,
+    /** A witnessed work session moves the witness's believed
+     *  level this far toward the truth. */
+    beliefCorrection: 0.5,
+    /** Outside a session, a witness's belief corrects at most
+     *  once per this many ticks per person and discipline. */
+    beliefSeenGateTicks: 72,
+    /** Testimony weight at an inquiry scales with the hearing
+     *  officer's believed skill in the sitting's discipline:
+     *  the factor is base + perLevel times believed level. */
+    testimonyBeliefBase: 0.7,
+    testimonyBeliefPerLevel: 0.06,
+    /** The accident roll: each effective level in the work's
+     *  discipline relieves this much of the danger, to a floor.
+     *  A practised hand is a safer hand. */
+    accidentReliefPerLevel: 0.045,
+    accidentReliefFloor: 0.55,
+    /** Treatment pricing: a treated body's healing scales by
+     *  this plus the treater's medicine competence. Hands at
+     *  medicine 0 heal at 0.6 of the old rate; the medic's
+     *  practised hands heal faster than the old flat price. */
+    treatHealBase: 0.6,
+    /** Boarding levels per role, from the role table the flat
+     *  number was drawn from: the chief engineer boards at
+     *  engineering 7, the medic at medicine 6, the cook at
+     *  husbandry 6 and almost nothing anywhere else. */
+    boarding: {
+      captain: { operations: 5, engineering: 1, husbandry: 1 },
+      "executive officer": { operations: 4, engineering: 2, husbandry: 1 },
+      "chief engineer": {
+        engineering: 7,
+        lifeSystems: 5,
+        fabrication: 3,
+        operations: 1,
+      },
+      engineer: { engineering: 6, lifeSystems: 4, fabrication: 3 },
+      medic: { medicine: 6, lifeSystems: 1, husbandry: 1 },
+      cook: { husbandry: 6, lifeSystems: 2 },
+      botanist: { hydroponics: 4, lifeSystems: 2, husbandry: 2, medicine: 1 },
+      pilot: { operations: 5, engineering: 3 },
+      navigator: { operations: 5, engineering: 1 },
+      "security officer": { operations: 3, engineering: 1, medicine: 1 },
+      scientist: { operations: 4, hydroponics: 2, lifeSystems: 2 },
+      quartermaster: { husbandry: 5, lifeSystems: 3, fabrication: 2, operations: 1 },
+    } as Record<string, Record<string, number>>,
+    /** The discipline a role's unguided work belongs to: the
+     *  trade they ply when no system in the room claims them. */
+    primary: {
+      captain: "operations",
+      "executive officer": "operations",
+      "chief engineer": "engineering",
+      engineer: "engineering",
+      medic: "medicine",
+      cook: "husbandry",
+      botanist: "hydroponics",
+      pilot: "operations",
+      navigator: "operations",
+      "security officer": "operations",
+      scientist: "operations",
+      quartermaster: "husbandry",
+    } as Record<string, string>,
   },
 
   /**

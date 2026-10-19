@@ -1517,3 +1517,164 @@ d77edb7898a4b6fd after. Decisions are unchanged at both spans
 (51,192 and 147,236). Every non-chatter event, decision, and
 belief is unchanged, per the no-feedback test above. Replay
 across chatter stays exact (test/chatter.test.ts).
+
+## Crew skills, built (Oct 18, 2026)
+
+The chapter is built. Seven disciplines (Engineering, Life
+Systems, Hydroponics, Medicine, Fabrication, Operations,
+Husbandry) live on a skills ledger (src/world/skills.ts) in the
+harm ledger's shape: state changes go through one booking door
+(bookXp), in integer milli-XP, at the moment work happens, and
+booking draws no randomness. Levels run 0 to 10 on a growing
+threshold curve (20k milli-XP to level 1, 1,330k to level 10).
+One level is worth 0.14 in the formulas that used to read the
+flat number, the scale the old role table was drawn at: a chief
+engineer boards Engineering 7 and reads 0.98, as the flat
+number did. Boarding levels live in CONFIG.skills.boarding;
+the chapter's examples hold (chief engineer Engineering 7,
+medic Medicine 6, cook Husbandry 6 and almost nothing else).
+
+The flat repairSkill is removed, not blended. Every formula
+that read it reads a discipline level now: repair and
+maintenance amounts and the repair gate (affinity plus level 2,
+or level 6 with no affinity, so a mastered hand can repair what
+her role never listed), treatment candidate pricing and the
+healing factor (priced by the actual treater: the member on the
+treat action, else the medbay-affinity hand standing in the
+medbay), work accident danger (relieved by the practised
+discipline of the room's most dangerous system), the accusation
+means term (the accused's best discipline), council
+qualification, and inquiry testimony weight.
+
+Booking doors: maintaining a system books its discipline,
+repairing books it again at the repair rate, a repair that drew
+parts books Fabrication at a fifth share, finishing a repair
+books a completion bonus, treating books Medicine scaled by the
+patient's severity, carrying the wounded books Medicine to the
+carrier, meal service books Husbandry to the server, a port
+resupply books Husbandry to the quartermaster, and room work
+with no system books the room's trade. Difficulty multiplies
+the base lesson (routine 1, damaged 1.75, red 2.5). Passion
+and cover add their doubling on the routine lesson instead of
+multiplying the difficulty: at routine work a passionate hand
+learns at exactly double rate, and red work with a passion
+learns at difficulty plus one, not difficulty times two. The
+compounding was measured minting level 4 in a secondary inside
+90 days; the additive form is what the chapter's numbers
+describe. Failure books at half rate (work accidents book the
+lesson this way). Mentoring books a fifth of a lesson to
+juniors standing with the worker, but only from lessons worth
+watching: repairs, treatments, completions, and session-opening
+work. Routine ticks do not radiate. Measured before the
+restriction, a patrolling officer reached Life Systems 4 from
+zero in 90 days by standing in rooms; watching is not doing.
+
+Rust runs in the skills step at day boundaries: past a week's
+grace since last practice, a discipline above its boarding
+level loses 250 milli-XP a day, and stops at the boarding
+floor. Marks cap the effective level (markCapLevel 5: a ruined
+hand caps Engineering and Fabrication, a lost eye caps
+Operations) while the true ledger keeps accruing underneath;
+every formula and display reads the effective level.
+
+Believed skill lives in the existing belief stores, per
+observer per subject per discipline. It starts offset from the
+truth by up to two levels (self-belief is always exact), and
+corrects only through witnessed work: co-present witnesses move
+toward the truth by at most half a level per gated booking,
+exactly on a witnessed level-up, and down to the truth on a
+witnessed public failure. Council appointments judge candidates
+by the appointer's believed skill, so a captain who has it
+backwards seats the worse hand; test/skills.test.ts constructs
+exactly that (the captain rates the cook Engineering 9 and the
+engineer 1, the chief engineer dies, and the cook takes the
+seat). Testimony at an inquiry is weighted by the officers'
+believed expertise in the cause's discipline (death to
+Medicine, sabotage to Engineering, theft to Husbandry, the
+rest to Operations), on top of the existing trust discount.
+
+Generation keeps a seed's identity. Removing the flat number
+removed its draw (role.repair plus rng.next() times 0.1, one
+draw per member), and the first build quietly named a
+different crew on every seed: traits and beliefs reshuffled,
+and seed 42's first sabotage slid past day 30, which two suite
+tests caught. The passion now draws in that slot, one draw per
+member at the same stream position, and the generated roster
+(names, traits, needs, beliefs, rivalries) is byte-identical
+to the pre-skills build on seed 42. The minor discipline and
+the believed-skill offsets draw after every identity draw, on
+the same stream, where nothing downstream consumes it.
+
+Tuning, measured over 90 days on the daily seeds plus 99.
+Level-ups per run: 15 to 23. Best gain per member per seed:
++3 at most, with one named edge below. Cross-training from a
+boarding level of 1 or less: at most +1 anywhere. Nobody
+reaches 10 in anything they did not board near (nobody reaches
+10 at all in the window). Deaths: 0 on all eight seeds. Two
+structural notes the table makes plain. First, growth follows
+the work the engine assigns, not the role's title: Life
+Systems runs hot because four roles hold the water recycler in
+their affinity, and the engineering department's growth splits
+between Engineering and Life Systems by which system is
+hurting. Second, Husbandry has few teachers in this engine:
+meal service (the cook) and the resupply manifest (the
+quartermaster). Meal service is sized so a working cook gains
+about a level of Husbandry in 90 days; the quartermaster's
+growth rides Life Systems, their affinity work, and their
+Husbandry moves by points, not levels. The named edge: seed
+42's cook gains Life Systems +4 in 90 days (2 to 6). Passion
+and role affinity coincide there on the fleet's most-damaged
+system, worked daily; the cook ends as the ship's best life
+support hand, one level over the chief engineer, who boarded
+at 5. The test ceiling records the shape: 3 anywhere, 4 only
+for a passion. If the maintainer wants the chapter's two-to-
+three to bind secondaries too, the recycler's damage rate is
+the dial, not the booking rates.
+
+Viewer: the roster row carries one number (the primary
+discipline's short label and level) beside the title, and the
+person card gains a Skills section: the passion in prose, a
+row per held discipline with the true level, progress toward
+the next, any mark cap, and the captain's believed level where
+it differs from the truth by a level or more. Level-ups print
+in the chronicle as minor milestones and never toast: the
+alert whitelist was not extended. The epilogue line of the
+chapter is not built: no epilogue surface exists in the engine
+or the viewer yet, and the ledger carries the numbers it will
+read (peak level and boarding level per discipline) when
+endings land.
+
+Judgment calls, recorded plainly:
+
+- Fabrication has no system of its own in this engine. It
+  books from work that teaches it: repairs that draw parts
+  from the locker, at a fifth of the repair's lesson.
+- Cover (the necessity rate) has two doors: holding an acting
+  council seat whose portfolio covers the discipline, or
+  working a system while no able native affinity holder is
+  aboard. The council public record now carries the acting map
+  the cover test reads.
+- Believed skill is updated at the booking moment, inside the
+  ledger's door, not in a separate perception sweep over work
+  events. Same store, same witness rule, one less pass that
+  can drift from the work itself.
+- Treatment healing reads the treater's Medicine through the
+  skills ledger, under the health chapter's own medic and lay
+  factors, which still apply beneath it.
+- Passengers and synthetics holding levels stay deferred, as
+  the chapter leaves them: the ledger keys on the person, not
+  the role, so nothing in the booking path assumes a role.
+
+Hash shift, stated honestly: skills change behaviour wherever
+a formula read the flat number, and hashes move. Seed 42: at
+4,320 ticks, 34,182 events and hash 8db3af2e6030063a before;
+34,191 events and hash f7bdb20808fbe3e1 after, with decisions
+unchanged at 51,192. At 12,960 ticks: 99,194 events and hash
+d77edb7898a4b6fd before; 99,915 events and hash
+3736cecd3770bb44 after. The 90-day drama on seed 42: sabotages
+100 to 91, system repairs 100 to 90, injuries 2 to 2, deaths
+0 to 0, accusations 1,461 to 1,385, grudges 88 to 82, lasting
+marks 1 to 1, plus 18 level-ups that did not exist before.
+Replay stays exact (test/replay.test.ts, test/chatter.test.ts)
+and the full gate is green: 128 tests, typecheck clean on the
+engine and the viewer.

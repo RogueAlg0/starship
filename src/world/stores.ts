@@ -25,6 +25,7 @@ import { driftSuspicion } from "../perception/beliefs.ts";
 import { CONFIG } from "../scenario/config.ts";
 import type { Port, Sector, Voyage } from "./galaxy.ts";
 import type { Ship } from "./ship.ts";
+import { bookXp } from "./skills.ts";
 import { applyConditionDelta, clamp01 } from "./systems.ts";
 import type { Traffic } from "./traffic.ts";
 
@@ -518,6 +519,22 @@ function runCall(
         full: entry.full,
       })),
     });
+    // The manifest is the quartermaster's work: stores handling
+    // books to their husbandry, the one lesson a port call
+    // teaches on a schedule.
+    const quartermaster = crew.find(
+      (member) =>
+        member.roleKey === "quartermaster" &&
+        !member.dead &&
+        !member.leftShip &&
+        !member.ashore,
+    );
+    if (quartermaster !== undefined) {
+      bookXp(w, crew, quartermaster, "husbandry", CONFIG.skills.resupplyMilli, {
+        task: `working the manifest at ${port.name}`,
+        session: true,
+      });
+    }
     if (port.character === "shrine") {
       for (const member of crew) {
         member.needs.morale = clamp01(

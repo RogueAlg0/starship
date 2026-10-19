@@ -22,6 +22,7 @@ import {
   type SpeechNames,
 } from "../perception/speech.ts";
 import { CONFIG } from "../scenario/config.ts";
+import { DISCIPLINE_LABEL, type Discipline } from "../world/skills.ts";
 import type { SimEvent } from "./events.ts";
 
 export interface ChronicleOptions {
@@ -412,6 +413,19 @@ class Renderer implements ChronicleRenderer {
       case "lasting_mark": {
         line(
           `${ts} — The wound leaves ${person(str(data, "person"))} with a ${str(data, "mark")}.`,
+          true,
+        );
+        break;
+      }
+      case "level_up": {
+        // The margin prints the true level; the crew's beliefs
+        // about it are their own affair.
+        const label =
+          DISCIPLINE_LABEL[str(data, "discipline") as Discipline] ??
+          str(data, "discipline");
+        line(
+          `${ts} — ${person(str(data, "person"))}'s hands have learned: ` +
+            `${label} ${num(data, "level")}, ${str(data, "task")}.`,
           true,
         );
         break;

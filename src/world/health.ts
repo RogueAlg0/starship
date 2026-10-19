@@ -29,6 +29,14 @@ import {
 } from "../perception/beliefs.ts";
 import { CONFIG } from "../scenario/config.ts";
 import type { Ship } from "./ship.ts";
+import {
+  bookXp,
+  disciplineOfSystem,
+  effectiveLevel,
+  notePublicFailure,
+  skillOf,
+  type Discipline,
+} from "./skills.ts";
 import { clamp01 } from "./systems.ts";
 import type { Weather } from "./weather.ts";
 
@@ -326,12 +334,56 @@ function accidents(
     else if (member.needs.energy < cfg.tiredEnergy) danger *= cfg.tiredFactor;
     // The wounded work clumsy, and the sick worse.
     danger *= 1 + totalSeverity(member) * 0.5 + member.body.sick * 0.4;
+    // A practised hand is a safer hand: the discipline of the
+    // room's most dangerous system prices the member's relief.
+    const discipline = workDiscipline(ship, member);
+    if (discipline !== null) {
+      const relief = Math.max(
+        CONFIG.skills.accidentReliefFloor,
+        1 - effectiveLevel(member, discipline) * CONFIG.skills.accidentReliefPerLevel,
+      );
+      danger *= relief;
+    }
     if (!rng.chance(cfg.accidentPerTick * danger)) continue;
     const part = BODY_PARTS[rng.int(BODY_PARTS.length)] as BodyPart;
     const severity =
       cfg.woundSeverityMin + rng.next() * (cfg.woundSeverityMax - cfg.woundSeverityMin);
     woundMember(w, member, "accident", part, severity);
+    // Failure teaches too, at half rate, provided the worker
+    // lived through it: the accident books its lesson in the
+    // work's discipline, and being seen to fail corrects the
+    // record of anyone who rated the worker above the truth.
+    if (discipline !== null) {
+      bookXp(
+        w,
+        crew,
+        member,
+        discipline,
+        CONFIG.skills.failureMilli * CONFIG.skills.failureFactor,
+        { task: "the accident that taught them" },
+      );
+      notePublicFailure(w, crew, member, discipline);
+    }
   }
+}
+
+/**
+ * The discipline of the work a member's hands are on: the most
+ * dangerous system's discipline in their room, or their trade's
+ * primary where the room holds no system.
+ */
+function workDiscipline(ship: Ship, member: CrewMember): Discipline | null {
+  let best: Discipline | null = null;
+  let bestDanger = -1;
+  for (const system of ship.systemsInRoom(member.room)) {
+    const danger = CONFIG.health.dangerByKind[system.kind] ?? 0.5;
+    if (danger > bestDanger) {
+      bestDanger = danger;
+      best = disciplineOfSystem(system.kind);
+    }
+  }
+  if (best !== null) return best;
+  return (CONFIG.skills.primary[member.roleKey] ?? "operations") as Discipline;
 }
 
 /**
@@ -520,6 +572,30 @@ export function stepHealth(
       });
     }
 
+    // Treatment is bounded by the treater's medicine: the hands
+    // on the body this tick (a member treating them, else the
+    // medic standing in the medbay) price the healing factor.
+    let treaterFactor = 1;
+    if (treated) {
+      const treater =
+        crew.find(
+          (o) => o.activity === "treat" && o.treatTarget === member.id,
+        ) ??
+        (inMedbay
+          ? crew.find(
+              (o) =>
+                o !== member &&
+                !o.dead &&
+                o.room === member.room &&
+                o.affinity.includes("medbay unit"),
+            )
+          : undefined);
+      if (treater !== undefined) {
+        treaterFactor =
+          CONFIG.skills.treatHealBase + skillOf(treater, "medicine");
+      }
+    }
+
     // ---- wounds: bleeding, infection, healing.
     let bleeding = 0;
     let healing = 0;
@@ -535,7 +611,7 @@ export function stepHealth(
         );
       }
       let heal = cfg.healPerDay / tpd;
-      if (treated) heal *= cfg.treatedHealFactor;
+      if (treated) heal *= cfg.treatedHealFactor * treaterFactor;
       if (inMedbay) heal *= cfg.medbayHealFactor;
       if (member.activity === "rest") heal *= cfg.restHealFactor;
       if (!cmoFilled) heal *= cfg.layHealFactor;
@@ -627,6 +703,12 @@ export function stepHealth(
           person: member.id,
           from,
           to: medbayRoom,
+        });
+        // Carrying the wounded is work beside the medic's trade:
+        // the carrier's medicine books the lesson.
+        bookXp(w, crew, carrier, "medicine", CONFIG.skills.carryMilli, {
+          task: "carrying the wounded",
+          mentor: true,
         });
       }
     }

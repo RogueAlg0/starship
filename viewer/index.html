@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Starship — viewer</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%9A%80%3C/text%3E%3C/svg%3E">
 <style>
@@ -17,42 +17,17 @@
     --good: #57c465;
     --warn: #e8a33d;
     --bad: #e5534b;
+    --tabh: calc(56px + env(safe-area-inset-bottom));
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; }
+  html, body { margin: 0; padding: 0; height: 100dvh; }
   body {
     background: var(--bg);
     color: var(--text);
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    min-height: 100dvh;
     display: flex;
     flex-direction: column;
-  }
-  header {
-    padding: 10px 12px 8px;
-    border-bottom: 1px solid var(--line);
-    background: var(--panel);
-    position: sticky;
-    top: 0;
-    z-index: 5;
-  }
-  .title-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 6px 14px;
-  }
-  h1 { font-size: 20px; margin: 0; letter-spacing: 0.02em; }
-  .title-row .meta { color: var(--muted); font-size: 13px; }
-  .title-row .meta b { color: var(--text); font-weight: 600; }
-  #hash { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-  #watch-icon { image-rendering: pixelated; vertical-align: -1px; }
-  .controls {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-    margin-top: 8px;
+    overflow: hidden;
   }
   button {
     background: var(--panel-2);
@@ -71,188 +46,165 @@
     color: var(--accent);
     font-weight: 700;
   }
-  #play-btn { min-width: 96px; font-weight: 700; }
-  .speed-group { display: flex; gap: 4px; }
-  .speed-group button { padding: 6px 10px; min-width: 44px; }
-  .seed-group { display: flex; gap: 6px; align-items: center; }
-  .seed-group label { color: var(--muted); font-size: 14px; }
-  #seed-input {
-    width: 92px;
-    min-height: 40px;
-    background: var(--bg);
-    color: var(--text);
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    padding: 6px 8px;
-    font-size: 15px;
+
+  /* ------------------------------------------------ stage */
+  #stage {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    position: relative;
   }
-  .toggle {
+  /* The one status strip: ship, day, time, watch, weather,
+     position. One line; it truncates before it ever wraps. */
+  #status-strip {
+    flex: none;
     display: flex;
     align-items: center;
-    gap: 8px;
-    min-height: 40px;
-    color: var(--muted);
-    font-size: 14px;
-    cursor: pointer;
-    user-select: none;
-  }
-  .toggle input { width: 20px; height: 20px; accent-color: var(--accent); }
-  #daily-banner {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px 12px;
-    margin-top: 8px;
-    padding: 6px 10px;
-    border: 1px solid var(--accent);
-    border-radius: 8px;
-    background: #171208;
-    color: var(--accent);
-    font-size: 14px;
-  }
-  #daily-banner button {
-    border-color: var(--accent);
-    color: var(--accent);
-    min-height: 34px;
-    padding: 4px 12px;
-    font-size: 14px;
-    font-weight: 600;
-  }
-  #toast {
-    position: fixed;
-    left: 50%;
-    transform: translateX(-50%);
-    bottom: 18px;
-    z-index: 30;
-    width: max-content;
-    max-width: min(92vw, 540px);
+    gap: 10px;
+    padding: 4px 10px;
     background: var(--panel);
-    color: var(--text);
-    border: 1px solid var(--accent);
-    border-radius: 10px;
-    padding: 10px 16px;
-    font-size: 14.5px;
-    text-align: center;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-  }
-  /* The ship's day ribbon: a quiet strip under the header naming
-     the rhythm the deck is keeping. It teaches; it does not shout. */
-  #day-ribbon {
-    padding: 5px 12px;
-    font-size: 13px;
-    color: var(--muted);
-    background: #0d1320;
     border-bottom: 1px solid var(--line);
+    z-index: 5;
+  }
+  #ship-name {
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+  #watch-icon { image-rendering: pixelated; flex: none; }
+  #strip-line {
+    flex: 1;
+    min-width: 0;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-  }
-  .section-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    margin-bottom: 6px;
-  }
-  .section-head h2 { margin: 0; }
-  .log-toggle { display: flex; gap: 4px; }
-  .log-toggle button {
-    min-height: 30px;
-    padding: 3px 10px;
-    font-size: 12.5px;
-    border-radius: 6px;
-  }
-  .log-toggle button.active {
-    border-color: var(--accent);
-    color: var(--accent);
-    font-weight: 700;
-  }
-  #weather-banner {
-    padding: 6px 12px;
-    font-size: 14px;
+    font-size: 13.5px;
     color: var(--muted);
-    background: #0e141f;
-    border-bottom: 1px solid var(--line);
+    font-variant-numeric: tabular-nums;
   }
-  #weather-banner b { color: var(--text); }
-  #weather-banner.storm { color: var(--warn); }
-  #weather-banner.storm b { color: var(--warn); }
-  /* The stores strip: five slim bars under the weather, one per
-     store, in days of supply with a trend arrow. Bands match the
-     alert tiers: green, amber under ten days, red under four. */
-  #stores-strip {
+  #status-strip button {
+    flex: none;
+    min-height: 38px;
+    min-width: 46px;
+    padding: 4px 10px;
+    font-size: 14px;
+  }
+  #play-btn { font-weight: 700; }
+  /* The menu row: view toggles and the run's cold numbers,
+     behind the strip's menu button. */
+  #menu-row {
+    flex: none;
     display: flex;
     flex-wrap: wrap;
-    gap: 4px 16px;
-    padding: 5px 12px;
-    font-size: 12.5px;
-    color: var(--muted);
-    background: #0d1320;
-    border-bottom: 1px solid var(--line);
-  }
-  .store-cell { display: flex; align-items: center; gap: 6px; }
-  .store-cell .slabel {
-    font-size: 10.5px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-  .store-cell .sbar {
-    width: 54px;
-    height: 6px;
-    background: #0a0f18;
-    border-radius: 3px;
-    overflow: hidden;
-  }
-  .store-cell .sbar > div { height: 100%; background: var(--good); border-radius: 3px; }
-  .store-cell .sbar > div.warn { background: var(--warn); }
-  .store-cell .sbar > div.crit { background: var(--bad); }
-  .store-cell .sval { color: var(--text); font-variant-numeric: tabular-nums; }
-  .alert.tier-critical .alert-life-fill { background: var(--bad); }
-  main {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 12px;
-    padding: 12px;
-    flex: 1;
-    width: 100%;
-    max-width: 1500px;
-    margin: 0 auto;
-  }
-  section {
+    align-items: center;
+    gap: 6px 14px;
+    padding: 6px 10px;
     background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    padding: 10px;
-    min-width: 0;
-  }
-  section h2 {
-    margin: 0 0 6px;
+    border-bottom: 1px solid var(--line);
     font-size: 13px;
-    text-transform: uppercase;
-    letter-spacing: 0.09em;
     color: var(--muted);
-    font-weight: 600;
+    z-index: 5;
+  }
+  #menu-row[hidden] { display: none; }
+  #menu-row .meta b { color: var(--text); font-weight: 600; }
+  #menu-row button { min-height: 34px; padding: 3px 12px; font-size: 13.5px; }
+  #hash { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  .ship-stage {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background: #04060a;
   }
   #ship-canvas {
-    width: 100%;
-    height: auto;
+    max-width: 100%;
+    max-height: 100%;
     display: block;
     image-rendering: pixelated;
-    background: #04060a;
-    border-radius: 8px;
     cursor: pointer;
   }
-  /* Alerts: urgency-tiered chips floated over the deck's top-right,
-     the squad viewer's floating battle news. On narrow phones the
-     stack leaves the overlay and runs full-width above the canvas
-     instead, so it never covers the deck switcher or the minimap. */
-  .ship-stage { position: relative; }
+  /* The scene chip: what the deck is doing right now, in the
+     reference's style ("Council · Inquiry · 5 seated"). */
+  #scene-chip {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 6;
+    max-width: 52%;
+    padding: 5px 10px;
+    background: rgba(11, 16, 24, 0.88);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
+  }
+  #view-switch {
+    position: absolute;
+    left: 8px;
+    bottom: 8px;
+    z-index: 6;
+    display: flex;
+    gap: 6px;
+  }
+  #view-switch button {
+    min-height: 36px;
+    padding: 4px 12px;
+    font-size: 13.5px;
+    font-weight: 600;
+    background: rgba(24, 34, 51, 0.92);
+  }
+  #view-switch button.active {
+    border-color: var(--good);
+    color: var(--good);
+  }
+  #minimap-canvas {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    z-index: 6;
+    width: 132px;
+    height: 42px;
+    image-rendering: pixelated;
+    background: rgba(11, 15, 22, 0.9);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  @media (min-width: 980px) {
+    #minimap-canvas { width: 176px; height: 56px; }
+  }
+  @media (max-width: 760px) {
+    /* The strip's line outranks the ship's name at phone widths:
+       the name lives in the Ship sheet, the line must fit. The
+       watch icon goes too: the watch word already says it. */
+    #ship-name { display: none; }
+    #watch-icon { display: none; }
+    #status-strip { gap: 5px; padding: 4px 6px; }
+    #status-strip button { min-width: 40px; padding: 4px 7px; font-size: 13.5px; }
+    #strip-line { font-size: 12px; }
+    /* The minimap rides above the view switch: side by side they
+       are wider than a phone. */
+    #minimap-canvas { bottom: 52px; }
+  }
+
+  /* ------------------------------------------------ alerts */
+  /* Whitelisted cards over the deck's top-right, capped by the
+     stack itself (2 phone, 4 desktop). */
   #alert-stack {
     position: absolute;
     top: 8px;
     right: 8px;
-    z-index: 6;
-    width: min(320px, 72%);
+    z-index: 7;
+    width: min(320px, 74%);
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -297,9 +249,10 @@
     image-rendering: pixelated;
   }
   .alert-text {
-    white-space: nowrap;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
   }
   .alert-x {
     flex: none;
@@ -325,70 +278,117 @@
   .alert-life-fill {
     height: 100%;
     width: 100%;
-    background: #8fa3bf;
+    background: var(--warn);
     animation-name: alert-burn;
     animation-timing-function: linear;
     animation-fill-mode: forwards;
   }
-  .alert.tier-major .alert-life-fill { background: var(--warn); }
+  .alert.tier-critical .alert-life-fill { background: var(--bad); }
   @keyframes alert-burn { from { width: 100%; } to { width: 0%; } }
-  @media (max-width: 640px) {
-    #alert-stack {
-      position: static;
-      width: auto;
-      margin-bottom: 6px;
-    }
-  }
   @media (prefers-reduced-motion: reduce) {
     .alert { transition: opacity 0.25s ease; }
     .alert.enter { transform: none; }
+    #sheet { transition: none; }
   }
-  .deck-switch {
+
+  /* ------------------------------------------------ sheet */
+  /* One sheet for every panel: 64dvh, slid down out of sight
+     when closed; only its body scrolls. On desktop it docks to
+     the right edge instead. */
+  #sheet {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: var(--tabh);
+    height: 64dvh;
+    z-index: 8;
+    background: var(--panel);
+    border-top: 2px solid var(--accent);
+    box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.5);
+    transform: translateY(106%);
+    transition: transform 0.22s ease-out;
     display: flex;
-    gap: 8px;
-    margin-bottom: 6px;
+    flex-direction: column;
   }
-  .deck-switch button {
-    flex: 1;
-    min-height: 40px;
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text);
-    background: var(--panel-2);
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    cursor: pointer;
-  }
-  .deck-switch button.active {
-    border-color: var(--good);
-    color: var(--good);
-  }
-  .deck-foot {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    margin-top: 6px;
-  }
-  #minimap-canvas {
-    width: 176px;
-    height: 56px;
+  #sheet:not(.closed) { transform: none; }
+  #sheet-head {
     flex: none;
-    image-rendering: pixelated;
-    background: #0b0f16;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--line);
   }
-  .deck-hint {
-    margin: 0;
+  #sheet-title { font-size: 15px; font-weight: 700; }
+  #sheet-close { min-height: 36px; min-width: 42px; padding: 2px 10px; font-size: 18px; line-height: 1; }
+  #sheet-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+  }
+  #sheet-body section { min-width: 0; }
+  #sheet-body h3 {
+    margin: 14px 0 6px;
     font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
     color: var(--muted);
-    line-height: 1.5;
+    font-weight: 600;
   }
-  @media (max-width: 520px) {
-    #minimap-canvas { width: 132px; height: 42px; }
+  #sheet-body h3:first-child { margin-top: 0; }
+  @media (min-width: 980px) {
+    #sheet {
+      left: auto;
+      top: 47px;
+      bottom: var(--tabh);
+      width: 440px;
+      height: auto;
+      border-top: none;
+      border-left: 2px solid var(--accent);
+      transform: translateX(106%);
+    }
+    #sheet:not(.closed) { transform: none; }
   }
-  #side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+  /* ------------------------------------------------ tab bar */
+  #tabbar {
+    flex: none;
+    height: var(--tabh);
+    padding-bottom: env(safe-area-inset-bottom);
+    display: flex;
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    z-index: 9;
+  }
+  #tabbar button {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    background: none;
+    border: none;
+    border-radius: 0;
+    min-height: 0;
+    padding: 3px 0;
+    font-size: 20px;
+    line-height: 1.1;
+    color: var(--muted);
+  }
+  #tabbar button small {
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+  }
+  #tabbar button.on {
+    color: var(--accent);
+    background: var(--panel-2);
+  }
+
+  /* ------------------------------------------------ crew */
   .crew-row {
     display: grid;
     grid-template-columns: 44px minmax(0, 1fr);
@@ -408,6 +408,194 @@
     image-rendering: pixelated;
     grid-row: span 2;
   }
+  .crew-row .who { min-width: 0; }
+  .crew-row .who .name { font-size: 14.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .crew-row .who .role { font-size: 12px; color: var(--muted); }
+  .crew-row .needs {
+    grid-column: 2;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+  }
+  .need { display: flex; flex-direction: column; gap: 2px; }
+  .need .need-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .need .bar { height: 6px; background: #0d1420; border-radius: 3px; overflow: hidden; }
+  .need .bar > div { height: 100%; background: var(--good); border-radius: 3px; }
+  .need .bar > div.low { background: var(--bad); }
+  .need .bar > div.mid { background: var(--warn); }
+
+  /* ------------------------------------------------ council */
+  .seat-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 4px 6px;
+    font-size: 13.5px;
+    border-top: 1px solid #1d293d;
+  }
+  .seat-row:first-child { border-top: none; }
+  .seat-row .seat-name { color: var(--muted); }
+  .seat-row .seat-holder { font-weight: 600; text-align: right; }
+  .seat-row .seat-holder.vacant { color: var(--muted); font-weight: 400; }
+  .legitimacy-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .legitimacy-row .sbar {
+    flex: 1;
+    height: 6px;
+    background: #0a0f18;
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .legitimacy-row .sbar > div { height: 100%; background: var(--good); }
+  .legitimacy-row .sbar > div.warn { background: var(--warn); }
+  .legitimacy-row .sbar > div.crit { background: var(--bad); }
+  .legitimacy-row .sval { color: var(--text); font-variant-numeric: tabular-nums; }
+  .sitting-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 6px;
+    background: none;
+    border: none;
+    border-top: 1px solid #1d293d;
+    border-radius: 0;
+    min-height: 40px;
+    font-size: 13.5px;
+    text-align: left;
+    color: var(--text);
+  }
+  .sitting-row .s-time { color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
+  .sitting-row .s-main { flex: 1; min-width: 0; }
+  .sitting-row .s-verdict { font-weight: 700; flex: none; }
+  .truth-chip {
+    flex: none;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 6px;
+    background: #3a2320;
+    color: #ff9a8a;
+  }
+  .truth-chip.good { background: #1d3320; color: #8fe3a0; }
+  #council-back { min-height: 36px; padding: 4px 12px; font-size: 13.5px; margin-bottom: 8px; }
+  #council-transcript {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: #c9d6ea;
+  }
+  #council-transcript .tline { padding: 2px 0; border-top: 1px solid #1d293d; }
+  #council-transcript .tline:first-child { border-top: none; }
+  .sheet-empty { color: var(--muted); font-size: 13.5px; padding: 6px; }
+
+  /* ------------------------------------------------ chronicle */
+  .sheet-tools {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    margin-bottom: 6px;
+  }
+  .log-toggle { display: flex; gap: 4px; }
+  .log-toggle button {
+    min-height: 30px;
+    padding: 3px 10px;
+    font-size: 12.5px;
+    border-radius: 6px;
+  }
+  .log-toggle button.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 700;
+  }
+  #chronicle {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 4px 2px;
+    overflow-wrap: anywhere;
+  }
+  #chronicle .line { padding: 1px 6px; border-radius: 4px; }
+  #chronicle .line.routine { color: #93a5c4; }
+  #chronicle .line.hl { color: #f0dfae; }
+  #chronicle .line.dim { opacity: 0.28; }
+  #chronicle .line.blank { padding: 0; }
+
+  /* ------------------------------------------------ ship sheet */
+  /* The stores: five labelled bars, days of supply as a number,
+     band colour carrying the alarm (green, amber under ten days,
+     red under four), the council's legitimacy as a sixth row. */
+  #stores-strip { display: flex; flex-direction: column; gap: 7px; }
+  .store-cell { display: flex; align-items: center; gap: 8px; }
+  .store-cell .slabel {
+    flex: none;
+    width: 52px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+  }
+  .store-cell .sbar {
+    flex: 1;
+    height: 8px;
+    background: #0a0f18;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .store-cell .sbar > div { height: 100%; background: var(--good); border-radius: 4px; }
+  .store-cell .sbar > div.warn { background: var(--warn); }
+  .store-cell .sbar > div.crit { background: var(--bad); }
+  .store-cell .sval {
+    flex: none;
+    width: 58px;
+    text-align: right;
+    font-size: 13px;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  #route-readout { font-size: 14px; padding: 2px 0 4px; }
+  .seed-group { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .seed-group label { color: var(--muted); font-size: 14px; }
+  #seed-input {
+    width: 92px;
+    min-height: 40px;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 6px 8px;
+    font-size: 15px;
+  }
+  #daily-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+    font-size: 14px;
+    color: var(--accent);
+  }
+  #daily-banner:empty { display: none; }
+  .pref-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 40px;
+    padding: 2px 6px;
+    border-top: 1px solid #1d293d;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .pref-row:first-child { border-top: none; }
+  .pref-row input { width: 22px; height: 22px; accent-color: var(--accent); flex: none; }
+
+  /* ------------------------------------------------ cards */
   #person-card, #port-card, #traffic-card {
     position: fixed;
     z-index: 20;
@@ -418,18 +606,18 @@
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
     left: 8px;
     right: 8px;
-    bottom: 8px;
-    max-height: 64dvh;
+    bottom: calc(var(--tabh) + 8px);
+    max-height: 62dvh;
     overflow-y: auto;
   }
   @media (min-width: 980px) {
     #person-card, #port-card, #traffic-card {
       left: auto;
       bottom: auto;
-      top: 76px;
+      top: 60px;
       right: 16px;
       width: 384px;
-      max-height: calc(100dvh - 100px);
+      max-height: calc(100dvh - 140px);
     }
   }
   #person-close, #port-close, #traffic-close {
@@ -490,116 +678,109 @@
     color: #c9d6ea;
   }
   #person-recent .rline { padding: 1px 0; }
-  .crew-row .who { min-width: 0; }
-  .crew-row .who .name { font-size: 14.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .crew-row .who .role { font-size: 12px; color: var(--muted); }
-  .crew-row .needs {
-    grid-column: 2;
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 6px;
-  }
-  .need { display: flex; flex-direction: column; gap: 2px; }
-  .need .need-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
-  .need .bar { height: 6px; background: #0d1420; border-radius: 3px; overflow: hidden; }
-  .need .bar > div { height: 100%; background: var(--good); border-radius: 3px; }
-  .need .bar > div.low { background: var(--bad); }
-  .need .bar > div.mid { background: var(--warn); }
-  #chronicle {
-    overflow-y: auto;
-    height: 46dvh;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 13px;
-    line-height: 1.5;
-    padding: 4px 2px;
-    overflow-wrap: anywhere;
-  }
-  #chronicle .line { padding: 1px 6px; border-radius: 4px; }
-  #chronicle .line.routine { color: #93a5c4; }
-  #chronicle .line.hl { color: #f0dfae; }
-  #chronicle .line.dim { opacity: 0.28; }
-  #chronicle .line.blank { padding: 0; }
-  @media (min-width: 980px) {
-    main { grid-template-columns: minmax(0, 7fr) minmax(330px, 5fr); }
-    #chronicle { height: calc(100dvh - 210px); max-height: 900px; }
-  }
-  /* Density: the squad screen feels tight because its chrome is
-     thin. Desktop gives up a few pixels of padding per surface so
-     the ship claims them; phones keep their comfortable spacing,
-     and no touch target drops below 40px anywhere. */
-  @media (min-width: 980px) {
-    header { padding: 7px 12px 6px; }
-    main { gap: 10px; padding: 10px; }
-    section { padding: 8px; }
-    #side { gap: 10px; }
-    .crew-row { padding: 6px; }
+
+  #toast {
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: calc(var(--tabh) + 14px);
+    z-index: 30;
+    width: max-content;
+    max-width: min(92vw, 540px);
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--accent);
+    border-radius: 10px;
+    padding: 10px 16px;
+    font-size: 14.5px;
+    text-align: center;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
   }
 </style>
 </head>
 <body>
-<header>
-  <div class="title-row">
-    <h1 id="ship-name">Starship</h1>
-    <span class="meta">Day <b id="clock-day">1</b>, <b id="clock-time">00:00</b></span>
-    <span class="meta"><canvas id="watch-icon" width="9" height="9" aria-hidden="true"></canvas> <b id="watch-label">Day watch</b></span>
-    <span class="meta">speed <b id="speed-readout">3x</b></span>
+<div id="stage">
+  <div id="status-strip">
+    <span id="ship-name">Starship</span>
+    <canvas id="watch-icon" width="9" height="9" aria-hidden="true"></canvas>
+    <span id="strip-line">D1 · 00:00 · Day watch · Calm</span>
+    <button id="play-btn" type="button">Pause</button>
+    <button id="speed-btn" type="button" aria-label="Speed">3x</button>
+    <button id="menu-btn" type="button" aria-label="Menu">☰</button>
+  </div>
+  <div id="menu-row" hidden>
+    <button id="toggle-wear" type="button" aria-pressed="true">Wear</button>
+    <button id="toggle-bubbles" type="button" aria-pressed="true">Bubbles</button>
     <span class="meta">stream <b id="hash">…</b></span>
     <span class="meta"><b id="event-count">0</b> events</span>
-    <span class="meta" id="route-readout"></span>
   </div>
-  <div class="controls">
-    <button id="play-btn" type="button">Pause</button>
-    <div class="speed-group" id="speed-group" role="group" aria-label="Playback speed"></div>
-    <div class="seed-group">
-      <label for="seed-input">Seed</label>
-      <input id="seed-input" type="number" value="42" step="1">
-      <button id="new-voyage-btn" type="button">New voyage</button>
-      <button id="random-btn" type="button">Random seed</button>
+  <div class="ship-stage">
+    <canvas id="ship-canvas" role="img" aria-label="Top-down deck plan of the ship: rooms, equipment, and crew at work"></canvas>
+    <div id="scene-chip" hidden></div>
+    <div id="alert-stack" aria-live="polite" aria-label="Ship alerts"></div>
+    <div id="view-switch" role="group" aria-label="View">
+      <button id="deck1-btn" type="button">Upper</button>
+      <button id="deck2-btn" type="button">Lower</button>
+      <button id="exterior-btn" type="button">Hull</button>
+      <button id="map-btn" type="button">Chart</button>
     </div>
+    <canvas id="minimap-canvas" role="img" aria-label="Minimap of both decks: tap a deck to view it"></canvas>
   </div>
-  <div id="daily-banner">
-    <span id="daily-text"></span>
-    <button id="daily-btn" type="button" hidden>★ Today's voyage</button>
+</div>
+<div id="sheet" class="closed">
+  <div id="sheet-head">
+    <span id="sheet-title">Crew</span>
+    <button id="sheet-close" type="button" aria-label="Close panel">×</button>
   </div>
-</header>
-<div id="day-ribbon" aria-label="The ship's day: watch phase, current block, and the next routine beat"></div>
-<div id="weather-banner">Space weather: <b id="weather-name">calm</b></div>
-<div id="stores-strip" aria-label="Ship stores, in days of supply"></div>
-<main>
-  <section aria-label="Ship schematic">
-    <h2>Ship</h2>
-    <div class="deck-switch" role="group" aria-label="Deck selector">
-      <button id="deck1-btn" type="button">Deck 1 · Upper</button>
-      <button id="deck2-btn" type="button">Deck 2 · Lower</button>
-      <button id="exterior-btn" type="button">Exterior</button>
-      <button id="map-btn" type="button">Map</button>
-    </div>
-    <div class="ship-stage">
-      <div id="alert-stack" aria-live="polite" aria-label="Ship alerts"></div>
-      <canvas id="ship-canvas" role="img" aria-label="Top-down deck plan of the ship: rooms, equipment, and crew at work"></canvas>
-    </div>
-    <div class="deck-foot">
-      <canvas id="minimap-canvas" role="img" aria-label="Minimap of both decks: tap a deck to view it"></canvas>
-      <p class="deck-hint">Two decks, one ship. The minimap shows both: coloured dots are crew, gold ticks are the lifts, and a pulsing room needs help. Keys 7 and 8 switch decks; key 9 steps outside to the hull, where the windows are lit by the life inside. Out there, tap the hull to go to that part of the ship. Key 0 (or M) opens the star map: the sector, its ports in their factions' colours, and the route the ship is sailing. On the map, tap a port for its card.</p>
-    </div>
-  </section>
-  <div id="side">
-    <section aria-label="Crew">
-      <h2>Crew</h2>
+  <div id="sheet-body">
+    <section data-sheet="crew" aria-label="Crew">
       <div id="crew-panel"></div>
     </section>
-    <section aria-label="Chronicle">
-      <div class="section-head">
-        <h2>Chronicle</h2>
+    <section data-sheet="council" aria-label="Council" hidden>
+      <div id="council-seats"></div>
+      <h3>Sittings</h3>
+      <div id="council-list"></div>
+      <div id="council-detail" hidden>
+        <button id="council-back" type="button">‹ Sittings</button>
+        <div id="council-transcript"></div>
+      </div>
+    </section>
+    <section data-sheet="log" aria-label="Chronicle" hidden>
+      <div class="sheet-tools">
         <div class="log-toggle" role="group" aria-label="Chronicle detail">
           <button id="log-highlights-btn" type="button" aria-pressed="true">Highlights</button>
-          <button id="log-full-btn" type="button" aria-pressed="false">Full log</button>
+          <button id="log-full-btn" type="button" aria-pressed="false">Full</button>
         </div>
       </div>
       <div id="chronicle"></div>
     </section>
+    <section data-sheet="ship" aria-label="Ship" hidden>
+      <h3>Stores</h3>
+      <div id="stores-strip"></div>
+      <h3>Voyage</h3>
+      <div id="route-readout"></div>
+      <div class="seed-group">
+        <label for="seed-input">Seed</label>
+        <input id="seed-input" type="number" value="42" step="1">
+        <button id="new-voyage-btn" type="button">New</button>
+        <button id="random-btn" type="button">Random</button>
+      </div>
+      <div id="daily-banner">
+        <span id="daily-text"></span>
+        <button id="daily-btn" type="button" hidden>★ Today</button>
+      </div>
+      <h3>Pause on</h3>
+      <div id="alert-prefs"></div>
+    </section>
   </div>
-</main>
+</div>
+<nav id="tabbar" aria-label="Panels">
+  <button id="tab-crew" type="button" data-tab="crew">👤<small>Crew</small></button>
+  <button id="tab-council" type="button" data-tab="council">⚖<small>Council</small></button>
+  <button id="tab-log" type="button" data-tab="log">📖<small>Log</small></button>
+  <button id="tab-ship" type="button" data-tab="ship">🚀<small>Ship</small></button>
+  <button id="tab-map" type="button" data-tab="map">🗺<small>Map</small></button>
+</nav>
 <div id="person-card" hidden>
   <button id="person-close" type="button" aria-label="Close person card">×</button>
   <div class="person-head">
@@ -612,7 +793,7 @@
   </div>
   <p id="person-bio"></p>
   <div id="person-dossier"></div>
-  <h3>Recently</h3>
+  <h3>Recent</h3>
   <div id="person-recent"></div>
 </div>
 <div id="port-card" hidden>

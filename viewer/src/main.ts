@@ -37,9 +37,13 @@ import {
   stateSignature,
 } from "./faces.ts";
 import {
+  ALERT_KIND_DEFS,
   AlertStack,
   AlertStackView,
+  loadPausePrefs,
+  savePausePrefs,
   type AlertItem,
+  type PausePrefs,
 } from "./alerts.ts";
 import {
   daysOf,
@@ -117,38 +121,67 @@ let selectedCrew: string | null = null;
 let logMode: "highlights" | "full" = "highlights";
 let weatherName = "calm";
 let stickToBottom = true;
+/** Which sheet the bottom sheet shows, or null while it is closed. */
+let sheetTab: string | null = null;
+/** View toggles from the menu row, persisted like the log mode. */
+let showWear = true;
+let showBubbles = true;
+/** Pause-on preferences for alert kinds (./alerts.ts). */
+const pausePrefs: PausePrefs = loadPausePrefs();
 
 // ------------------------------------------------------------ dom handles
 
 const shipNameEl = must<HTMLElement>("ship-name");
-const clockDayEl = must<HTMLElement>("clock-day");
-const clockTimeEl = must<HTMLElement>("clock-time");
+const stripLineEl = must<HTMLElement>("strip-line");
 const watchIcon = must<HTMLCanvasElement>("watch-icon");
-const watchLabelEl = must<HTMLElement>("watch-label");
-const speedReadoutEl = must<HTMLElement>("speed-readout");
 const hashEl = must<HTMLElement>("hash");
 const eventCountEl = must<HTMLElement>("event-count");
 const playBtn = must<HTMLButtonElement>("play-btn");
+const speedBtn = must<HTMLButtonElement>("speed-btn");
+const menuBtn = must<HTMLButtonElement>("menu-btn");
+const menuRow = must<HTMLElement>("menu-row");
+const toggleWearBtn = must<HTMLButtonElement>("toggle-wear");
+const toggleBubblesBtn = must<HTMLButtonElement>("toggle-bubbles");
 const dailyText = must<HTMLElement>("daily-text");
 const dailyBtn = must<HTMLButtonElement>("daily-btn");
 const toastEl = must<HTMLElement>("toast");
-const speedGroup = must<HTMLElement>("speed-group");
 const seedInput = must<HTMLInputElement>("seed-input");
-const weatherBanner = must<HTMLElement>("weather-banner");
-const weatherNameEl = must<HTMLElement>("weather-name");
 const alertStackEl = must<HTMLElement>("alert-stack");
 const deckCanvas = must<HTMLCanvasElement>("ship-canvas");
 const deck1Btn = must<HTMLButtonElement>("deck1-btn");
 const deck2Btn = must<HTMLButtonElement>("deck2-btn");
 const exteriorBtn = must<HTMLButtonElement>("exterior-btn");
 const mapBtn = must<HTMLButtonElement>("map-btn");
+const sceneChipEl = must<HTMLElement>("scene-chip");
 const routeEl = must<HTMLElement>("route-readout");
 const minimapCanvas = must<HTMLCanvasElement>("minimap-canvas");
 const crewPanel = must<HTMLElement>("crew-panel");
 const chronicleEl = must<HTMLElement>("chronicle");
 const logHighlightsBtn = must<HTMLButtonElement>("log-highlights-btn");
 const logFullBtn = must<HTMLButtonElement>("log-full-btn");
-const ribbonEl = must<HTMLElement>("day-ribbon");
+const sheetEl = must<HTMLElement>("sheet");
+const sheetBodyEl = must<HTMLElement>("sheet-body");
+const sheetTitleEl = must<HTMLElement>("sheet-title");
+const councilSeatsEl = must<HTMLElement>("council-seats");
+const councilListEl = must<HTMLElement>("council-list");
+const councilDetailEl = must<HTMLElement>("council-detail");
+const councilTranscriptEl = must<HTMLElement>("council-transcript");
+const alertPrefsEl = must<HTMLElement>("alert-prefs");
+const tabButtons = new Map<string, HTMLButtonElement>(
+  ["crew", "council", "log", "ship", "map"].map((tab) => [
+    tab,
+    must<HTMLButtonElement>(`tab-${tab}`),
+  ]),
+);
+const sheetSections = new Map<string, HTMLElement>(
+  ["crew", "council", "log", "ship"].map((tab) => {
+    const el = document.querySelector<HTMLElement>(
+      `#sheet-body section[data-sheet="${tab}"]`,
+    );
+    if (el === null) throw new Error(`viewer: no sheet section ${tab}`);
+    return [tab, el] as [string, HTMLElement];
+  }),
+);
 
 // ------------------------------------------------------------------ deck
 
@@ -211,6 +244,8 @@ function pruneGames(): void {
 /** A council sitting in progress, from its council_convened event. */
 interface ActiveSitting {
   room: number;
+  /** The sitting's business ("inquiry", "course", ...). */
+  kind: string;
   /** Officer ids in seat order (the convened record's own order). */
   seats: Array<{ member: string; seat: string }>;
   accused: string | null;
@@ -330,7 +365,9 @@ function buildDeck(): void {
   mapActive = false;
   closePortCard();
   closeTrafficCard();
+  document.body.dataset.view = "deck";
   refreshDeckButtons();
+  refreshTabStates();
 }
 
 /**
@@ -346,7 +383,9 @@ function setViewDeck(next: number): void {
   closeTrafficCard();
   deck.setExterior(false);
   deck.setDeck(next);
+  document.body.dataset.view = "deck";
   refreshDeckButtons();
+  refreshTabStates();
 }
 
 /** Step outside: the ship from the hull, windows lit by the life inside. */
@@ -356,7 +395,9 @@ function setViewExterior(): void {
   closePortCard();
   closeTrafficCard();
   deck.setExterior(true);
+  document.body.dataset.view = "exterior";
   refreshDeckButtons();
+  refreshTabStates();
 }
 
 /** Open the chart: the sector, its ports, and the route being sailed. */
@@ -364,7 +405,73 @@ function setViewMap(): void {
   if (deck === null) return;
   deck.setExterior(false);
   mapActive = true;
+  document.body.dataset.view = "map";
   refreshDeckButtons();
+  refreshTabStates();
+}
+
+// ------------------------------------------------------------------ sheet
+
+/**
+ * One bottom sheet holds every panel (the reference viewers' fold:
+ * the stage stays the screen, panels visit it). The tab bar opens
+ * a sheet; the Map tab is not a sheet at all, it changes the stage.
+ * Tapping the open tab again, or the sheet's close button, folds
+ * the sheet away. Person and port cards stay floating overlays.
+ */
+const TAB_TITLES: Record<string, string> = {
+  crew: "Crew",
+  council: "Council",
+  log: "Log",
+  ship: "Ship",
+  map: "Map",
+};
+
+function refreshTabStates(): void {
+  for (const [tab, button] of tabButtons) {
+    button.classList.toggle(
+      "on",
+      tab === "map"
+        ? sheetTab === null && mapActive
+        : sheetTab === tab,
+    );
+  }
+}
+
+function openSheet(tab: string): void {
+  if (tab === "map") {
+    closeSheet();
+    setViewMap();
+    return;
+  }
+  sheetTab = tab;
+  document.body.dataset.sheet = tab;
+  sheetEl.classList.remove("closed");
+  sheetTitleEl.textContent = TAB_TITLES[tab] ?? tab;
+  for (const [key, section] of sheetSections) {
+    section.hidden = key !== tab;
+  }
+  // Each panel opens at its top; the log opens at its foot when
+  // it is riding the bottom, as it did in its own scroller.
+  if (tab === "log" && stickToBottom) {
+    sheetBodyEl.scrollTop = sheetBodyEl.scrollHeight;
+  } else {
+    sheetBodyEl.scrollTop = 0;
+  }
+  if (tab === "council") showSittingList();
+  refreshTabStates();
+}
+
+function closeSheet(): void {
+  sheetTab = null;
+  delete document.body.dataset.sheet;
+  sheetEl.classList.add("closed");
+  refreshTabStates();
+}
+
+function toggleSheet(tab: string): void {
+  if (tab !== "map" && sheetTab === tab) closeSheet();
+  else openSheet(tab);
 }
 
 function refreshDeckButtons(): void {
@@ -387,16 +494,22 @@ function refreshDeckButtons(): void {
 // ---------------------------------------------------------------- alerts
 
 /**
- * Urgency-tiered alerts over the deck (./alerts.ts). Two feeds,
- * both from state the viewer already holds: the event stream (in
+ * Whitelisted alerts over the deck (./alerts.ts). Only the kinds
+ * on the whitelist are ever posted from here; everything else
+ * the chronicle speaks stays in the chronicle. Two feeds, both
+ * from state the viewer already holds: the event stream (in
  * drainEvents) for moments, and the per-frame system conditions
- * (in updateSlowUi) for states. Nothing is invented here; the
- * texts mirror the chronicle's own sentences.
+ * plus voyage transitions (in updateSlowUi) for states. Nothing
+ * is invented here; the texts mirror the chronicle's own
+ * sentences.
  */
 const alertStack = new AlertStack();
 const alertView = new AlertStackView(alertStackEl, alertStack, (item) => {
   focusAlert(item);
 });
+alertStack.onRaise = (kind) => {
+  if (pausePrefs[kind]) setPlaying(false);
+};
 
 /** A tap on an alert: go to the person, or to the room it names. */
 function focusAlert(item: AlertItem): void {
@@ -435,79 +548,44 @@ function roomName(index: number): string {
   return run.ship.rooms[index]?.name ?? `room ${index}`;
 }
 
-/** Moments from the event stream, tiered by how loud they are. */
+/**
+ * Whether a board's finding matches the truth it judged, on the
+ * chronicle's own reckoning (the hand, and for a death the
+ * cause). Null where the sitting's record carries no truth to
+ * tell. Watcher knowledge only: it colours a card and a chip,
+ * and never reaches the crew.
+ */
+function findingWasRight(event: SimEvent): boolean | null {
+  if (event.data.truthKnown !== true) return null;
+  const accused = eventStr(event, "accused");
+  const truthCulprit = eventStr(event, "truthCulprit");
+  const truthCause = eventStr(event, "truthCause");
+  const victim = eventStr(event, "victim");
+  const culpritRight =
+    accused === ""
+      ? truthCulprit === ""
+      : event.data.convicted === true
+        ? accused === truthCulprit
+        : accused !== truthCulprit;
+  const causeWrong =
+    victim !== "" && truthCause !== "" && eventStr(event, "cause") !== truthCause;
+  return culpritRight && !causeWrong;
+}
+
+/** Tick of the last storm card: landfall flicker is one storm. */
+let lastStormToastTick = Number.NEGATIVE_INFINITY;
+
+/** Moments from the event stream: the whitelist, and nothing else. */
 function feedAlert(event: SimEvent): void {
   const now = performance.now();
   const actor = event.actors[0];
   switch (event.type) {
-    case "sabotage_committed": {
-      const systemId = eventStr(event, "system");
-      const system = run.ship.systems.find((s) => s.id === systemId);
-      const room = system?.room ?? eventNum(event, "room");
-      alertStack.post(
-        {
-          tier: "major",
-          category: "sabotage",
-          text:
-            `Sabotage: the ${systemName(systemId)} in the ` +
-            `${roomName(room)} is found damaged.`,
-          focus: { room, systemId },
-        },
-        now,
-      );
-      break;
-    }
-    case "accusation": {
-      if (actor === undefined) break;
-      alertStack.post(
-        {
-          tier: "major",
-          category: "speech",
-          text:
-            `${personName(actor)} accuses ` +
-            `${personName(eventStr(event, "accused"))} of sabotage.`,
-          focus: { personId: actor },
-        },
-        now,
-      );
-      break;
-    }
-    case "grudge_formed": {
-      if (actor === undefined) break;
-      alertStack.post(
-        {
-          tier: "major",
-          category: "grudge",
-          text:
-            `${personName(actor)} now holds a grudge against ` +
-            `${personName(eventStr(event, "target"))}.`,
-          focus: { personId: actor },
-        },
-        now,
-      );
-      break;
-    }
-    case "trust_broken": {
-      if (actor === undefined) break;
-      alertStack.post(
-        {
-          tier: "major",
-          category: "trust",
-          text:
-            `${personName(actor)}'s trust in ` +
-            `${personName(eventStr(event, "with"))} is broken.`,
-          focus: { personId: actor },
-        },
-        now,
-      );
-      break;
-    }
     case "death": {
       if (actor === undefined) break;
       alertStack.post(
         {
-          tier: "critical",
-          category: "death",
+          kind: "death",
+          subject: actor,
           text: `${personName(actor)} has died.`,
           focus: { personId: actor },
         },
@@ -515,17 +593,47 @@ function feedAlert(event: SimEvent): void {
       );
       break;
     }
-    case "ship_lost":
-    case "crew_collapse": {
+    case "council_convened": {
+      // Only a board of inquiry opens with a card; discipline,
+      // rationing, course and the rest convene quietly.
+      if (eventStr(event, "kind") !== "inquiry") break;
+      const accused = eventStr(event, "accused");
       alertStack.post(
         {
-          tier: "critical",
-          category: "ending",
+          kind: "inquiry",
+          subject: accused !== "" ? accused : `tick${event.tick}`,
           text:
-            event.type === "ship_lost"
-              ? `The ${run.ship.name} is lost.`
-              : `Too few able crew remain: the ${run.ship.name} drifts.`,
-          focus: {},
+            accused !== ""
+              ? `Inquiry: ${personName(accused)} is called before the board.`
+              : "Inquiry: the board convenes.",
+          focus: accused !== "" ? { personId: accused } : {},
+        },
+        now,
+      );
+      break;
+    }
+    case "council_finding": {
+      const kind = eventStr(event, "kind");
+      if (kind !== "inquiry" && kind !== "discipline") break;
+      const accused = eventStr(event, "accused");
+      if (accused === "") break;
+      const convicted = event.data.convicted === true;
+      // A sabotage finding the truth confirms is the one drama
+      // that outranks the plain verdict, and takes its card.
+      const confirmedSabotage =
+        convicted &&
+        eventStr(event, "cause") === "sabotage" &&
+        findingWasRight(event) === true;
+      alertStack.post(
+        {
+          kind: confirmedSabotage ? "sabotage" : "verdict",
+          subject: accused,
+          text: confirmedSabotage
+            ? `Sabotage confirmed: ${personName(accused)}.`
+            : convicted
+              ? `Verdict: ${personName(accused)} is found culpable.`
+              : `Verdict: ${personName(accused)} is acquitted.`,
+          focus: { personId: accused },
         },
         now,
       );
@@ -535,8 +643,8 @@ function feedAlert(event: SimEvent): void {
       const member = eventStr(event, "member");
       alertStack.post(
         {
-          tier: "major",
-          category: "relief",
+          kind: "relief",
+          subject: member,
           text: `${personName(member)} has been relieved of command.`,
           focus: { personId: member },
         },
@@ -544,116 +652,70 @@ function feedAlert(event: SimEvent): void {
       );
       break;
     }
-    case "injury": {
-      const person = eventStr(event, "person");
+    case "ship_lost": {
       alertStack.post(
         {
-          tier: "major",
-          category: "injury",
-          text: `${personName(person)} is injured: a ${eventStr(event, "part")} wound.`,
-          focus: { personId: person },
+          kind: "ship-lost",
+          subject: "ship",
+          text: `The ${run.ship.name} is lost.`,
+          focus: {},
         },
         now,
       );
       break;
     }
-    case "system_repaired": {
-      const systemId = eventStr(event, "system");
-      const system = run.ship.systems.find((s) => s.id === systemId);
-      const by = eventStr(event, "by");
+    case "crew_collapse": {
       alertStack.post(
         {
-          tier: "minor",
-          category: "repair",
-          text:
-            by !== ""
-              ? `${personName(by)} has repaired the ${systemName(systemId)}.`
-              : `The ${systemName(systemId)} is repaired.`,
-          focus: { room: system?.room, systemId },
+          kind: "collapse",
+          subject: "ship",
+          text: `Too few able crew remain: the ${run.ship.name} drifts.`,
+          focus: {},
         },
         now,
       );
       break;
     }
-    case "bond_formed": {
-      if (actor === undefined) break;
-      const level = eventNum(event, "level");
+    case "departure": {
+      const to = eventStr(event, "to");
       alertStack.post(
         {
-          tier: "minor",
-          category: "bond",
-          text:
-            level >= 2
-              ? `${personName(actor)} and ${personName(eventStr(event, "with"))} are fast friends now.`
-              : `${personName(actor)} and ${personName(eventStr(event, "with"))} have grown close.`,
-          focus: { personId: actor },
+          kind: "departure",
+          subject: `charter@${event.tick}`,
+          text: `Departure: for ${to}.`,
+          focus: {},
         },
         now,
       );
       break;
     }
-    case "stores_low":
-    case "stores_critical": {
-      const key = eventStr(event, "store") as StoreKey;
-      const days = Math.floor(eventNum(event, "days"));
-      const system = run.ship.systems.find(
-        (s) => s.kind === STORE_PRODUCER_KIND[key],
-      );
+    case "arrival":
+    case "port_call": {
+      const port = eventStr(event, "port");
       alertStack.post(
         {
-          tier: event.type === "stores_critical" ? "critical" : "major",
-          category: "stores",
-          text:
-            event.type === "stores_critical"
-              ? `${STORE_LABELS[key]} stores are critical: ${days} days remain.`
-              : `${STORE_LABELS[key]} stores run low: ${days} days remain.`,
-          focus: { room: system?.room, systemId: system?.id },
+          kind: "arrival",
+          subject: `${port}@${event.tick}`,
+          text: `Arrival: ${port}.`,
+          focus: {},
         },
         now,
       );
       break;
     }
-    case "rationing_imposed": {
-      const by = eventStr(event, "by");
-      if (by === "") break;
+    case "weather": {
+      // Landfall only: the chain's move into the storm. The chain
+      // flickers at the storm's edge, so a re-landfall inside a
+      // day is the same storm system, not new news.
+      if (eventStr(event, "to") !== "radiation storm") break;
+      if (event.tick - lastStormToastTick < CONFIG.time.ticksPerDay) break;
+      lastStormToastTick = event.tick;
       alertStack.post(
         {
-          tier: "major",
-          category: "stores",
-          text:
-            `${personName(by)} imposes rationing: ` +
-            `${eventStr(event, "store")} at ${Math.floor(eventNum(event, "days"))} days.`,
-          focus: { personId: by },
-        },
-        now,
-      );
-      break;
-    }
-    case "theft": {
-      // Only a witnessed theft is news aboard; the rest is a tally
-      // the chronicle finds later, or never.
-      if (event.data.witnessed !== true) break;
-      alertStack.post(
-        {
-          tier: "major",
-          category: "sabotage",
-          text:
-            `${personName(eventStr(event, "witness"))} saw ` +
-            `${personName(eventStr(event, "thief"))} take food from the stores.`,
-          focus: { personId: eventStr(event, "thief") },
-        },
-        now,
-      );
-      break;
-    }
-    case "dead_in_space": {
-      const system = run.ship.systems.find((s) => s.kind === "engines");
-      alertStack.post(
-        {
-          tier: "major",
-          category: "stores",
-          text: `Out of fuel: the ${run.ship.name} drifts, dead in space.`,
-          focus: { room: system?.room, systemId: system?.id },
+          kind: "storm",
+          subject: "storm",
+          text: "Radiation storm.",
+          focus: {},
         },
         now,
       );
@@ -664,13 +726,18 @@ function feedAlert(event: SimEvent): void {
   }
 }
 
-/** States from the live conditions, plus the speed the clock runs at. */
+/**
+ * States from the live conditions: the critical-band system
+ * cards. Later-leg departures are derived here too: the voyage
+ * system emits no event when a stay ends, but the viewer watches
+ * the stay end, and a departure is whitelisted news. Only stays
+ * count: the charter origin is not a port call, and its
+ * departure already arrives as an event.
+ */
+let prevStayPort: number | null = null;
+let staySeen = false;
+
 function syncAlerts(): void {
-  alertStack.setTps(
-    playing
-      ? (SPEEDS[speedIndex] as (typeof SPEEDS)[number]).ticksPerSecond
-      : 0,
-  );
   alertStack.syncSystems(
     run.ship.systems.map((s) => ({
       id: s.id,
@@ -682,8 +749,330 @@ function syncAlerts(): void {
     })),
     performance.now(),
   );
+  const stay = run.galaxy.voyage.stayAt(run.tick);
+  const stayPort = stay !== null ? stay.port : null;
+  if (!staySeen) {
+    staySeen = true;
+    prevStayPort = stayPort;
+    return;
+  }
+  if (prevStayPort !== null && stayPort === null) {
+    const sector = run.galaxy.sector;
+    const from = sector.portAt(prevStayPort).name;
+    const leg = run.galaxy.voyage.currentLegAt(run.tick);
+    const to = leg !== null ? sector.portAt(leg.to).name : "";
+    alertStack.post(
+      {
+        kind: "departure",
+        subject: `${from}@${run.tick}`,
+        text: to !== "" ? `Departure: ${from} for ${to}.` : `Departure: ${from}.`,
+        focus: {},
+      },
+      performance.now(),
+    );
+  }
+  prevStayPort = stayPort;
 }
 
+
+// ------------------------------------------------------------- council
+
+/**
+ * The Council sheet's records, read off the event stream the
+ * viewer already drains: a sitting is one row (time, subject,
+ * matter, verdict) plus the watcher's truth chip where the
+ * finding's record carries a truth, and its transcript (the
+ * convening, the testimony quotes with their grades, the
+ * finding, the truth line, the sentence) lives one tap deeper.
+ * The renderer that prints the transcript is the chronicle's
+ * own, seeded the same way the person card seeds it, so the
+ * sheet and the log never disagree.
+ */
+interface SittingRecord {
+  id: number;
+  tick: number;
+  kind: string;
+  accusedId: string | null;
+  subject: string;
+  matter: string;
+  verdict: string;
+  chip: string | null;
+  chipGood: boolean;
+  coursePort: string;
+  events: SimEvent[];
+}
+
+const SITTING_MATTERS: Record<string, string> = {
+  inquiry: "Inquiry",
+  discipline: "Discipline",
+  rationing: "Rationing",
+  lift: "Lift rationing",
+  ratification: "Ratification",
+  emergency: "Emergency",
+  relief: "No confidence",
+  appointment: "Appointment",
+  course: "Course",
+};
+
+const SEAT_TITLES: Record<string, string> = {
+  captain: "Captain",
+  "first officer": "First Officer",
+  "chief engineer": "Chief Engineer",
+  "chief medical officer": "Chief Medical Officer",
+  "security chief": "Security Chief",
+  "science officer": "Science Officer",
+  quartermaster: "Quartermaster",
+};
+
+let sittings: SittingRecord[] = [];
+let openSitting: SittingRecord | null = null;
+let lastSitting: SittingRecord | null = null;
+let sittingsDirty = true;
+let detailSittingId: number | null = null;
+let seatsSig = "";
+
+function trackCouncil(event: SimEvent): void {
+  switch (event.type) {
+    case "council_convened": {
+      const kind = eventStr(event, "kind");
+      const accused = eventStr(event, "accused");
+      let subject = "";
+      if (accused !== "") {
+        subject = personName(accused);
+      } else if (kind === "course") {
+        subject = eventStr(event, "from");
+      } else if (
+        kind === "rationing" ||
+        kind === "lift" ||
+        kind === "ratification"
+      ) {
+        const store = eventStr(event, "store");
+        subject =
+          store === "food" ? "Food" : store === "water" ? "Water" : "Stores";
+      } else if (kind === "relief") {
+        const captain = run.council.seats["captain"];
+        subject = captain !== null && captain !== undefined
+          ? personName(captain)
+          : "Captain";
+      } else if (kind === "appointment") {
+        subject = "First Officer";
+      } else if (kind === "emergency") {
+        subject = "Ship";
+      }
+      const record: SittingRecord = {
+        id: sittings.length,
+        tick: event.tick,
+        kind,
+        accusedId: accused !== "" ? accused : null,
+        subject,
+        matter: SITTING_MATTERS[kind] ?? kind,
+        verdict: "",
+        chip: null,
+        chipGood: false,
+        coursePort: "",
+        events: [event],
+      };
+      sittings.push(record);
+      openSitting = record;
+      lastSitting = record;
+      sittingsDirty = true;
+      break;
+    }
+    case "council_testimony": {
+      openSitting?.events.push(event);
+      break;
+    }
+    case "course_decided": {
+      if (openSitting !== null) {
+        openSitting.events.push(event);
+        openSitting.coursePort = eventStr(event, "port");
+      }
+      break;
+    }
+    case "council_finding": {
+      const record = openSitting ?? lastSitting;
+      if (record === null) break;
+      record.events.push(event);
+      const kind = eventStr(event, "kind");
+      const accused = eventStr(event, "accused");
+      const convicted = event.data.convicted === true;
+      if (kind === "inquiry" || kind === "discipline") {
+        record.verdict =
+          accused === "" ? "no culprit" : convicted ? "culpable" : "acquitted";
+        const right = findingWasRight(event);
+        if (right === true) {
+          record.chip = "upheld";
+          record.chipGood = true;
+        } else if (right === false) {
+          const truthCulprit = eventStr(event, "truthCulprit");
+          record.chip =
+            convicted && accused !== truthCulprit
+              ? "wrongly brigged"
+              : !convicted && truthCulprit !== "" &&
+                  (accused === "" || accused === truthCulprit)
+                ? "culprit walks"
+                : "wrong cause";
+          record.chipGood = false;
+        }
+      } else if (kind === "course") {
+        record.verdict =
+          record.coursePort !== ""
+            ? record.coursePort
+            : eventStr(event, "consequence").replace("course set for ", "");
+      } else {
+        record.verdict = convicted ? "carried" : "refused";
+      }
+      if (openSitting === record) openSitting = null;
+      sittingsDirty = true;
+      if (detailSittingId === record.id) renderSittingTranscript(record);
+      break;
+    }
+    case "council_sentence":
+    case "captain_forgiveness": {
+      // The tail of the sitting that just found: the sentence and
+      // the forgiveness belong to its transcript.
+      const member = eventStr(event, "member");
+      if (lastSitting !== null && member === lastSitting.accusedId) {
+        lastSitting.events.push(event);
+        if (detailSittingId === lastSitting.id) {
+          renderSittingTranscript(lastSitting);
+        }
+      }
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+function renderCouncilSeats(): void {
+  const seats = run.council.seats;
+  const legitimacy = Math.round(run.council.legitimacy * 100);
+  const sig =
+    CONFIG.council.seats.map((def) => seats[def.key] ?? "-").join("|") +
+    `#${legitimacy}`;
+  if (sig === seatsSig) return;
+  seatsSig = sig;
+  councilSeatsEl.replaceChildren();
+  for (const def of CONFIG.council.seats) {
+    const row = document.createElement("div");
+    row.className = "seat-row";
+    const name = document.createElement("span");
+    name.className = "seat-name";
+    name.textContent = SEAT_TITLES[def.key] ?? def.key;
+    const holder = document.createElement("span");
+    const holderId = seats[def.key];
+    holder.className =
+      "seat-holder" + (holderId === null || holderId === undefined ? " vacant" : "");
+    holder.textContent =
+      holderId === null || holderId === undefined
+        ? "Vacant"
+        : personName(holderId);
+    row.append(name, holder);
+    councilSeatsEl.appendChild(row);
+  }
+  const legRow = document.createElement("div");
+  legRow.className = "legitimacy-row";
+  const legLabel = document.createElement("span");
+  legLabel.textContent = "Legitimacy";
+  const bar = document.createElement("div");
+  bar.className = "sbar";
+  const fill = document.createElement("div");
+  fill.style.width = `${legitimacy}%`;
+  fill.className = legitimacy < 30 ? "crit" : legitimacy < 50 ? "warn" : "";
+  bar.appendChild(fill);
+  const value = document.createElement("span");
+  value.className = "sval";
+  value.textContent = `${legitimacy}%`;
+  legRow.append(legLabel, bar, value);
+  councilSeatsEl.appendChild(legRow);
+}
+
+function renderSittingList(): void {
+  councilListEl.replaceChildren();
+  if (sittings.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "sheet-empty";
+    empty.textContent = "No sittings yet.";
+    councilListEl.appendChild(empty);
+    return;
+  }
+  for (let i = sittings.length - 1; i >= 0; i--) {
+    const record = sittings[i] as SittingRecord;
+    const clock = shipClock(record.tick);
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "sitting-row";
+    const time = document.createElement("span");
+    time.className = "s-time";
+    time.textContent = `D${clock.day} ${clock.time}`;
+    const main = document.createElement("span");
+    main.className = "s-main";
+    main.textContent =
+      record.subject !== ""
+        ? `${record.subject} · ${record.matter}`
+        : record.matter;
+    row.append(time, main);
+    if (record.verdict !== "") {
+      const verdict = document.createElement("span");
+      verdict.className = "s-verdict";
+      verdict.textContent = record.verdict;
+      row.appendChild(verdict);
+    }
+    if (record.chip !== null) {
+      const chip = document.createElement("span");
+      chip.className = "truth-chip" + (record.chipGood ? " good" : "");
+      chip.textContent = record.chip;
+      row.appendChild(chip);
+    }
+    row.addEventListener("click", () => openSittingDetail(record));
+    councilListEl.appendChild(row);
+  }
+}
+
+function showSittingList(): void {
+  detailSittingId = null;
+  councilDetailEl.hidden = true;
+  councilListEl.hidden = false;
+  renderCouncilSeats();
+  renderSittingList();
+  sittingsDirty = false;
+}
+
+function openSittingDetail(record: SittingRecord): void {
+  detailSittingId = record.id;
+  councilListEl.hidden = true;
+  councilDetailEl.hidden = false;
+  renderSittingTranscript(record);
+  sheetBodyEl.scrollTop = 0;
+}
+
+/** The transcript: the sitting's own events through the one renderer. */
+function renderSittingTranscript(record: SittingRecord): void {
+  const events = run.world.events.events;
+  const transcript = createChronicleRenderer();
+  for (const event of events) {
+    if (event.type === "ship_generated" || event.type === "crew_generated") {
+      transcript.push(event);
+    }
+  }
+  councilTranscriptEl.replaceChildren();
+  for (const event of record.events) {
+    for (const line of transcript.push(event)) {
+      if (line.text === "") continue;
+      const div = document.createElement("div");
+      div.className = "tline";
+      div.textContent = line.text;
+      councilTranscriptEl.appendChild(div);
+    }
+  }
+  if (councilTranscriptEl.childElementCount === 0) {
+    const div = document.createElement("div");
+    div.className = "tline";
+    div.textContent = "Nothing recorded.";
+    councilTranscriptEl.appendChild(div);
+  }
+}
 
 // ------------------------------------------------------------ crew panel
 
@@ -1491,14 +1880,17 @@ function appendLinesToDom(lines: readonly LogLine[]): void {
     if (first === null) break;
     chronicleEl.removeChild(first);
   }
-  if (stickToBottom) chronicleEl.scrollTop = chronicleEl.scrollHeight;
+  // The sheet body is the scroller now; the log rides it.
+  if (stickToBottom && sheetTab === "log") {
+    sheetBodyEl.scrollTop = sheetBodyEl.scrollHeight;
+  }
 }
 
 function rebuildChronicleDom(): void {
   chronicleEl.replaceChildren();
   const visible = allLines.filter((entry) => linePasses(entry));
   appendLinesToDom(visible.slice(-MAX_CHRONICLE_DOM_LINES));
-  chronicleEl.scrollTop = chronicleEl.scrollHeight;
+  sheetBodyEl.scrollTop = sheetBodyEl.scrollHeight;
 }
 
 function refreshLineDims(): void {
@@ -1603,6 +1995,7 @@ function drainEvents(): void {
         const accusedRaw = event.data.accused;
         activeSittings.push({
           room: eventNum(event, "room"),
+          kind: eventStr(event, "kind"),
           seats,
           accused: typeof accusedRaw === "string" ? accusedRaw : null,
           untilTick: event.tick + SITTING_TICKS,
@@ -1646,6 +2039,7 @@ function drainEvents(): void {
       const actor = event.actors[0];
       if (actor !== undefined) updateCarry(actor, event);
     }
+    trackCouncil(event);
     feedAlert(event);
     for (const line of renderer.push(event)) {
       const entry: LogLine = { line, type: event.type };
@@ -1666,11 +2060,10 @@ function drainEvents(): void {
  */
 function refreshDailyBanner(): void {
   if (currentSeed === dailySeed()) {
-    dailyText.textContent =
-      `★ Voyage of the Day: the ${run.ship.name} — the same ship for everyone`;
+    dailyText.textContent = `★ Voyage of the Day · ${run.ship.name}`;
     dailyBtn.hidden = true;
   } else {
-    dailyText.textContent = "Today's voyage is a different ship.";
+    dailyText.textContent = "";
     dailyBtn.hidden = false;
   }
 }
@@ -1710,6 +2103,17 @@ function startVoyage(seed: number, opts?: { daily?: boolean }): void {
   councilSeatByMember.clear();
   councilStandByMember.clear();
   carryByMember.clear();
+  sittings = [];
+  openSitting = null;
+  lastSitting = null;
+  detailSittingId = null;
+  sittingsDirty = true;
+  seatsSig = "";
+  councilListEl.replaceChildren();
+  councilSeatsEl.replaceChildren();
+  staySeen = false;
+  prevStayPort = null;
+  lastStormToastTick = Number.NEGATIVE_INFINITY;
   alertStack.reset();
   chronicleEl.replaceChildren();
   shipNameEl.textContent = run.ship.name;
@@ -1783,97 +2187,138 @@ let shownTick = -1;
 function updateHeader(): void {
   if (run.tick === shownTick) return;
   shownTick = run.tick;
-  const clock = shipClock(run.tick);
-  clockDayEl.textContent = String(clock.day);
-  clockTimeEl.textContent = clock.time;
   hashEl.textContent = run.hash().slice(0, 10);
   eventCountEl.textContent = String(run.world.events.size);
+}
+
+/** The strip's weather word: the state, never a sentence. */
+const WEATHER_WORDS: Record<string, string> = {
+  calm: "Calm",
+  "solar wind": "Solar wind",
+  "radiation storm": "Storm",
+};
+
+/** The strip's position segment, kept by updateRoute. */
+let stripRouteShort = "";
+let lastStripText = "";
+
+/**
+ * The one status strip: day, time, watch, weather, position.
+ * One line, written on the slow cadence and only when it
+ * changes; the weather itself is painted in the world, so the
+ * strip carries just its name.
+ */
+function updateStrip(): void {
+  const clock = shipClock(run.tick);
   const watch = watchName(
     (run.tick % CONFIG.time.ticksPerDay) * CONFIG.time.minutesPerTick,
   );
   if (watch !== shownWatch) {
     shownWatch = watch;
-    watchLabelEl.textContent = watch;
     paintWatchIcon(watch);
+  }
+  const watchWord = watch.replace(" watch", "");
+  const parts = [
+    `D${clock.day}`,
+    clock.time,
+    watchWord,
+    WEATHER_WORDS[weatherName] ?? weatherName,
+  ];
+  if (stripRouteShort !== "") parts.push(stripRouteShort);
+  const text = parts.join(" · ");
+  if (text !== lastStripText) {
+    lastStripText = text;
+    stripLineEl.textContent = text;
   }
 }
 
 // ------------------------------------------------------- ship's day
 
-/**
- * The printed beats of the ship's day, for the ribbon's next-beat
- * reading: the day watch's schedule, which is the ship's rhythm.
- */
-const DAY_BEATS: ReadonlyArray<{ hour: number; label: string }> = [
-  { hour: 6, label: "Wake" },
-  { hour: 7, label: "Breakfast" },
-  { hour: 8, label: "Work" },
-  { hour: 12, label: "Midday break" },
-  { hour: 13, label: "Work" },
-  { hour: 18, label: "Evening meal" },
-  { hour: 19, label: "Free time" },
-  { hour: 22, label: "Lights-out" },
-];
-
-const BLOCK_LABELS: Record<BlockKind, string> = {
-  sleep: "Sleep",
-  work: "Work",
-  meal: "At table",
-  free: "Free time",
+/** The scene chip's word for a sitting's business. */
+const SITTING_CHIP_WORDS: Record<string, string> = {
+  inquiry: "Inquiry",
+  discipline: "Discipline",
+  rationing: "Rationing",
+  lift: "Rationing",
+  ratification: "Ratification",
+  emergency: "Emergency",
+  relief: "Relief",
+  appointment: "Appointment",
+  course: "Course",
 };
 
-let lastRibbonText = "";
+let lastSceneText = "\u0000";
 
 /**
- * The ship's day ribbon: the watch phase, the block most of the
- * crew are in right now, and the next beat of the day with its
- * time. It teaches the rhythm the deck is keeping; it is written
- * only when the reading changes, on the slow-UI cadence.
+ * The scene chip over the deck: the moment the ship is in, in
+ * the reference's style ("Council · Inquiry · 5 seated",
+ * "Mess · Breakfast · 9 at table"). Derived from the staging
+ * state the deck already keeps; written only when it changes,
+ * on the slow cadence.
  */
-function updateRibbon(): void {
+function updateSceneChip(): void {
   const tick = run.tick;
-  const dayMinutes =
-    (tick % CONFIG.time.ticksPerDay) * CONFIG.time.minutesPerTick;
-  const watch = watchName(dayMinutes);
-  const counts = new Map<BlockKind, number>();
-  let nightOnDuty = 0;
-  for (const member of run.crew) {
-    const block = blockAt(member.routine, tick);
-    counts.set(block, (counts.get(block) ?? 0) + 1);
-    if (member.watch === "night" && block === "work") nightOnDuty++;
-  }
-  let majority: BlockKind = "free";
-  let best = -1;
-  for (const kind of ["sleep", "meal", "work", "free"] as const) {
-    const n = counts.get(kind) ?? 0;
-    if (n > best) {
-      best = n;
-      majority = kind;
-    }
-  }
-  let nowLabel: string;
-  if (majority === "meal") {
-    nowLabel =
-      mealWindowAt(tick) === "breakfast" ? "Breakfast" : "Evening meal";
-  } else if (majority === "sleep" && nightOnDuty > 0) {
-    // Most hands are asleep and the night pair holds the ship: the
-    // ship's posture is the night watch, not merely sleep.
-    nowLabel = "Night watch";
+  let text = "";
+  const sitting = activeSittings[activeSittings.length - 1];
+  if (sitting !== undefined) {
+    const word = SITTING_CHIP_WORDS[sitting.kind] ?? "Sitting";
+    text = `Council · ${word} · ${sitting.seats.length} seated`;
   } else {
-    nowLabel = BLOCK_LABELS[majority];
-  }
-  let beat = DAY_BEATS[0] as (typeof DAY_BEATS)[number];
-  for (const candidate of DAY_BEATS) {
-    if (candidate.hour * 60 > dayMinutes) {
-      beat = candidate;
-      break;
+    const stay = run.galaxy.voyage.stayAt(tick);
+    if (stay !== null) {
+      const port = run.galaxy.sector.portAt(stay.port);
+      const ashore = run.crew.filter((m) => m.ashore).length;
+      text =
+        ashore > 0
+          ? `Port · ${port.name} · ${ashore} ashore`
+          : `Port · ${port.name}`;
+    } else {
+      const meal = mealWindowAt(tick);
+      if (meal !== null) {
+        const atTable = run.crew.filter(
+          (m) => !m.ashore && !m.dead && !m.leftShip && m.activity === "eat",
+        ).length;
+        text =
+          `Mess · ${meal === "breakfast" ? "Breakfast" : "Evening meal"}` +
+          ` · ${atTable} at table`;
+      } else {
+        const counts = new Map<BlockKind, number>();
+        let nightOnDuty = 0;
+        for (const member of run.crew) {
+          if (member.dead || member.leftShip) continue;
+          const block = blockAt(member.routine, tick);
+          counts.set(block, (counts.get(block) ?? 0) + 1);
+          if (member.watch === "night" && block === "work") nightOnDuty++;
+        }
+        let majority: BlockKind = "free";
+        let best = -1;
+        for (const kind of ["sleep", "meal", "work", "free"] as const) {
+          const n = counts.get(kind) ?? 0;
+          if (n > best) {
+            best = n;
+            majority = kind;
+          }
+        }
+        if (majority === "sleep" && nightOnDuty > 0) {
+          // Most hands are asleep and the night pair holds the
+          // ship: the ship's posture is the night watch.
+          text = `Night watch · ${nightOnDuty} on duty`;
+        } else if (majority === "sleep") {
+          text = `Sleep · ${best} in bunks`;
+        } else if (majority === "work") {
+          text = `Work · ${best} on duty`;
+        } else if (majority === "meal") {
+          text = `Mess · ${best} at table`;
+        } else {
+          text = `Free time · ${best} about`;
+        }
+      }
     }
   }
-  const beatTime = `${String(beat.hour).padStart(2, "0")}:00`;
-  const text = `${watch} · ${nowLabel} · Next: ${beat.label} ${beatTime}`;
-  if (text !== lastRibbonText) {
-    lastRibbonText = text;
-    ribbonEl.textContent = text;
+  if (text !== lastSceneText) {
+    lastSceneText = text;
+    sceneChipEl.textContent = text;
+    sceneChipEl.hidden = text === "";
   }
 }
 
@@ -1924,6 +2369,22 @@ function updateRoute(): void {
           : "";
     }
   }
+  // The strip's position segment: the port's name in port, the
+  // destination and whole days out under way.
+  let short = "";
+  if (stay !== null) {
+    short = sector.portAt(stay.port).name;
+  } else {
+    const leg = voyage.currentLegAt(tick);
+    if (leg !== null) {
+      const daysToGo = (leg.arriveTick - vt) / tpd;
+      short = `${sector.portAt(leg.to).name} ${Math.max(1, Math.ceil(daysToGo))}d`;
+    } else {
+      const portIndex = voyage.portIndexAt(tick);
+      if (portIndex !== null) short = sector.portAt(portIndex).name;
+    }
+  }
+  stripRouteShort = short;
   if (text !== lastRouteText) {
     lastRouteText = text;
     routeEl.textContent = text;
@@ -1935,7 +2396,7 @@ function updateRoute(): void {
 const STRIP_LABELS: Record<StoreKey, string> = {
   food: "Food",
   water: "Water",
-  oxygen: "O2 margin",
+  oxygen: "O2",
   fuel: "Fuel",
   parts: "Parts",
 };
@@ -2037,12 +2498,18 @@ function updateStoresStrip(): void {
 }
 
 function updateSlowUi(): void {
-  weatherNameEl.textContent = weatherName;
-  weatherBanner.classList.toggle("storm", weatherName === "radiation storm");
-  updateRibbon();
   updateRoute();
+  updateStrip();
+  updateSceneChip();
   updateStoresStrip();
   syncAlerts();
+  if (sheetTab === "council") {
+    renderCouncilSeats();
+    if (sittingsDirty && detailSittingId === null) {
+      renderSittingList();
+      sittingsDirty = false;
+    }
+  }
 
   if (cardPortIndex !== null && performance.now() - lastPortRenderMs > 1000) {
     lastPortRenderMs = performance.now();
@@ -2189,6 +2656,8 @@ function frame(nowMs: number): void {
       councilSeat: councilSeatByMember,
       councilStand: councilStandByMember,
       carry: carryByMember,
+      showWear,
+      showBubbles,
       dayMinutes:
         (run.tick % CONFIG.time.ticksPerDay) * CONFIG.time.minutesPerTick,
       storm: weatherName === "radiation storm",
@@ -2238,21 +2707,75 @@ function setPlaying(next: boolean): void {
 function setSpeed(index: number): void {
   speedIndex = Math.max(0, Math.min(SPEEDS.length - 1, index));
   const speed = SPEEDS[speedIndex] as (typeof SPEEDS)[number];
-  speedReadoutEl.textContent = speed.label;
-  [...speedGroup.children].forEach((child, i) => {
-    child.classList.toggle("active", i === speedIndex);
-  });
+  speedBtn.textContent = speed.label;
 }
 
-SPEEDS.forEach((speed, i) => {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.textContent = speed.label;
-  button.addEventListener("click", () => setSpeed(i));
-  speedGroup.appendChild(button);
+/** One cycling speed button (the reference viewers' fold). */
+speedBtn.addEventListener("click", () => {
+  setSpeed((speedIndex + 1) % SPEEDS.length);
 });
 
 playBtn.addEventListener("click", () => setPlaying(!playing));
+menuBtn.addEventListener("click", () => {
+  menuRow.hidden = !menuRow.hidden;
+});
+
+function setToggle(
+  which: "wear" | "bubbles",
+  on: boolean,
+  persist = true,
+): void {
+  if (which === "wear") showWear = on;
+  else showBubbles = on;
+  const button = which === "wear" ? toggleWearBtn : toggleBubblesBtn;
+  button.classList.toggle("active", on);
+  button.setAttribute("aria-pressed", String(on));
+  if (persist) {
+    try {
+      window.localStorage.setItem(
+        "starship.toggles",
+        JSON.stringify({ wear: showWear, bubbles: showBubbles }),
+      );
+    } catch {
+      // Storage can refuse; the toggles still work for the session.
+    }
+  }
+}
+toggleWearBtn.addEventListener("click", () => setToggle("wear", !showWear));
+toggleBubblesBtn.addEventListener("click", () =>
+  setToggle("bubbles", !showBubbles),
+);
+
+for (const [tab, button] of tabButtons) {
+  button.addEventListener("click", () => toggleSheet(tab));
+}
+must<HTMLButtonElement>("sheet-close").addEventListener("click", () => {
+  closeSheet();
+});
+must<HTMLButtonElement>("council-back").addEventListener("click", () => {
+  showSittingList();
+});
+
+/** The pause-on settings: one checkbox per whitelisted kind. */
+function buildAlertPrefs(): void {
+  alertPrefsEl.replaceChildren();
+  for (const def of ALERT_KIND_DEFS) {
+    const row = document.createElement("label");
+    row.className = "pref-row";
+    const label = document.createElement("span");
+    label.textContent = def.label;
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.dataset.pauseKind = def.kind;
+    box.checked = pausePrefs[def.kind];
+    box.addEventListener("change", () => {
+      pausePrefs[def.kind] = box.checked;
+      savePausePrefs(pausePrefs);
+    });
+    row.append(label, box);
+    alertPrefsEl.appendChild(row);
+  }
+}
 dailyBtn.addEventListener("click", () => startDailyVoyage());
 deck1Btn.addEventListener("click", () => setViewDeck(0));
 deck2Btn.addEventListener("click", () => setViewDeck(1));
@@ -2303,9 +2826,10 @@ must<HTMLButtonElement>("random-btn").addEventListener("click", () => {
 });
 logHighlightsBtn.addEventListener("click", () => setLogMode("highlights"));
 logFullBtn.addEventListener("click", () => setLogMode("full"));
-chronicleEl.addEventListener("scroll", () => {
+sheetBodyEl.addEventListener("scroll", () => {
+  if (sheetTab !== "log") return;
   stickToBottom =
-    chronicleEl.scrollHeight - chronicleEl.scrollTop - chronicleEl.clientHeight <
+    sheetBodyEl.scrollHeight - sheetBodyEl.scrollTop - sheetBodyEl.clientHeight <
     40;
 });
 
@@ -2325,6 +2849,7 @@ window.addEventListener("keydown", (event) => {
     closePersonCard();
     closePortCard();
     closeTrafficCard();
+    closeSheet();
   } else if (event.key >= "1" && event.key <= "6") {
     setSpeed(Number(event.key) - 1);
   } else if (event.key === "7" || event.key === "[") {
@@ -2344,6 +2869,30 @@ const params = new URLSearchParams(window.location.search);
 setLogMode(initialLogMode(params), false);
 setSpeed(speedIndex);
 setPlaying(true);
+buildAlertPrefs();
+document.body.dataset.view = "deck";
+{
+  // The alert stack's phone discipline (caps and lifetimes)
+  // follows the viewport, live.
+  const phoneQuery = window.matchMedia("(max-width: 760px)");
+  const applyPhone = () => alertStack.setPhoneMode(phoneQuery.matches);
+  applyPhone();
+  phoneQuery.addEventListener("change", applyPhone);
+  // The menu row's view toggles, restored.
+  let wear = true;
+  let bubbles = true;
+  try {
+    const stored = JSON.parse(
+      window.localStorage.getItem("starship.toggles") ?? "{}",
+    ) as { wear?: unknown; bubbles?: unknown };
+    if (typeof stored.wear === "boolean") wear = stored.wear;
+    if (typeof stored.bubbles === "boolean") bubbles = stored.bubbles;
+  } catch {
+    // No stored toggles: both on.
+  }
+  setToggle("wear", wear, false);
+  setToggle("bubbles", bubbles, false);
+}
 if (params.get("daily") === "1") {
   // ?daily=1 wins over ?seed=: it names a day, not a ship, and the ship
   // it names changes at UTC midnight.

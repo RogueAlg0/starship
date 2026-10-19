@@ -1,53 +1,113 @@
-// Alerts: urgency-tiered notifications over the deck, the way the
-// reference squad viewer floats its battle news over the map. An
-// alert is either a MOMENT (an event the chronicle already speaks:
-// a sabotage found, an accusation, a repair finished) or a STATE (a
-// system's condition band, which holds for as long as the condition
-// holds). Moments fade on a wall-clock lifetime; states persist.
+// Alerts: notifications over the deck, rebuilt on a whitelist.
 //
-// Tiers:
-// - critical (red): a system below 30% condition, or failed. A
-//   state: it persists while the condition holds. Its dismiss
-//   snoozes it until the band changes, not forever.
-// - major (amber): sabotage, an accusation, a grudge, a broken
-//   trust, a system crossing below 60%. Lingers about 12 s.
-// - minor (neutral): a repair completed, a system back above 90%,
-//   a bond formed. Fades in about 5 s.
+// The old stack tiered EVERYTHING the chronicle spoke (sabotage,
+// accusations, grudges, broken trust, injuries, repairs, bonds)
+// and let it toast behind rate limits; on a busy seed that was a
+// card every few seconds, forever. The reference viewers cannot
+// spam by construction: only a short whitelist of dramatic kinds
+// may ever become a card, and everything else lives in the feed.
+// This module is that construction:
 //
-// Lifetimes scale mildly with playback speed so a burst at 6x does
-// not flood the corner and a note at 1x gets its slow read:
-// scale = clamp(2.5 / max(ticksPerSecond, 0.4), 0.5, 2.5), applied
-// to the base lifetimes above (12 s major, 5 s minor). At the 1x
-// witness pace (0.4 tps) the scale is 2.5; at 3 tps it is about
-// 0.83; at 6x (60 tps) it bottoms out at 0.5.
+// - Eleven kinds may toast, ever: death, inquiry opened, verdict,
+//   a sabotage finding confirmed against the truth, relief of the
+//   captain carried, a system in its critical band (a state card,
+//   held while the condition holds), the ship lost, the crew
+//   collapsed, arrival, departure, a radiation storm's landfall.
+//   Bonds, snubs, repairs, recoveries, level-ups, gossip, injuries,
+//   accusations and the rest are chronicle-only. They are not
+//   filtered here; they are never posted. The caller (main.ts)
+//   maps events onto these kinds and nothing else.
+// - Lifetimes are the squad numbers: 6 s on a phone, 9 s on a
+//   desktop, majors included. The stack caps at 2 on a phone,
+//   4 on a desktop. Condition cards are the only persistent ones.
+// - A continuing situation updates its one card: a verdict takes
+//   the place of the inquiry card it concludes, a confirmed
+//   sabotage finding takes the verdict's place, and a hurt
+//   system's card follows its condition in place.
+// - The same kind about the same subject cannot re-toast inside
+//   a dedupe window (30 s), even if its card already left.
+// - Each kind carries a "pause on" preference (the village
+//   pattern), persisted in localStorage; defaults pause only on
+//   death, the ship lost, and the crew collapsed. When a card is
+//   raised for a pausing kind, the stack says so through onRaise
+//   and the viewer stops its clock.
 //
-// Stack discipline: at most 4 visible, newest on top, one alert per
-// subject (a system sliding 55% then 28% escalates its own alert; it
-// never stacks two). Minors are rate-limited (one accepted per 3 s)
-// and dropped when the stack is full; majors and criticals displace
-// the oldest minor, then the oldest timed major. Criticals are never
-// displaced.
-//
-// The stack itself is pure state (no DOM), so the headless harness
-// can drive it with a fake clock. AlertStackView renders it.
+// The stack itself is pure state (no DOM), so the headless
+// harness can drive it with a fake clock. AlertStackView renders.
 
 import { spriteCanvas, type SpriteDef } from "./props.ts";
 
-export type AlertTier = "critical" | "major" | "minor";
-
-export type AlertCategory =
-  | "damage"
-  | "sabotage"
-  | "speech"
-  | "grudge"
-  | "trust"
-  | "repair"
-  | "bond"
-  | "stores"
+export type AlertKind =
   | "death"
-  | "ending"
+  | "inquiry"
+  | "verdict"
+  | "sabotage"
   | "relief"
-  | "injury";
+  | "system"
+  | "ship-lost"
+  | "collapse"
+  | "arrival"
+  | "departure"
+  | "storm";
+
+/** Display severity: red edge, or amber. */
+export type AlertTier = "critical" | "major";
+
+export interface AlertKindDef {
+  kind: AlertKind;
+  /** One or two words, for the settings sheet. */
+  label: string;
+  tier: AlertTier;
+  /** Pause the clock when a card of this kind is raised. */
+  defaultPause: boolean;
+}
+
+export const ALERT_KIND_DEFS: readonly AlertKindDef[] = [
+  { kind: "death", label: "Death", tier: "critical", defaultPause: true },
+  { kind: "inquiry", label: "Inquiry", tier: "major", defaultPause: false },
+  { kind: "verdict", label: "Verdict", tier: "major", defaultPause: false },
+  { kind: "sabotage", label: "Sabotage", tier: "critical", defaultPause: false },
+  { kind: "relief", label: "Relief", tier: "major", defaultPause: false },
+  { kind: "system", label: "Systems", tier: "critical", defaultPause: false },
+  { kind: "ship-lost", label: "Ship lost", tier: "critical", defaultPause: true },
+  { kind: "collapse", label: "Collapse", tier: "critical", defaultPause: true },
+  { kind: "arrival", label: "Arrival", tier: "major", defaultPause: false },
+  { kind: "departure", label: "Departure", tier: "major", defaultPause: false },
+  { kind: "storm", label: "Storm", tier: "major", defaultPause: false },
+];
+
+const KIND_DEF = new Map(ALERT_KIND_DEFS.map((d) => [d.kind, d]));
+
+export type PausePrefs = Record<AlertKind, boolean>;
+
+const PAUSE_STORAGE_KEY = "starship.alertPause";
+
+export function loadPausePrefs(): PausePrefs {
+  const prefs = {} as PausePrefs;
+  for (const def of ALERT_KIND_DEFS) prefs[def.kind] = def.defaultPause;
+  try {
+    const raw = window.localStorage.getItem(PAUSE_STORAGE_KEY);
+    if (raw !== null) {
+      const stored = JSON.parse(raw) as Partial<Record<string, unknown>>;
+      for (const def of ALERT_KIND_DEFS) {
+        if (typeof stored[def.kind] === "boolean") {
+          prefs[def.kind] = stored[def.kind] as boolean;
+        }
+      }
+    }
+  } catch {
+    // Storage can refuse or hold junk; the defaults stand.
+  }
+  return prefs;
+}
+
+export function savePausePrefs(prefs: PausePrefs): void {
+  try {
+    window.localStorage.setItem(PAUSE_STORAGE_KEY, JSON.stringify(prefs));
+  } catch {
+    // The preference is a nicety, not state worth crashing over.
+  }
+}
 
 /** Where a click takes the viewer: a person, or a room to flash. */
 export interface AlertFocus {
@@ -58,8 +118,10 @@ export interface AlertFocus {
 
 export interface AlertItem {
   key: string;
+  kind: AlertKind;
   tier: AlertTier;
-  category: AlertCategory;
+  /** Icon key in the view's sprite table. */
+  category: string;
   text: string;
   focus: AlertFocus;
   bornMs: number;
@@ -67,16 +129,15 @@ export interface AlertItem {
   expiresMs: number;
   /** Lifetime span for the progress bar; Infinity for states. */
   spanMs: number;
-  /** Condition band for state alerts ("critical" | "major"). */
-  band: string | null;
+  /** True for the condition-held system card. */
+  state: boolean;
 }
 
-export interface AlertEventInput {
-  /** A critical MOMENT (a store crossing its critical line) is
-   *  timed like a long major; critical STATES come from the
-   *  condition sync and hold until they clear. */
-  tier: "critical" | "major" | "minor";
-  category: AlertCategory;
+export interface AlertMomentInput {
+  /** Any whitelisted kind except "system" (a state, not a moment). */
+  kind: Exclude<AlertKind, "system">;
+  /** The person, port, or matter the card is about: the dedupe key. */
+  subject: string;
   text: string;
   focus: AlertFocus;
 }
@@ -92,53 +153,42 @@ export interface SystemState {
   failed: boolean;
 }
 
-export const MAX_VISIBLE_ALERTS = 4;
-const MINOR_GAP_MS = 3000;
-const MAJOR_BASE_MS = 12_000;
-const MINOR_BASE_MS = 5_000;
 const CRITICAL_BELOW = 0.3;
-const MAJOR_BELOW = 0.6;
-const RECOVERED_ABOVE = 0.9;
-
-/**
- * The lifetime multiplier for the current playback rate: the brief's
- * rule, clamp(2.5 / max(tps, 0.4), 0.5, 2.5).
- */
-export function lifetimeScale(ticksPerSecond: number): number {
-  return Math.min(
-    2.5,
-    Math.max(0.5, 2.5 / Math.max(ticksPerSecond, 0.4)),
-  );
-}
-
-function bandOf(state: SystemState): "critical" | "major" | "none" {
-  if (state.failed || state.condition < CRITICAL_BELOW) return "critical";
-  if (state.condition < MAJOR_BELOW) return "major";
-  return "none";
-}
+/** The same kind about the same subject stays quiet this long. */
+const DEDUPE_MS = 30_000;
+/** A kind whose card replaces an earlier card about the subject. */
+const REPLACES: Partial<Record<AlertKind, readonly AlertKind[]>> = {
+  verdict: ["inquiry"],
+  sabotage: ["inquiry", "verdict"],
+};
 
 export class AlertStack {
   /** Newest first. */
   private items: AlertItem[] = [];
-  /** Last band seen per system id ("critical" | "major" | "none"). */
-  private bands = new Map<string, string>();
-  /** System key -> the band its critical alert was snoozed in. */
-  private snoozedBand = new Map<string, string>();
-  /** Systems that have been below the recovery line this dip. */
-  private dipped = new Set<string>();
-  /** Systems that reached a condition band during this dip. */
-  private banded = new Set<string>();
-  private lastMinorMs = Number.NEGATIVE_INFINITY;
-  private seq = 0;
-  private tps = 0.4;
+  /** System ids currently in the critical band. */
+  private critical = new Set<string>();
+  /** System key -> dismissed in the critical band: stay quiet. */
+  private snoozed = new Set<string>();
+  /** Dedupe keys ("kind:subject") -> last accepted post, wall-ms. */
+  private lastPost = new Map<string, number>();
+  private phone = false;
   onChange: (() => void) | null = null;
+  /** A card was raised; the viewer pauses if the kind says so. */
+  onRaise: ((kind: AlertKind) => void) | null = null;
 
-  setTps(ticksPerSecond: number): void {
-    this.tps = ticksPerSecond;
+  setPhoneMode(phone: boolean): void {
+    if (this.phone === phone) return;
+    this.phone = phone;
+    this.trim();
+    this.changed();
   }
 
-  private scale(): number {
-    return lifetimeScale(this.tps);
+  private get cap(): number {
+    return this.phone ? 2 : 4;
+  }
+
+  private get lifetimeMs(): number {
+    return this.phone ? 6_000 : 9_000;
   }
 
   /** Visible alerts, newest first (snoozed states are not here). */
@@ -148,11 +198,9 @@ export class AlertStack {
 
   reset(): void {
     this.items = [];
-    this.bands.clear();
-    this.snoozedBand.clear();
-    this.dipped.clear();
-    this.banded.clear();
-    this.lastMinorMs = Number.NEGATIVE_INFINITY;
+    this.critical.clear();
+    this.snoozed.clear();
+    this.lastPost.clear();
     this.changed();
   }
 
@@ -161,39 +209,66 @@ export class AlertStack {
   }
 
   /**
-   * Post a moment: an event the chronicle already spoke. Returns
-   * true when the alert was admitted (minors can be rate-limited or
-   * dropped by a full stack).
+   * Post a moment: one of the whitelisted kinds, about a subject.
+   * A continuing situation updates in place (a verdict replaces
+   * its inquiry card); the same kind and subject inside the
+   * dedupe window refreshes its card instead of stacking, and
+   * stays suppressed if the card was dismissed or expired.
    */
-  post(input: AlertEventInput, nowMs: number): boolean {
-    const key = `evt:${input.category}:${++this.seq}`;
-    const base =
-      input.tier === "critical"
-        ? MAJOR_BASE_MS * 2
-        : input.tier === "major"
-          ? MAJOR_BASE_MS
-          : MINOR_BASE_MS;
-    const span = base * this.scale();
+  post(input: AlertMomentInput, nowMs: number): boolean {
+    const def = KIND_DEF.get(input.kind);
+    if (def === undefined) return false;
+    const key = `mom:${input.kind}:${input.subject}`;
+    const dedupeKey = `${input.kind}:${input.subject}`;
+    const last = this.lastPost.get(dedupeKey);
+    const existing = this.items.find((i) => i.key === key);
+    if (last !== undefined && nowMs - last < DEDUPE_MS && existing === undefined) {
+      return false; // Said already, and gone: the window holds.
+    }
+    this.lastPost.set(dedupeKey, nowMs);
+    // A conclusion takes its opening's place.
+    for (const replaced of REPLACES[input.kind] ?? []) {
+      const old = this.items.find(
+        (i) => i.kind === replaced && i.key.endsWith(`:${input.subject}`),
+      );
+      if (old !== undefined) {
+        this.items = this.items.filter((i) => i !== old);
+      }
+    }
+    const span = this.lifetimeMs;
+    if (existing !== undefined) {
+      existing.text = input.text;
+      existing.focus = input.focus;
+      existing.bornMs = nowMs;
+      existing.expiresMs = nowMs + span;
+      existing.spanMs = span;
+      this.items = [existing, ...this.items.filter((i) => i !== existing)];
+      this.changed();
+      return true;
+    }
     const item: AlertItem = {
       key,
-      tier: input.tier,
-      category: input.category,
+      kind: input.kind,
+      tier: def.tier,
+      category: input.kind,
       text: input.text,
       focus: input.focus,
       bornMs: nowMs,
       expiresMs: nowMs + span,
       spanMs: span,
-      band: null,
+      state: false,
     };
-    if (!this.admit(item, nowMs)) return false;
+    if (!this.admit(item)) return false;
+    this.onRaise?.(input.kind);
     this.changed();
     return true;
   }
 
   /**
-   * Feed the live condition of every system. State alerts are
-   * derived from band transitions, so a steady condition never
-   * re-fires its own news.
+   * Feed the live condition of every system. Only the critical
+   * band holds a card: below 30% or failed. The card follows the
+   * condition in place and leaves quietly when the system climbs
+   * out; nothing toasts for the merely-failing or the recovered.
    */
   syncSystems(states: readonly SystemState[], nowMs: number): void {
     for (const state of states) {
@@ -203,165 +278,78 @@ export class AlertStack {
 
   private syncSystem(state: SystemState, nowMs: number): void {
     const key = `sys:${state.id}`;
-    const band = bandOf(state);
-    const prev = this.bands.get(state.id);
-    this.bands.set(state.id, band);
-    if (state.condition < RECOVERED_ABOVE) this.dipped.add(state.id);
-    if (band !== "none") this.banded.add(state.id);
+    const isCritical = state.failed || state.condition < CRITICAL_BELOW;
+    const wasCritical = this.critical.has(state.id);
+    if (isCritical) this.critical.add(state.id);
+    else this.critical.delete(state.id);
 
-    if (band === "critical") {
-      if (prev === "critical") {
-        // Steady emergency: keep the alert (unless snoozed in this
-        // band), refreshing its text as the number moves.
-        if (this.snoozedBand.get(key) !== "critical") {
-          this.upsertState(key, state, "critical", nowMs, false);
-        }
-      } else if (prev !== undefined) {
-        // Escalation (or a first sighting): the state takes the stack.
-        this.snoozedBand.delete(key);
-        this.upsertState(key, state, "critical", nowMs, true);
-      }
-      // prev === undefined and already critical cannot happen: ships
-      // generate systems at 85% or better. If it ever did, the next
-      // sync (prev now "critical") raises it.
-    } else if (band === "major") {
-      if (prev === "critical") {
-        // De-escalation: the emergency is over, the news lingers.
-        this.snoozedBand.delete(key);
-        this.upsertState(key, state, "major", nowMs, true);
-      } else if (prev === "none") {
-        // The crossing below 60%: a timed major moment.
-        this.upsertState(key, state, "major", nowMs, true);
-      }
-      // prev === "major" or undefined: the crossing already spoke.
-    } else {
-      // band === "none": healthy air.
-      this.snoozedBand.delete(key);
+    if (!isCritical) {
+      this.snoozed.delete(key);
       const existing = this.items.find((i) => i.key === key);
-      if (existing !== undefined && existing.tier === "critical") {
-        // A jump straight out of the red (a finished repair): the
-        // state becomes a lingering major, it does not just vanish.
-        const pct = Math.round(state.condition * 100);
-        this.upsertState(
-          key,
-          state,
-          "major",
-          nowMs,
-          true,
-          `The ${state.name} is out of danger (${pct}%) — ${state.roomName}.`,
-        );
+      if (existing !== undefined) {
+        this.items = this.items.filter((i) => i !== existing);
+        this.changed();
       }
-      if (
-        state.condition >= RECOVERED_ABOVE &&
-        this.dipped.has(state.id) &&
-        this.banded.has(state.id)
-      ) {
-        this.dipped.delete(state.id);
-        this.banded.delete(state.id);
-        this.post(
-          {
-            tier: "minor",
-            category: "repair",
-            text: `The ${state.name} is back above 90%.`,
-            focus: { room: state.room, systemId: state.id },
-          },
-          nowMs,
-        );
-      } else if (state.condition >= RECOVERED_ABOVE) {
-        this.dipped.delete(state.id);
-      }
-    }
-  }
-
-  /** Create or refresh the one state alert for a system. */
-  private upsertState(
-    key: string,
-    state: SystemState,
-    tier: "critical" | "major",
-    nowMs: number,
-    fresh: boolean,
-    textOverride?: string,
-  ): void {
-    const pct = Math.round(state.condition * 100);
-    const text =
-      textOverride ??
-      (state.failed
-        ? `The ${state.name} in the ${state.roomName} has failed.`
-        : tier === "critical"
-          ? `The ${state.name} is at ${pct}% — ${state.roomName}.`
-          : `The ${state.name} is failing (${pct}%) — ${state.roomName}.`);
-    const existing = this.items.find((i) => i.key === key);
-    if (existing !== undefined) {
-      if (
-        existing.tier === tier &&
-        existing.text === text &&
-        existing.band === tier
-      ) {
-        return; // Steady state: nothing new to say.
-      }
-      existing.tier = tier;
-      existing.category = "damage";
-      existing.text = text;
-      existing.focus = { room: state.room, systemId: state.id };
-      existing.band = tier;
-      if (tier === "critical") {
-        existing.expiresMs = Number.POSITIVE_INFINITY;
-        existing.spanMs = Number.POSITIVE_INFINITY;
-      } else if (fresh) {
-        const span = MAJOR_BASE_MS * this.scale();
-        existing.bornMs = nowMs;
-        existing.expiresMs = nowMs + span;
-        existing.spanMs = span;
-      }
-      // Fresh news goes on top.
-      this.items = [existing, ...this.items.filter((i) => i !== existing)];
-      this.changed();
       return;
     }
-    const span =
-      tier === "critical"
-        ? Number.POSITIVE_INFINITY
-        : MAJOR_BASE_MS * this.scale();
+    if (this.snoozed.has(key)) return;
+    const pct = Math.round(state.condition * 100);
+    const text = state.failed
+      ? `The ${state.name} in the ${state.roomName} has failed.`
+      : `The ${state.name} is at ${pct}% — ${state.roomName}.`;
+    const existing = this.items.find((i) => i.key === key);
+    if (existing !== undefined) {
+      if (existing.text !== text) {
+        existing.text = text;
+        this.changed();
+      }
+      return;
+    }
     const item: AlertItem = {
       key,
-      tier,
-      category: "damage",
+      kind: "system",
+      tier: "critical",
+      category: "system",
       text,
       focus: { room: state.room, systemId: state.id },
       bornMs: nowMs,
-      expiresMs: tier === "critical" ? Number.POSITIVE_INFINITY : nowMs + span,
-      spanMs: span,
-      band: tier,
+      expiresMs: Number.POSITIVE_INFINITY,
+      spanMs: Number.POSITIVE_INFINITY,
+      state: true,
     };
-    if (this.admit(item, nowMs)) this.changed();
+    if (this.admit(item)) {
+      if (!wasCritical) this.onRaise?.("system");
+      this.changed();
+    }
   }
 
   /**
-   * Admit an item under the stack discipline. Returns false when a
-   * minor is rate-limited or has nowhere to go.
+   * Admit a moment under the stack discipline: timed cards make
+   * room by displacing the oldest timed card; state cards are
+   * never displaced, and a critical kind still gets in over a
+   * wall of states (the cap is a discipline, not a blindfold).
    */
-  private admit(item: AlertItem, nowMs: number): boolean {
-    if (item.tier === "minor") {
-      if (nowMs - this.lastMinorMs < MINOR_GAP_MS) return false;
-      if (this.items.length >= MAX_VISIBLE_ALERTS) return false;
-      this.lastMinorMs = nowMs;
-      this.items.unshift(item);
-      return true;
-    }
-    // Major and critical displace: oldest minor first, then the
-    // oldest timed major. Criticals are never displaced; if the
-    // stack is wall-to-wall criticals, a critical still gets in
-    // (the cap is a discipline, not a blindfold).
-    while (this.items.length >= MAX_VISIBLE_ALERTS) {
-      const victim =
-        this.oldestWhere((i) => i.tier === "minor") ??
-        this.oldestWhere((i) => i.tier === "major" && i.band === null) ??
-        this.oldestWhere((i) => i.tier === "major");
+  private admit(item: AlertItem): boolean {
+    while (this.items.length >= this.cap) {
+      const victim = this.oldestWhere((i) => !i.state);
       if (victim === undefined) break;
       this.items = this.items.filter((i) => i !== victim);
     }
+    if (this.items.length >= this.cap && item.tier !== "critical") {
+      return false;
+    }
     this.items.unshift(item);
     return true;
+  }
+
+  /** Enforce the cap after a mode change (desktop to phone). */
+  private trim(): void {
+    while (this.items.length > this.cap) {
+      const victim =
+        this.oldestWhere((i) => !i.state) ?? this.oldestWhere(() => true);
+      if (victim === undefined) break;
+      this.items = this.items.filter((i) => i !== victim);
+    }
   }
 
   private oldestWhere(
@@ -375,15 +363,14 @@ export class AlertStack {
   }
 
   /**
-   * Dismiss an alert. A critical state is snoozed until its band
-   * changes; a timed alert is simply gone (it was a moment).
+   * Dismiss a card. A system state is snoozed until its band
+   * changes; a timed card is simply gone (it was a moment), and
+   * its dedupe window still holds.
    */
   dismiss(key: string): void {
     const item = this.items.find((i) => i.key === key);
     if (item === undefined) return;
-    if (item.band === "critical") {
-      this.snoozedBand.set(key, "critical");
-    }
+    if (item.state) this.snoozed.add(key);
     this.items = this.items.filter((i) => i !== item);
     this.changed();
   }
@@ -398,20 +385,48 @@ export class AlertStack {
 
 // ------------------------------------------------------------- the view
 
-const ICONS: Record<AlertCategory, SpriteDef> = {
-  damage: {
+const ICONS: Record<string, SpriteDef> = {
+  death: {
     rows: [
-      "....r....",
-      "...rro...",
-      "...royo..",
-      "..royyo..",
-      "..oyyyo..",
-      "..oyyyo..",
-      "...oyo...",
-      "...o.o...",
-      "....o....",
+      "....g....",
+      "...ggg...",
+      "....g....",
+      "....g....",
+      ".ggggggg.",
+      "....g....",
+      "....g....",
+      "....g....",
+      "..ggggg..",
     ],
-    pal: { r: "#e5534b", o: "#e07b39", y: "#ffd76a" },
+    pal: { g: "#9aa7b8" },
+  },
+  inquiry: {
+    rows: [
+      "....g....",
+      "...ggg...",
+      "ggggggggg",
+      ".g..g..g.",
+      ".g..g..g.",
+      "....g....",
+      "...ggg...",
+      "..ggggg..",
+      ".........",
+    ],
+    pal: { g: "#ffd76a" },
+  },
+  verdict: {
+    rows: [
+      "....g....",
+      "...ggg...",
+      "ggggggggg",
+      ".g..g..g.",
+      ".g..g..g.",
+      "....g....",
+      "...ggg...",
+      "..ggggg..",
+      ".........",
+    ],
+    pal: { g: "#cfe0f4" },
   },
   sabotage: {
     rows: [
@@ -427,118 +442,6 @@ const ICONS: Record<AlertCategory, SpriteDef> = {
     ],
     pal: { x: "#ffd76a" },
   },
-  speech: {
-    rows: [
-      ".wwwwwww.",
-      "wwwwwwwww",
-      "ww.w.w.ww",
-      "wwwwwwwww",
-      "wwwwwwwww",
-      ".wwwwwww.",
-      "..ww.....",
-      ".ww......",
-      ".........",
-    ],
-    pal: { w: "#cfe0f4" },
-  },
-  grudge: {
-    rows: [
-      "....zz...",
-      "...zz....",
-      "..zzzzz..",
-      "...zz....",
-      "..zz.....",
-      ".zz......",
-      "zz.......",
-      ".........",
-      ".........",
-    ],
-    pal: { z: "#ff7847" },
-  },
-  trust: {
-    rows: [
-      ".hh...hh.",
-      "hhhh..hhh",
-      "hhhh..hhh",
-      ".hhh..hh.",
-      "..hh..h..",
-      "...h..h..",
-      "....h....",
-      ".........",
-      ".........",
-    ],
-    pal: { h: "#c98a9d" },
-  },
-  repair: {
-    rows: [
-      ".rr...rr.",
-      "rrrrrrrrr",
-      "rrrwwwrrr",
-      "rrwwwwwrr",
-      ".rrwwwrr.",
-      "..rrrrr..",
-      "...rrr...",
-      "....r....",
-      ".........",
-    ],
-    pal: { r: "#7fd4a8", w: "#eef6ee" },
-  },
-  bond: {
-    rows: [
-      ".hh...hh.",
-      "hhhhhhhhh",
-      "hhhhhhhhh",
-      ".hhhhhhh.",
-      "..hhhhh..",
-      "...hhh...",
-      "....h....",
-      ".........",
-      ".........",
-    ],
-    pal: { h: "#e86a92" },
-  },
-  stores: {
-    rows: [
-      ".........",
-      ".xxxxxxx.",
-      "xooooooox",
-      "xo.ooo.ox",
-      "xooooooox",
-      "xo.ooo.ox",
-      "xooooooox",
-      ".xxxxxxx.",
-      ".........",
-    ],
-    pal: { x: "#a8763e", o: "#e8a33d" },
-  },
-  death: {
-    rows: [
-      "....g....",
-      "...ggg...",
-      "....g....",
-      "....g....",
-      ".ggggggg.",
-      "....g....",
-      "....g....",
-      "....g....",
-      "..ggggg..",
-    ],
-    pal: { g: "#9aa7b8" },
-  },
-  ending: {
-    rows: [
-      ".........",
-      ".s...s...",
-      "..s.s....",
-      "...s..s..",
-      "....ss...",
-      "...s.....",
-      "..s...s..",
-      ".s.....s.",
-      ".........",
-    ],
-    pal: { s: "#e5534b" },
-  },
   relief: {
     rows: [
       ".........",
@@ -553,19 +456,89 @@ const ICONS: Record<AlertCategory, SpriteDef> = {
     ],
     pal: { g: "#ffd76a" },
   },
-  injury: {
+  system: {
+    rows: [
+      "....r....",
+      "...rro...",
+      "...royo..",
+      "..royyo..",
+      "..oyyyo..",
+      "..oyyyo..",
+      "...oyo...",
+      "...o.o...",
+      "....o....",
+    ],
+    pal: { r: "#e5534b", o: "#e07b39", y: "#ffd76a" },
+  },
+  "ship-lost": {
     rows: [
       ".........",
-      "...www...",
-      "...www...",
-      ".wwwwwww.",
-      ".wwwrwww.",
-      ".wwwwwww.",
-      "...www...",
-      "...www...",
+      ".s...s...",
+      "..s.s....",
+      "...s..s..",
+      "....ss...",
+      "...s.....",
+      "..s...s..",
+      ".s.....s.",
       ".........",
     ],
-    pal: { w: "#eef2f4", r: "#e5534b" },
+    pal: { s: "#e5534b" },
+  },
+  collapse: {
+    rows: [
+      ".........",
+      ".s...s...",
+      "..s.s....",
+      "...s..s..",
+      "....ss...",
+      "...s.....",
+      "..s...s..",
+      ".s.....s.",
+      ".........",
+    ],
+    pal: { s: "#e5534b" },
+  },
+  arrival: {
+    rows: [
+      "....g....",
+      "....g....",
+      ".g..g..g.",
+      ".g..g..g.",
+      "..g.g.g..",
+      "...ggg...",
+      "....g....",
+      ".ggggggg.",
+      ".........",
+    ],
+    pal: { g: "#7fd4a8" },
+  },
+  departure: {
+    rows: [
+      "....g....",
+      ".ggggggg.",
+      "....g....",
+      "...ggg...",
+      "..g.g.g..",
+      ".g..g..g.",
+      ".g..g..g.",
+      "....g....",
+      "....g....",
+    ],
+    pal: { g: "#8fa3bf" },
+  },
+  storm: {
+    rows: [
+      ".....zz..",
+      "....zz...",
+      "...zz....",
+      "..zzzzz..",
+      "....zz...",
+      "...zz....",
+      "..zz.....",
+      ".zz......",
+      "zz.......",
+    ],
+    pal: { z: "#ffd76a" },
   },
 };
 
@@ -574,19 +547,19 @@ interface Chip {
   fill: HTMLDivElement | null;
   item: AlertItem;
   leaving: boolean;
-  /** "x" for critical (dismiss button), "bar" for timed tiers. */
+  /** "x" for state cards (dismiss button), "bar" for timed kinds. */
   shape: string;
   /** The born|span the lifetime bar's CSS animation was armed with. */
   barKey: string;
 }
 
 /**
- * Renders an AlertStack into the stack container: dark chips with a
- * tier-coloured left bar, a pixel icon, one line of text, and a
- * thin lifetime bar on timed tiers. Chips are reconciled by key, so
- * a state alert that escalates keeps its element and just changes
- * colour. The frame loop drives expiry only: the lifetime bar is a
- * CSS animation armed when a chip is built or its span is refreshed,
+ * Renders an AlertStack into the stack container: dark chips with
+ * a tier-coloured left bar, a pixel icon, one line of text, and a
+ * thin lifetime bar on timed kinds. Chips are reconciled by key,
+ * so a state card that changes its text keeps its element. The
+ * frame loop drives expiry only: the lifetime bar is a CSS
+ * animation armed when a chip is built or its span is refreshed,
  * never a per-frame style write.
  */
 export class AlertStackView {
@@ -615,8 +588,8 @@ export class AlertStackView {
   /**
    * (Re)start a timed chip's lifetime bar as a CSS animation over
    * the item's span. Called when a chip is built and whenever its
-   * item's born/span pair changes (a refreshed state alert); a
-   * steady chip is never touched again.
+   * item's born/span pair changes (a refreshed card); a steady
+   * chip is never touched again.
    */
   private armBar(chip: Chip): void {
     const { fill, item } = chip;
@@ -645,16 +618,11 @@ export class AlertStackView {
     }
     // Create or refresh chips, newest on top.
     for (const item of visible) {
-      // The × shape belongs to states (infinite span); a timed
-      // critical moment burns a bar like any other moment.
-      const shape =
-        item.tier === "critical" && !Number.isFinite(item.spanMs)
-          ? "x"
-          : "bar";
+      const shape = item.state ? "x" : "bar";
       let chip = this.chips.get(item.key);
       if (chip !== undefined && !chip.leaving && chip.shape !== shape) {
-        // The alert changed shape (a timed major escalated to a
-        // critical state, or the reverse): rebuild its element.
+        // The card changed shape (a moment became a state, or the
+        // reverse): rebuild its element.
         chip.root.remove();
         this.chips.delete(item.key);
         chip = undefined;
@@ -665,6 +633,7 @@ export class AlertStackView {
       } else {
         chip.item = item;
         chip.root.className = `alert tier-${item.tier}`;
+        chip.root.dataset.kind = item.kind;
         const text = chip.root.querySelector(".alert-text");
         if (text !== null) text.textContent = item.text;
         this.armBar(chip);
@@ -676,6 +645,7 @@ export class AlertStackView {
   private buildChip(item: AlertItem): Chip {
     const root = document.createElement("div");
     root.className = `alert tier-${item.tier} enter`;
+    root.dataset.kind = item.kind;
     if (item.tier === "critical") root.setAttribute("role", "alert");
 
     const main = document.createElement("button");
@@ -687,8 +657,9 @@ export class AlertStackView {
     icon.height = 9;
     icon.setAttribute("aria-hidden", "true");
     const iconCtx = icon.getContext("2d");
-    if (iconCtx !== null) {
-      iconCtx.drawImage(spriteCanvas(ICONS[item.category]), 0, 0);
+    const sprite = ICONS[item.category] ?? ICONS.system;
+    if (iconCtx !== null && sprite !== undefined) {
+      iconCtx.drawImage(spriteCanvas(sprite), 0, 0);
     }
     const text = document.createElement("span");
     text.className = "alert-text";
@@ -698,7 +669,7 @@ export class AlertStackView {
     root.appendChild(main);
 
     let fill: HTMLDivElement | null = null;
-    if (item.tier === "critical" && !Number.isFinite(item.spanMs)) {
+    if (item.state) {
       const x = document.createElement("button");
       x.type = "button";
       x.className = "alert-x";
@@ -721,10 +692,7 @@ export class AlertStackView {
       fill,
       item,
       leaving: false,
-      shape:
-        item.tier === "critical" && !Number.isFinite(item.spanMs)
-          ? "x"
-          : "bar",
+      shape: item.state ? "x" : "bar",
       barKey: "",
     };
     this.armBar(chip);

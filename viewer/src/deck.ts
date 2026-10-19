@@ -1188,6 +1188,13 @@ export interface DeckFrameOpts {
   speedTps: number;
   /** The ship is riding out a radiation storm (the exterior's lights). */
   storm?: boolean;
+  /** Paint the wear layer into the deck (default true). The wear
+   *  itself keeps accruing either way; this gates only the scars'
+   *  showing, a view toggle from the viewer's menu row. */
+  showWear?: boolean;
+  /** Draw speech and thought bubbles (default true). A view toggle,
+   *  like showWear: the chatter itself is the chronicle's business. */
+  showBubbles?: boolean;
   /** The meal window open at this tick, if any (the exterior's mess glow). */
   meal?: "breakfast" | "evening" | null;
   /**
@@ -2106,7 +2113,13 @@ export class DeckView {
     // deck's composite; the frame then blits the one composite.
     if (this.wears[0].update(ship, opts.tick)) this.refreshComposite(0);
     if (this.wears[1].update(ship, opts.tick)) this.refreshComposite(1);
-    ctx.drawImage(this.composites[this.viewDeck] as HTMLCanvasElement, 0, 0);
+    ctx.drawImage(
+      (opts.showWear === false
+        ? this.statics[this.viewDeck]
+        : this.composites[this.viewDeck]) as HTMLCanvasElement,
+      0,
+      0,
+    );
 
     // Occupant slots, for spreading stand positions inside a room.
     // Scratch maps, cleared and reused: no allocation per frame.
@@ -2823,8 +2836,10 @@ export class DeckView {
     }
 
     // ---- bubbles, above everything
-    this.bubbles.update(now, crew);
-    this.bubbles.draw(ctx, now, positions, layout.widthPx);
+    if (opts.showBubbles !== false) {
+      this.bubbles.update(now, crew);
+      this.bubbles.draw(ctx, now, positions, layout.widthPx);
+    }
 
     // ---- alert flash: a pulsing outline on the room an alert named
     if (this.flash !== null) {

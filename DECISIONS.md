@@ -1246,3 +1246,48 @@ the candidate lists changed, so the month's decisions
 re-deal), hash 7525905c8b5f6c32, about 3,060 ticks/sec
 through the CLI. The 90-day reference run: 12,960 ticks,
 99,407 events, hash 19330fe257de8ca9.
+
+## Crew skills chapter adopted (Oct 18, 2026)
+
+DESIGN.md gains "Crew skills: the hands learn", designed at the
+maintainer's direction after the question of whether crew have
+levels like other colony and life sims. Today they do not: one
+flat competence number, rolled from the role's base at
+generation, never moves. The chapter replaces it with seven
+disciplines (Engineering, Life Systems, Hydroponics, Medicine,
+Fabrication, Operations, Husbandry), levels 0 to 10, and
+experience booked from work actually done, the harm ledger's
+rule mirrored: XP names the task that taught it, scales with
+the difficulty of the work, failure teaches at half rate, and
+the booking draws no randomness. One passion per person
+(double rate, may fall outside the role), necessity teaching at
+the passion rate for appointed cover, rust that eats only the
+gains, believed skill held per observer in the belief stores
+(the captain appoints by believed skill and can appoint
+wrong), and lasting marks capping disciplines from the
+consequences build. The old flat number is removed, not
+blended; every formula that read it reads the relevant
+discipline's level. Tuning law: one to two levels in a primary
+discipline per 90 days of sailing (a measuring window, not a
+voyage length; the sailing is open-ended), two to three with
+passion, nobody maxes what they did not board near. Design
+only, no code. Open questions recorded in the chapter:
+believed skill per observer (leaning yes), mentoring needing
+co-presence only (leaning yes), passengers and synthetics
+holding levels (deferred with their chains; the ledger shape
+must not assume a role).
+
+## Council-made course decisions endorsed (Oct 18, 2026)
+
+The Consequences and Council entry above defers course and
+port decisions because distress calls are unbuilt. Recorded
+separately, so the direction is not lost: the maintainer
+explicitly wants the council making the ship's decisions, each
+officer bringing their own bias, and endorses promoting the
+next-port choice from pure itinerary logic to a council
+decision (navigator proposes; quartermaster counts fuel and
+days of supply; the doctor reads the crew, the engineer the
+ship; the captain holds agenda and tie-break). This is the
+natural next arc after this build, ahead of or alongside the
+distress-call half of the jurisdiction, which still waits on
+the rescue chain.

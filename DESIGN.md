@@ -975,6 +975,212 @@ hatch and voted on none of it, starts dinner.
   presents. Design the captain-as-accused inquiry first and the
   rest of the table inherits it.
 
+## Crew skills: the hands learn (designed Oct 18, 2026, not built)
+
+RuneScape gives a character a level per skill and raises it by
+doing the skill. RimWorld gives a colonist a row of skills, a
+passion for some of them, and lets the work of the colony do the
+teaching. Starship has neither today: a crew member carries one
+competence number, rolled at generation from their role's base,
+and it never moves. The chief engineer on day 90 is exactly as
+good as the chief engineer on day 1. Only harm moves a person,
+downward. This chapter gives the crew the other direction.
+
+The rule that governs everything below is the consequences
+chapter's rule, mirrored: **skill is booked from work actually
+done, the way harm is booked to its ledger.** No one gains
+engineering from sleeping, no one gains medicine from eating
+near the medbay. Every point of experience names the task that
+taught it, and the chronicle could, in principle, recount how
+anyone aboard got good.
+
+### The disciplines
+
+Skills are disciplines, one per family of work the engine
+already generates. The list is deliberately short, seven, and
+each system aboard belongs to exactly one discipline, so the
+booking is never ambiguous:
+
+- **Engineering**: reactor, engines.
+- **Life systems**: life support, water recycler.
+- **Hydroponics**: the hydroponics rig.
+- **Medicine**: the medbay unit, and treatment wherever it happens.
+- **Fabrication**: the fabricator, repair of loose equipment.
+- **Operations**: comms, navigation, piloting, sensor work.
+- **Husbandry**: cooking, stores handling, the mess and the
+  pantry: the cook's and quartermaster's shared ground.
+
+A role's affinity list, which today decides what its holder can
+repair, becomes the map of which disciplines that role feeds.
+Work outside the disciplines (a security investigation, a
+council sitting) teaches judgment the game does not number; it
+moves beliefs and trust, which are already numbers of their own.
+
+### Experience, booked like harm
+
+When work lands, experience lands with it, in the same tick and
+from the same event: repair progress on a system books its
+discipline, a treatment books medicine, a meal service books
+husbandry. The amount scales with the difficulty of what was
+actually done: work on a system in the red teaches more than
+routine maintenance on a healthy one, and a treatment that saves
+a bad wound teaches more than a bandage. Failure teaches too,
+at half rate: the hands learn from the repair that went wrong,
+provided the worker lived through it. Experience is kept in
+integer units, the stores discipline, and the booking is pure
+arithmetic: it draws nothing from any stream, so granting
+experience can never change a run's luck.
+
+### Levels
+
+Each discipline runs 0 to 10. The scale is small on purpose:
+a level should be an event the chronicle can print. There is
+also no voyage boundary to reset against: the ship sails leg
+after leg for as long as the run lasts, so a level is simply
+where a person has got to so far, and a long run keeps
+compounding slowly rather than restarting anyone. Thresholds grow as they rise, so the
+first levels of a new discipline come in days and the last
+levels of a mastered one take a voyage. A level feeds every
+formula the old flat number feeds today: repair speed and
+quality, treatment outcome, and (new in the consequences build)
+the accident roll, where a practised hand is a safer hand.
+Level is also a floor of competence the affinity rule respects:
+a level 6 engineer-by-practice can repair her systems even if
+her role never listed them. Roles stop being cages the day the
+botanist has kept engineering alive through a crisis.
+
+Generation seeds the starting levels from the role table the
+flat number is drawn from today: the chief engineer boards at
+Engineering 7, the medic at Medicine 6, the cook at Husbandry
+6 and almost nothing anywhere else. The old number does not
+survive as a separate stat; it is the shadow these levels cast,
+and the build replaces it rather than blending the two.
+
+### Passion
+
+Each person boards with one passion: a discipline they learn at
+double rate, drawn at generation and allowed to fall outside
+their role. The cook with a passion for engineering is a story
+the roster can tell before anything has happened aboard. Passion
+is printed on the person card in prose (a gift for, a hunger
+for), never as a multiplier, and it interacts with everything
+the council does: a captain appointing by qualification looks
+for levels, but the mess knows who loves the work, and a
+passionate novice appointed over a bored expert is a political
+act with believers on both sides.
+
+### Teaching and necessity
+
+Skill moves sideways as well as up. Working alongside someone
+better books a fraction of their lesson to the junior: carrying
+the wounded to the medbay beside the medic, holding the light
+for the engineer. The fraction is small; watching is not doing.
+The strong teacher is necessity: when a role falls vacant and
+the captain appoints from a shrinking crew, the appointee's
+discipline grows at the passion rate whether they love the work
+or not, because now the work is theirs and it is daily. The
+council chapter's botanist-Chief Engineer should be visibly
+less frightening on day 30 of her tenure than on day 1, and the
+chronicle should be able to show the slope.
+
+### Rust
+
+What is not used is slowly lost, but only the gains: a
+discipline can rust back toward the level its holder boarded
+with, never below it. Rust is slow enough to be invisible inside
+a quiet month and real inside a long voyage where someone's real
+job vanished (the hydroponics hand who has run the fabricator
+since the rig died). No one rusts in a discipline they practise
+weekly. This is the one mechanic in the chapter tuned to be
+felt mainly in the epilogue: who peaked early, and at what, and
+what the ship stopped asking of them.
+
+### Believed skill
+
+The level in the ledger is the truth. What the crew holds is a
+belief about it, and the two are not the same number. Believed
+skill updates the way beliefs do: work seen raises it, work seen
+going wrong lowers it, and work done alone in engineering at
+03:00 raises it only for whoever was awake to notice. The
+distinctions matter everywhere skill is used socially:
+
+- The captain appoints by believed skill, and can appoint wrong.
+- Testimony weight at an inquiry follows believed skill in the
+  relevant discipline: the doctor believed brilliant is heard
+  as brilliant, until a public failure corrects the record.
+- The council votes the arithmetic it believes, and a
+  quartermaster whose husbandry the crew overrates gets his
+  counts trusted past the point the ledger would allow.
+
+A level-up is a private fact the moment it happens; it becomes
+a ship fact only when the work is seen. The chronicle, which
+never lies, prints the true level in its margin and lets the
+crew be wrong in the text.
+
+### Harm and skill
+
+The consequences chapter closes this loop from the other side.
+Lasting marks cap disciplines: a ruined hand caps Engineering
+and Fabrication while it lasts, and a lost eye caps Operations.
+A career that changes shape around an injury now changes shape
+in numbers the witness can read. Treatment itself is bounded by
+the treater's Medicine level, so a ship that loses its medic
+loses capability in a way that compounds: worse treatment, worse
+marks, lower caps. This is the spiral the frequency law watches.
+
+### The tuning law
+
+Growth has a frequency law like death does. Per 90 days of
+sailing (a measuring window, not a voyage length: the ship
+does not stop at day 90): a working crew member gains one to
+two levels in their
+primary discipline; a passionate one gains two to three; a
+cross-trainer starting from zero reaches level 2 or 3 only with
+sustained cover work, and nobody reaches 10 in anything they did
+not board near. If a run produces a cook who is the ship's best
+engineer by day 40 without a vacancy that forced it, the rates
+are wrong, not the story.
+
+### Chronicle and viewer
+
+Level-ups print in the chronicle as minor milestones, never as a
+feed of ticks: the line names the person, the discipline, and
+the work that carried them over. The person card carries the
+full row: seven disciplines, levels, a progress trace toward the
+next, the passion named in prose, and any cap a mark imposes.
+The roster shows one number only, the person's highest
+discipline, because a roster is a glance. The epilogue of any
+ending lists the growth beside the losses: who arrived better
+than they boarded, and at what.
+
+### Determinism and build notes (for when it is built)
+
+Experience and levels live on a "skills" ledger written by the
+kernel like the harm ledger: booked at the moment of work, in
+integer units, drawing no randomness. Starting levels draw from
+the crew generation stream in the same pass that draws traits.
+Believed skill lives in the existing belief stores, updated by
+the perception pass from witnessed work events. The flat
+per-person competence number is removed and every formula that
+read it reads the relevant discipline's level instead; the
+migration is the build's main surgical risk and wants its own
+before-and-after drama table, because changing who is good at
+repairs changes which ships have stories.
+
+### Open questions for the build
+
+- Does believed skill need its own number per observer, or one
+  ship-wide reputation per person? Leaning: per observer, in the
+  belief stores that already exist; a single reputation would
+  flatten exactly the mistakes the chapter exists to produce.
+- Mentoring: does the junior's fraction require a bond, or only
+  co-presence? Leaning: co-presence for the fraction, and a
+  bond adds willingness to be scheduled together, which the
+  routine already models.
+- Can a passenger or a synthetic crew member hold levels?
+  Deferred with their arrival chains; the ledger shape must not
+  assume a role, so the answer can be yes later without surgery.
+
 ## Version zero slice
 
 One ship. Twelve crew. Needs and relationships. One incident generator:

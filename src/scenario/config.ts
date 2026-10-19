@@ -553,6 +553,58 @@ export const CONFIG = {
     ],
   },
 
+  /**
+   * The galaxy, step 2: traffic. Other ships cross the sector on
+   * schedules generated whole at build from the "traffic" stream:
+   * a leg table per ship, drawn until it covers the horizon below,
+   * so a ship's position at any tick is a pure function of the tick
+   * (the same arithmetic discipline as the voyage leg) and the
+   * tick loop never simulates or decides anything for them. A
+   * contact is geometry, not drama: it opens when another ship
+   * crosses inside sensor range of the player's ship and closes
+   * when it leaves, and both edges are computed, never drawn.
+   */
+  traffic: {
+    /** Other ships per sector: enough that the sky is not empty,
+     *  few enough that a contact still means something. */
+    minShips: 6,
+    maxShips: 10,
+    /**
+     * Sensor range, in light-days. A contact opens inside it. At
+     * the sector's 12 light-day minimum port separation, a ship
+     * berthed at a neighbouring port stays out of reach; a ship
+     * passing on a crossing course does not. Set at 8 rather than
+     * 6 after measuring the daily seeds at both: at 6, one seed's
+     * month passed without a single traffic line of any kind,
+     * which is the barren sky this step exists to end.
+     */
+    sensorRangeLightDays: 8,
+    /** Schedules are generated until they cover this many days;
+     *  past the table's end a ship simply stays at her last port. */
+    scheduleHorizonDays: 400,
+    /** Port stays, in ticks (a tick is ten ship-minutes): half a
+     *  day to three days, the first stay included, so the sector
+     *  does not all sail on the same morning. */
+    minStayTicks: 72,
+    maxStayTicks: 432,
+    /** Chance a traffic ship answers to no faction. */
+    independentChance: 0.25,
+    /**
+     * The traffic's kinds, and each kind's cruise as a multiple of
+     * the player's cruise speed: couriers run hot, tankers wallow.
+     * The kinds are the archetypes chapter's working hulls, worn
+     * by other people's ships.
+     */
+    shipTypes: [
+      { kind: "hauler", cruiseFactor: 0.9 },
+      { kind: "courier", cruiseFactor: 1.3 },
+      { kind: "tanker", cruiseFactor: 0.8 },
+      { kind: "salvage rig", cruiseFactor: 0.85 },
+      { kind: "patrol cutter", cruiseFactor: 1.2 },
+      { kind: "passenger transport", cruiseFactor: 1.0 },
+    ],
+  },
+
   weather: {
     /** Weather state names, in index order. */
     states: ["calm", "solar wind", "radiation storm"],

@@ -45,6 +45,7 @@ import { DeckView } from "./deck.ts";
 import { Minimap } from "./minimap.ts";
 import { StarMapView } from "./starmap.ts";
 import type { Port } from "../../src/world/galaxy.ts";
+import type { TrafficShip } from "../../src/world/traffic.ts";
 import { watchName, type WatchName } from "./daynight.ts";
 import { spriteCanvas, type SpriteDef } from "./props.ts";
 
@@ -251,11 +252,13 @@ function buildDeck(): void {
     deckCanvas,
     run.galaxy.sector,
     run.galaxy.voyage,
+    run.galaxy.traffic,
     run.ship.name,
     currentSeed,
   );
   mapActive = false;
   closePortCard();
+  closeTrafficCard();
   refreshDeckButtons();
 }
 
@@ -269,6 +272,7 @@ function setViewDeck(next: number): void {
   if (deck === null) return;
   mapActive = false;
   closePortCard();
+  closeTrafficCard();
   deck.setExterior(false);
   deck.setDeck(next);
   refreshDeckButtons();
@@ -279,6 +283,7 @@ function setViewExterior(): void {
   if (deck === null) return;
   mapActive = false;
   closePortCard();
+  closeTrafficCard();
   deck.setExterior(true);
   refreshDeckButtons();
 }
@@ -631,6 +636,7 @@ function personName(id: string): string {
 function openPersonCard(id: string): void {
   cardCrewId = id;
   closePortCard();
+  closeTrafficCard();
   personCard.hidden = false;
   lastCardRenderMs = 0;
   renderPersonCard();
@@ -918,6 +924,7 @@ function oneDecimal(value: number): string {
 function openPortCard(port: Port): void {
   cardPortIndex = port.index;
   closePersonCard();
+  closeTrafficCard();
   portCard.hidden = false;
   lastPortRenderMs = 0;
   renderPortCard();
@@ -968,6 +975,136 @@ function renderPortCard(): void {
   portBioEl.textContent = bio;
 }
 
+// --------------------------------------------------------- traffic card
+
+const trafficCard = must<HTMLElement>("traffic-card");
+const trafficNameEl = must<HTMLElement>("traffic-name");
+const trafficFactionEl = must<HTMLElement>("traffic-faction");
+const trafficWhereEl = must<HTMLElement>("traffic-where");
+const trafficBioEl = must<HTMLElement>("traffic-bio");
+let cardTrafficIndex: number | null = null;
+let lastTrafficRenderMs = 0;
+
+function openTrafficCard(ship: TrafficShip): void {
+  cardTrafficIndex = ship.index;
+  closePersonCard();
+  closePortCard();
+  starMap?.selectTraffic(ship.index);
+  trafficCard.hidden = false;
+  lastTrafficRenderMs = 0;
+  renderTrafficCard();
+}
+
+function closeTrafficCard(): void {
+  cardTrafficIndex = null;
+  trafficCard.hidden = true;
+  starMap?.selectTraffic(null);
+}
+
+must<HTMLButtonElement>("traffic-close").addEventListener("click", () => {
+  closeTrafficCard();
+});
+
+/**
+ * The traffic card: who she is, whose registry she sails under,
+ * what her business is at this tick, and how far she lies from
+ * the witnessed ship. Every fact comes off the run's traffic
+ * table and the same position functions the chart draws from.
+ */
+function renderTrafficCard(): void {
+  if (cardTrafficIndex === null || starMap === null) return;
+  const sector = run.galaxy.sector;
+  const ship = run.galaxy.traffic.ships[cardTrafficIndex] as TrafficShip;
+  trafficNameEl.textContent = ship.name;
+  trafficFactionEl.textContent =
+    ship.type +
+    " · " +
+    (ship.faction === null
+      ? "Independent"
+      : `${sector.factionAt(ship.faction).name} registry`);
+  const lightDays = starMap.distanceFromPlayer(ship, run.tick);
+  const days = starMap.distanceDaysFromPlayer(ship, run.tick);
+  trafficWhereEl.textContent =
+    `${oneDecimal(lightDays)} light-days from the ${run.ship.name} · ` +
+    `${oneDecimal(days)} days at cruise`;
+  const leg = ship.legAt(run.tick);
+  const berthed = ship.portAt(run.tick);
+  let bio: string;
+  if (leg !== null) {
+    const daysOut = (leg.arriveTick - run.tick) / CONFIG.time.ticksPerDay;
+    bio =
+      `Bound for ${sector.portAt(leg.to).name}, ` +
+      `${oneDecimal(daysOut)} days out on her crossing.`;
+  } else if (berthed !== null) {
+    bio = `In port at ${sector.portAt(berthed).name}.`;
+    const next = ship.legs.find((l) => l.departTick > run.tick);
+    bio +=
+      next === undefined
+        ? " No sailing is on her board."
+        : ` She sails for ${sector.portAt(next.to).name} in ` +
+          `${oneDecimal((next.departTick - run.tick) / CONFIG.time.ticksPerDay)} days.`;
+  } else {
+    bio = "Off the chart's reckoning.";
+  }
+  bio += ` Registered out of ${ship.homePortRef.name}.`;
+  trafficBioEl.textContent = bio;
+}
+
+/**
+ * The exterior's neighbour: the nearest underway contact the
+ * traffic system currently holds, as the descriptor the hull
+ * view draws from. Berthed contacts cross no sky. Rebuilt only
+ * when the contact or its opening tick changes, so the traverse
+ * never restarts mid-crossing.
+ */
+let contactCacheKey = "";
+let contactCache: {
+  seed: number;
+  sinceTick: number;
+  dirX: 1 | -1;
+} | null = null;
+
+function exteriorContact(): {
+  seed: number;
+  sinceTick: number;
+  dirX: 1 | -1;
+} | null {
+  const traffic = run.galaxy.traffic;
+  const voyage = run.galaxy.voyage;
+  const sector = run.galaxy.sector;
+  const playerPos = voyage.positionAt(run.tick);
+  let best: { ship: TrafficShip; sinceTick: number; dist: number } | null =
+    null;
+  for (const entry of traffic.activeContacts()) {
+    if (entry.ship.legAt(run.tick) === null) continue;
+    const pos = entry.ship.positionAt(run.tick);
+    const dist = Math.hypot(pos.x - playerPos.x, pos.y - playerPos.y);
+    if (best === null || dist < best.dist) {
+      best = { ship: entry.ship, sinceTick: entry.sinceTick, dist };
+    }
+  }
+  if (best === null) {
+    contactCacheKey = "";
+    contactCache = null;
+    return null;
+  }
+  const key = `${best.ship.index}|${best.sinceTick}`;
+  if (key !== contactCacheKey) {
+    contactCacheKey = key;
+    const leg = best.ship.legAt(run.tick);
+    const dirX: 1 | -1 =
+      leg !== null && sector.portAt(leg.to).x < sector.portAt(leg.from).x
+        ? -1
+        : 1;
+    contactCache = {
+      seed: best.ship.index * 7919 + best.sinceTick,
+      sinceTick: best.sinceTick,
+      dirX,
+    };
+  }
+  return contactCache;
+}
+
 // -------------------------------------------------------------- chronicle
 
 /**
@@ -985,6 +1122,9 @@ const HIGHLIGHT_TYPES: ReadonlySet<string> = new Set([
   "crew_generated",
   "departure",
   "arrival", // the leg's end is a first-class moment, like its start
+  "contact", // another ship on the sensors
+  "contact_lost",
+  "port_traffic", // arrivals and sailings at the port of call
   "weather", // weather turns
   "meal_service", // the shared sittings
   "leisure_game",
@@ -1423,6 +1563,14 @@ function updateSlowUi(): void {
     renderPortCard();
   }
 
+  if (
+    cardTrafficIndex !== null &&
+    performance.now() - lastTrafficRenderMs > 1000
+  ) {
+    lastTrafficRenderMs = performance.now();
+    renderTrafficCard();
+  }
+
   for (const member of run.crew) {
     const ui = crewUi.get(member.id);
     if (ui === undefined) continue;
@@ -1526,6 +1674,7 @@ function frame(nowMs: number): void {
         (run.tick % CONFIG.time.ticksPerDay) * CONFIG.time.minutesPerTick,
       storm: weatherName === "radiation storm",
       meal: mealWindowAt(run.tick),
+      contact: exteriorContact(),
       tick: run.tick,
       speedTps: playing
         ? (SPEEDS[speedIndex] as (typeof SPEEDS)[number]).ticksPerSecond
@@ -1604,11 +1753,16 @@ deckCanvas.addEventListener("click", (event) => {
   const x = (event.clientX - rect.left) * (deckCanvas.width / rect.width);
   const y = (event.clientY - rect.top) * (deckCanvas.height / rect.height);
   if (mapActive && starMap !== null) {
-    // On the chart, a tap names a port (its card), the ship (nothing
-    // to open: the header carries her state), or empty space (close).
+    // On the chart, a tap names a port or another ship (its card),
+    // the witnessed ship (nothing to open: the header carries her
+    // state), or empty space (close).
     const hit = starMap.pick(x, y, run.tick);
     if (hit !== null && hit.kind === "port") openPortCard(hit.port);
-    else closePortCard();
+    else if (hit !== null && hit.kind === "traffic") openTrafficCard(hit.ship);
+    else {
+      closePortCard();
+      closeTrafficCard();
+    }
     return;
   }
   if (deck !== null && deck.exteriorActive) {
@@ -1650,6 +1804,7 @@ window.addEventListener("keydown", (event) => {
     selectCrew(null);
     closePersonCard();
     closePortCard();
+    closeTrafficCard();
   } else if (event.key >= "1" && event.key <= "6") {
     setSpeed(Number(event.key) - 1);
   } else if (event.key === "7" || event.key === "[") {

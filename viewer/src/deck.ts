@@ -48,7 +48,7 @@ import {
   type StageAnchor,
   type StageSystemState,
 } from "./staging.ts";
-import { ExteriorView } from "./exterior.ts";
+import { ExteriorView, type ExteriorContact } from "./exterior.ts";
 import {
   corridorTile,
   floorEdge,
@@ -1176,6 +1176,12 @@ export interface DeckFrameOpts {
   storm?: boolean;
   /** The meal window open at this tick, if any (the exterior's mess glow). */
   meal?: "breakfast" | "evening" | null;
+  /**
+   * The nearest active sensor contact, computed in main.ts from
+   * the traffic system's geometry: the exterior shows her as a
+   * distant lit shape crossing behind the hull. Null: empty sky.
+   */
+  contact?: ExteriorContact | null;
 }
 
 /**
@@ -2292,6 +2298,7 @@ export class DeckView {
         crew,
         storm: opts.storm === true,
         meal: opts.meal ?? null,
+        contact: opts.contact ?? null,
         navStrobe: this.staging.navStrobe(now),
         trackOf: (id: string) => (this.wears[0] as WearLayer).trackOf(id),
       });

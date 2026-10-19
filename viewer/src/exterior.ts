@@ -71,6 +71,25 @@ export interface ExteriorFrameOpts {
   navStrobe: number;
   /** The wear layer's per-system tracks (worst day, damage, patches). */
   trackOf: (systemId: string) => WearTrackView | undefined;
+  /**
+   * The nearest active sensor contact, or null for an empty sky:
+   * a distant lit shape crossing far behind the hull for as long
+   * as the contact holds. Placement is a pure function of the
+   * contact's identity and age, so the same run shows the same
+   * neighbour on the same course.
+   */
+  contact: ExteriorContact | null;
+}
+
+/**
+ * A contact as the exterior needs her: an identity seed (hash
+ * material), the tick the contact opened (her clock), and the
+ * sign of her course across the sky (from her leg's bearing).
+ */
+export interface ExteriorContact {
+  seed: number;
+  sinceTick: number;
+  dirX: 1 | -1;
 }
 
 type StageKind = "sabotage" | "failure" | "repaired";
@@ -938,6 +957,44 @@ export class ExteriorView {
     const now = opts.now;
     this.syncWear(opts);
     this.syncLights(opts);
+
+    // ---- a neighbour in the sky, behind everything of ours
+    // While a contact holds, her shape crosses far off: a few
+    // pixels of hull-grey and two running lights on a slow
+    // traverse that runs the contact's own clock — in at one
+    // edge, out at the other, three ship days of sky. No contact,
+    // no traffic: the sky is empty again the tick she is lost.
+    if (opts.contact !== null) {
+      const crossTicks = 432;
+      const age = Math.max(0, opts.tick - opts.contact.sinceTick);
+      const frac = Math.min(1, age / crossTicks);
+      const w = this.layout.widthPx;
+      const x =
+        opts.contact.dirX > 0
+          ? -26 + (w + 52) * frac
+          : w + 26 - (w + 52) * frac;
+      const y = this.hullTop - 30 - hash01(opts.contact.seed, 7) * 30;
+      const fade = Math.max(0.2, Math.min(1, frac * 7, (1 - frac) * 7));
+      ctx.globalAlpha = 0.55 * fade;
+      ctx.fillStyle = "#5b6c84";
+      ctx.beginPath();
+      ctx.moveTo(x - 9, y);
+      ctx.lineTo(x - 3, y - 2);
+      ctx.lineTo(x + 6, y - 2);
+      ctx.lineTo(x + 10, y);
+      ctx.lineTo(x + 6, y + 2);
+      ctx.lineTo(x - 3, y + 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.globalAlpha = 0.8 * fade;
+      ctx.fillStyle = "#e8f1ff";
+      ctx.fillRect(Math.round(x + 5), Math.round(y) - 1, 1, 1);
+      const blink = 0.5 + 0.5 * Math.sin(now / 700 + opts.contact.seed);
+      ctx.globalAlpha = (0.25 + 0.55 * blink) * fade;
+      ctx.fillStyle = "#ffc46b";
+      ctx.fillRect(Math.round(x - 6), Math.round(y) - 1, 1, 1);
+      ctx.globalAlpha = 1;
+    }
 
     // ---- engine plume, behind the hull
     const engines = this.ship.systems.find((s) => s.kind === "engines");

@@ -31,9 +31,11 @@ who was seen nearby, and accusations are spoken as beliefs, not
 findings. Every run renders a chronicle, the event log as a readable
 ship's log. The galaxy's first layer is built: each seed generates a
 sector of named ports and factions, and the voyage is a leg between
-two of them, with a departure, a travel clock, and an arrival. See
-DESIGN.md for the full design and DECISIONS.md for the standing
-choices.
+two of them, with a departure, a travel clock, and an arrival. The
+sector is not empty: other ships fly fixed schedules across it, and
+the ones that pass within sensor range are met as contacts in the
+log, named on the chart, and glimpsed from the hull. See DESIGN.md
+for the full design and DECISIONS.md for the standing choices.
 
 ## Requirements
 
@@ -87,8 +89,11 @@ suspected), a full-slice replay over 2,000 ticks, and a 30-day
 performance sanity run, and the galaxy: sector generation
 determinism and bounds (port counts, separations, faction home
 ports), the leg's distance-and-speed arithmetic, a monotonic route,
-and an arrival that fires exactly once on its named tick for every
-daily seed. `npm run check` runs the type check and the tests.
+an arrival that fires exactly once on its named tick for every
+daily seed, and traffic: schedule determinism and sanity, position
+purity, constructed contact cases, and a contact ledger re-derived
+from the position functions alone and matched against the event
+stream. `npm run check` runs the type check and the tests.
 
 ## Layout
 
@@ -108,7 +113,9 @@ daily seed. `npm run check` runs the type check and the tests.
   in `config.ts`.
 - `src/world/`: the procedural ship, its systems (condition, wear,
   strain, repair), shipboard weather, and the galaxy: the procedural
-  sector (ports and factions) and the voyage leg across it.
+  sector (ports and factions), the voyage leg across it, and the
+  sector's traffic: other ships on schedules generated at build,
+  whose positions are pure functions of the tick.
 - `src/entities/`: the crew of twelve and their per-tick behaviour.
 - `src/perception/`: beliefs: directed trust and bond, suspicion,
   grudges, and the society step that forms grudges and speaks

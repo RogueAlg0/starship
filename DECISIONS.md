@@ -853,3 +853,93 @@ seed-42 fingerprint: 4,320 ticks, 34,479 events, hash
 173a304792141f39, about 4,300 ticks/sec; decisions unchanged
 at 51,840, because the voyage draws none. Bundle grew 315,032
 -> 339,331 B (dist) for the sector in the engine and the chart.
+
+## Galaxy step 2: traffic, built (Oct 18, 2026)
+
+The sector stops being empty. New module `src/world/traffic.ts`,
+drawn only from a new "traffic" stream at build, registered as
+the "traffic" system after voyage. Six to ten other ships per
+sector: names from the signature's own tables, unique in the
+sector and never the witnessed ship's name; a type from a small
+table (hauler, courier, tanker, salvage rig, patrol cutter,
+passenger transport) carrying a cruise factor of 0.8 to 1.3
+times the player's cruise; a registry in one of the sector's
+factions or independent. A registered ship's home port is her
+faction's home port.
+
+Schedules, not agents. Each ship's leg table is generated up
+front to a 400-day horizon: chained legs between real ports,
+stays of half a day to three days, the first stay drawn like
+any other so no ship sails on tick 0. Her position at any tick
+is a pure function of that tick, under the same interpolation
+discipline as the player's leg. Traffic draws nothing and
+decides nothing during the run: the tick loop's cost stays
+flat in the ship count, replay has nothing new to reproduce,
+and the decision count does not move.
+
+Contacts are geometry, witnessed. Each tick the traffic system
+measures every ship against the player's position. A ship that
+crosses the 8 light-day sensor line raises one contact event:
+name, type, registry, the range at detection, her business
+(bound for a named port, or in port at one), and her motion
+(closing, passing, parallel, berthed) from the radial rate. She
+leaves with one contact_lost. The range is 8, not the 6 first
+drawn: measured at both, one daily seed's whole month passed
+at 6 without a single traffic line of any kind, which is the
+barren sky this step exists to end. While the player lies in
+port, ships berthed at or bound for that port are not sensor
+contacts at all; their arrivals and departures speak instead
+as port_traffic lines. A contact that turns port-local on the
+player's arrival closes quietly, and her own arrival speaks
+as port traffic. A per-tick invariant checks the contact
+ledger against the geometry: an announced contact is in
+range, and every position stays inside the sector square.
+
+Transponders are truthful in this step, and that is a v1
+simplification, not the design. A contact's stated name, type,
+registry, and business are accurate, because there is nothing
+yet that could act on a lie. The beliefs pillar wants
+transponders that can deceive: spoofed identities, dark ships,
+a registry that does not match the hull. That uncertainty is
+deferred to the bounty step, where being wrong about a ship
+carries a price. Nobody should read step 2's honesty as the
+settled design.
+
+Measured across the daily seeds and 99, per 30 days: seed 11,
+10 ships, 0 contacts, 2 port movements; 16, 6 ships, 1 contact,
+2 movements; 17, 10 ships, 3 contacts, 4 movements; 30, 7
+ships, 3 contacts, 2 movements; 39, 10 ships, 2 contacts, 1
+movement; 40, 7 ships, 1 contact; 42, 9 ships, 3 contacts; 99,
+10 ships, 5 contacts. A quiet sky some months, a busy one
+others: the register the chronicle already keeps.
+
+The viewer: the chart gains the traffic as small diamonds in
+their registries' colours, dimmer than the witnessed ship's
+marker, positions computed viewer-side from the same pure
+functions off the snapshot's traffic table. Only the selected
+ship wears her name. A tap on a marker opens a ship card on
+the port card's shell: type, registry, present business, and
+the range in light-days and in days at cruise. Outside, while
+an underway contact holds, her shape crosses far behind the
+hull: a few pixels and two running lights on a three-day
+traverse keyed to the contact's opening tick and the bearing
+of her leg. Berthed contacts cross no sky; no contact, no
+traffic. Contact, contact_lost, and port_traffic are
+highlight-class in the chronicle filter.
+
+Stubbed for later steps, deliberately: any interaction
+(comms, boarding, trade), patrol behaviour and suspicion,
+bounties and the spoofed transponders they bring, Conquest,
+and everything a port call will mean.
+
+Gates: tests 64/64 (13 new in test/traffic.test.ts, including
+a contact ledger re-derived from the position functions alone
+and matched event for event against two seeds' streams),
+purity green, typecheck clean, replay exact via the CLI
+against the regenerated runs/seed42 recording. New seed-42
+fingerprint: 4,320 ticks, 34,485 events (six more than step
+1: three contacts and their three losses), hash
+a2ccd3627b927733, about 5,700 ticks/sec in the suite's own
+timing and about 4,100 through the CLI with file sinks;
+decisions unchanged at 51,840, because traffic decides
+nothing. Bundle grew 339,331 -> 362,414 B (dist).

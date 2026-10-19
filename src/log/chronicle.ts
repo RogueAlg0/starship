@@ -184,6 +184,57 @@ class Renderer implements ChronicleRenderer {
         );
         break;
       }
+      case "contact": {
+        // Transponders are truthful in this step (see DECISIONS):
+        // the log prints what she reports, and what she reports is
+        // what she is. Spoofed identities are the bounty step's.
+        const factionName = str(data, "faction");
+        const registry =
+          factionName !== "" ? `${factionName} registry` : "independent registry";
+        const boundFor = str(data, "boundFor");
+        const inPort = str(data, "inPort");
+        const business =
+          boundFor !== ""
+            ? `bound for ${boundFor}`
+            : inPort !== ""
+              ? `in port at ${inPort}`
+              : "under way";
+        const motion = str(data, "motion");
+        const flavour =
+          motion === "closing"
+            ? ", closing"
+            : motion === "parallel"
+              ? ", on a parallel course"
+              : motion === "passing"
+                ? ", passing"
+                : "";
+        line(
+          `${ts} — Contact: the ${str(data, "type")} ${str(data, "ship")}, ` +
+            `${registry}, ${oneDecimal(num(data, "range"))} light-days out, ` +
+            `${business}${flavour}.`,
+          true,
+        );
+        break;
+      }
+      case "contact_lost": {
+        line(
+          `${ts} — Contact lost: the ${str(data, "type")} ${str(data, "ship")} ` +
+            `passes beyond sensor range.`,
+          true,
+        );
+        break;
+      }
+      case "port_traffic": {
+        line(
+          str(data, "movement") === "arrived"
+            ? `${ts} — Port traffic: the ${str(data, "type")} ${str(data, "ship")} ` +
+                `makes port at ${str(data, "port")}.`
+            : `${ts} — Port traffic: the ${str(data, "type")} ${str(data, "ship")} ` +
+                `sails from ${str(data, "port")}.`,
+          true,
+        );
+        break;
+      }
       case "weather": {
         line(`${ts} — Space weather turns: ${str(data, "to")}.`, true);
         break;

@@ -12,6 +12,7 @@
 
 import { CONFIG } from "../../src/scenario/config.ts";
 import type { Port, Sector, Voyage } from "../../src/world/galaxy.ts";
+import type { Traffic, TrafficShip } from "../../src/world/traffic.ts";
 import { SpaceBackdrop } from "./space.ts";
 
 /** Faction colours by faction index; independence is harbour grey. */
@@ -29,6 +30,7 @@ const PAD_PX = 30;
 
 export type MapPick =
   | { kind: "port"; port: Port }
+  | { kind: "traffic"; ship: TrafficShip }
   | { kind: "ship" }
   | null;
 
@@ -37,6 +39,7 @@ export class StarMapView {
   private readonly ctx: CanvasRenderingContext2D | null;
   private readonly sector: Sector;
   private readonly voyage: Voyage;
+  private readonly traffic: Traffic;
   private readonly shipName: string;
   private readonly backdrop: SpaceBackdrop;
   private staticLayer: HTMLCanvasElement | null = null;
@@ -45,11 +48,14 @@ export class StarMapView {
   private ox = 0;
   private oy = 0;
   private scale = 1;
+  /** The traffic ship wearing her name on the chart, if any. */
+  private selectedTraffic: number | null = null;
 
   constructor(
     canvas: HTMLCanvasElement,
     sector: Sector,
     voyage: Voyage,
+    traffic: Traffic,
     shipName: string,
     seedKey: number,
   ) {
@@ -57,12 +63,18 @@ export class StarMapView {
     this.ctx = canvas.getContext("2d");
     this.sector = sector;
     this.voyage = voyage;
+    this.traffic = traffic;
     this.shipName = shipName;
     this.backdrop = new SpaceBackdrop(
       seedKey,
       Math.max(1, canvas.width),
       Math.max(1, canvas.height),
     );
+  }
+
+  /** Select a traffic ship by index (her label draws), or clear. */
+  selectTraffic(index: number | null): void {
+    this.selectedTraffic = index;
   }
 
   private project(x: number, y: number): { px: number; py: number } {
@@ -233,6 +245,46 @@ export class StarMapView {
       ctx.stroke();
     }
 
+    // The sector's other traffic: small diamonds in their
+    // registries' colours, dimmer than the witnessed ship, read
+    // from the same position functions the engine reads — the
+    // chart computes nothing the sim has not already fixed. Only
+    // the selected ship wears her name; the rest is a quiet sky.
+    for (const other of this.traffic.ships) {
+      const otherPos = other.positionAt(tick);
+      const p = this.project(otherPos.x, otherPos.y);
+      const colour =
+        other.faction === null
+          ? INDEPENDENT_COLOUR
+          : (FACTION_COLOURS[other.faction % FACTION_COLOURS.length] ??
+            INDEPENDENT_COLOUR);
+      const selected = other.index === this.selectedTraffic;
+      ctx.globalAlpha = selected ? 0.95 : 0.6;
+      ctx.fillStyle = colour;
+      ctx.beginPath();
+      ctx.moveTo(p.px, p.py - 3.4);
+      ctx.lineTo(p.px + 3.4, p.py);
+      ctx.lineTo(p.px, p.py + 3.4);
+      ctx.lineTo(p.px - 3.4, p.py);
+      ctx.closePath();
+      ctx.fill();
+      if (selected) {
+        ctx.globalAlpha = 0.85;
+        ctx.strokeStyle = colour;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(p.px, p.py, 7.5, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.font = "10px system-ui, sans-serif";
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = "rgba(2, 4, 8, 0.85)";
+        ctx.fillText(other.name, p.px + 10, p.py + 14);
+        ctx.fillStyle = "#f2f7ff";
+        ctx.fillText(other.name, p.px + 9, p.py + 13);
+      }
+    }
+    ctx.globalAlpha = 1;
+
     // The ship: a bright diamond with a slow ring, her name above.
     const ring = 7 + 2 * Math.sin(nowMs / 300);
     ctx.strokeStyle = "rgba(242, 247, 255, 0.5)";
@@ -260,12 +312,26 @@ export class StarMapView {
     this.backdrop.drawNear(ctx, nowMs);
   }
 
-  /** What a tap at canvas coordinates names: a port, the ship, or space. */
+  /** What a tap at canvas coordinates names: a port, another
+   *  ship, the witnessed ship, or empty space. The witnessed ship
+   *  wins first, then traffic, then ports. */
   pick(x: number, y: number, tick: number): MapPick {
     this.ensureStatic();
     const pos = this.voyage.positionAt(tick);
     const ship = this.project(pos.x, pos.y);
     if (Math.hypot(x - ship.px, y - ship.py) <= 12) return { kind: "ship" };
+    let bestShip: TrafficShip | null = null;
+    let bestShipDist = 11;
+    for (const other of this.traffic.ships) {
+      const otherPos = other.positionAt(tick);
+      const p = this.project(otherPos.x, otherPos.y);
+      const d = Math.hypot(x - p.px, y - p.py);
+      if (d < bestShipDist) {
+        bestShipDist = d;
+        bestShip = other;
+      }
+    }
+    if (bestShip !== null) return { kind: "traffic", ship: bestShip };
     let best: Port | null = null;
     let bestDist = 13;
     for (const port of this.sector.ports) {
@@ -277,6 +343,21 @@ export class StarMapView {
       }
     }
     return best === null ? null : { kind: "port", port: best };
+  }
+
+  /** Light-days from the witnessed ship to another ship, right now. */
+  distanceFromPlayer(other: TrafficShip, tick: number): number {
+    const pos = this.voyage.positionAt(tick);
+    const otherPos = other.positionAt(tick);
+    return Math.hypot(otherPos.x - pos.x, otherPos.y - pos.y);
+  }
+
+  /** Days at the witnessed ship's cruise from here to another ship. */
+  distanceDaysFromPlayer(other: TrafficShip, tick: number): number {
+    return (
+      this.distanceFromPlayer(other, tick) /
+      CONFIG.galaxy.cruiseLightDaysPerDay
+    );
   }
 
   /** Days at cruise speed from the ship's present position to a port. */

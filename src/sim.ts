@@ -2,9 +2,9 @@
 // order, and invariant checks. The CLIs and the tests both build worlds
 // through here, so there is exactly one definition of what a run is.
 //
-// Generation draws from the "shipgen", "crewgen", and "galaxy" streams and
-// is part of the run: ship_generated and crew_generated are the first events
-// in every log, at tick 0, in live runs and replays alike.
+// Generation draws from the "shipgen", "crewgen", "galaxy", and "traffic"
+// streams and is part of the run: ship_generated and crew_generated are the
+// first events in every log, at tick 0, in live runs and replays alike.
 
 import {
   UtilitySource,
@@ -27,6 +27,11 @@ import {
   Voyage,
   type Sector,
 } from "./world/galaxy.ts";
+import {
+  checkTrafficState,
+  generateTraffic,
+  Traffic,
+} from "./world/traffic.ts";
 import { generateShip, type Ship } from "./world/ship.ts";
 import { checkShipState, stepSystems } from "./world/systems.ts";
 import { Weather } from "./world/weather.ts";
@@ -36,8 +41,9 @@ export interface BuiltWorld {
   engine: Engine;
   ship: Ship;
   crew: CrewMember[];
-  /** The sector this voyage crosses, and the leg being sailed. */
-  galaxy: { sector: Sector; voyage: Voyage };
+  /** The sector this voyage crosses, the leg being sailed, and
+   *  the other ships under way in the sector. */
+  galaxy: { sector: Sector; voyage: Voyage; traffic: Traffic };
   /** Records of the live source; empty when a replay source was supplied. */
   readonly decisions: DecisionRecord[];
   /**
@@ -74,6 +80,15 @@ export function buildWorld(
   // the ship and the crew, and no later system can shift it.
   const sector = generateSector(world.rng.get("galaxy"));
   const voyage = new Voyage(world.rng.get("galaxy"), sector);
+  // Traffic draws from its own stream, like everything else, and
+  // is generated whole: the sector's other ships and their entire
+  // schedules exist before the first tick, and no tick ever draws
+  // for them again.
+  const traffic = new Traffic(
+    sector,
+    generateTraffic(world.rng.get("traffic"), sector, ship.name),
+    voyage,
+  );
   const weather = new Weather();
   const ctx: CrewContext = {
     ship,
@@ -111,6 +126,7 @@ export function buildWorld(
 
   engine.addSystem({ name: "weather", step: (w) => weather.step(w) });
   engine.addSystem({ name: "voyage", step: (w) => voyage.step(w) });
+  engine.addSystem({ name: "traffic", step: (w) => traffic.step(w) });
   engine.addSystem({ name: "crew", step: (w) => stepCrew(w, crew, ctx) });
   engine.addSystem({ name: "society", step: (w) => stepSociety(w, crew) });
   engine.addSystem({
@@ -121,6 +137,9 @@ export function buildWorld(
   engine.addInvariant("ship state in range", () => checkShipState(ship));
   engine.addInvariant("voyage state in range", () =>
     checkVoyageState(voyage, world.tick),
+  );
+  engine.addInvariant("traffic contact state matches geometry", () =>
+    checkTrafficState(traffic, voyage, world.tick),
   );
 
   let started = false;
@@ -142,7 +161,7 @@ export function buildWorld(
     engine,
     ship,
     crew,
-    galaxy: { sector, voyage },
+    galaxy: { sector, voyage, traffic },
     get decisions() {
       return decisions instanceof UtilitySource ? decisions.records : [];
     },
@@ -167,8 +186,9 @@ export interface RunContext {
   readonly engine: Engine;
   readonly ship: Ship;
   readonly crew: CrewMember[];
-  /** The sector this voyage crosses, and the leg being sailed. */
-  readonly galaxy: { sector: Sector; voyage: Voyage };
+  /** The sector this voyage crosses, the leg being sailed, and
+   *  the other ships under way in the sector. */
+  readonly galaxy: { sector: Sector; voyage: Voyage; traffic: Traffic };
   /** Records of the live source; empty when a replay source was supplied. */
   readonly decisions: DecisionRecord[];
   /** The current tick (ticks completed so far). */

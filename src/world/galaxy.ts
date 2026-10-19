@@ -98,7 +98,7 @@ function shuffled<T>(rng: Rng, items: readonly T[]): T[] {
 }
 
 /** A name from the tables that this sector has not spent yet. */
-function drawName(
+export function drawName(
   rng: Rng,
   first: readonly string[],
   second: readonly string[],
@@ -288,6 +288,17 @@ export class Voyage {
   /** True once the leg is complete at a tick: the ship is in port. */
   inPortAt(tick: number): boolean {
     return tick >= this.legTicks;
+  }
+
+  /**
+   * The port the ship is berthed at, as an index: the origin
+   * before she sails and the destination once she has arrived,
+   * and null while she is under way between them.
+   */
+  portIndexAt(tick: number): number | null {
+    if (tick <= 0) return this.origin;
+    if (tick >= this.legTicks) return this.destination;
+    return null;
   }
 
   /** The voyage system: arrival fires exactly once, on its tick. */

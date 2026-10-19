@@ -20,6 +20,7 @@ import {
   type ChronicleRenderer,
 } from "../../src/log/chronicle.ts";
 import type { SimEvent } from "../../src/log/events.ts";
+import { chatterText } from "../../src/perception/speech.ts";
 import { CONFIG } from "../../src/scenario/config.ts";
 import { createRun, type RunContext } from "../../src/sim.ts";
 import type { CrewMember } from "../../src/entities/crew.ts";
@@ -1540,6 +1541,20 @@ function drainEvents(): void {
       // Accusations are spoken aloud in-fiction: a speech bubble.
       const actor = event.actors[0];
       if (actor !== undefined) deck?.speech(actor);
+    }
+    if (event.type === "chatter") {
+      // The words themselves, over the speaker's head: composed
+      // from the event payload by the same speech layer the
+      // chronicle uses, so the deck and the log never disagree.
+      const speaker = eventStr(event, "speaker");
+      if (speaker !== "") {
+        const text = chatterText(event.data, {
+          person: (id) => personName(id),
+          system: (id) => run.ship.systemById(id)?.name ?? id,
+          room: (index) => roomName(index),
+        });
+        if (text !== "") deck?.speechLine(speaker, text);
+      }
     }
     // The feel pass (./staging.ts): the act and the mend are staged
     // in the world at the tick they are displayed, not only written

@@ -1470,6 +1470,11 @@ export class DeckView {
     this.bubbles.speech(id, "bang");
   }
 
+  /** A spoken line: the words themselves in a text bubble. */
+  speechLine(id: string, text: string): void {
+    this.bubbles.speechLine(id, text);
+  }
+
   /** A council vote lands: the voter's token rises over their head. */
   stageVote(id: string, choice: string): void {
     this.bubbles.speech(

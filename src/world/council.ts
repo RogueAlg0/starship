@@ -37,6 +37,7 @@ import {
   suspicionOf,
   trustOf,
 } from "../perception/beliefs.ts";
+import { pickVariant } from "../perception/speech.ts";
 import { CONFIG } from "../scenario/config.ts";
 import type { Sector, Voyage } from "./galaxy.ts";
 import type { HealthState } from "./health.ts";
@@ -661,6 +662,18 @@ interface TestimonyStatement {
   witness: string;
   about: string;
   kind: string;
+  /** The witness stood where it happened (a death's room). */
+  present: boolean;
+  /**
+   * The watcher's grade of the claim, from the log's own truth:
+   * "lie" for the culprit's scapegoat, "not true" for a claim
+   * whose substance the log contradicts, null when the claim is
+   * true or the truth is not the sitting's to know. Log-layer
+   * data only: no belief or vote ever reads it.
+   */
+  tag: string | null;
+  /** Template index for the spoken claim, a hash of the moment. */
+  variant: number;
 }
 
 /**
@@ -669,6 +682,12 @@ interface TestimonyStatement {
  * the statements are returned, not emitted, so the caller can
  * write the convened record first and keep the log in sitting
  * order: convened, testimony, finding.
+ *
+ * Each statement also carries its spoken form (a template index
+ * the chronicle composes into a quoted claim) and its watcher
+ * grade. A witness who was there, holds the truth strongly, and
+ * names someone else (or nothing) earns a further statement of
+ * kind "withheld": they kept quiet, and the log notes it.
  */
 function testimony(
   crew: readonly CrewMember[],
@@ -676,8 +695,10 @@ function testimony(
   data: {
     victimId: string | null;
     truthCulprit: string | null;
+    truthKnown: boolean;
     presentIds: string[];
     causeKind: string;
+    room: number | null;
   },
 ): TestimonyStatement[] {
   const cfg = CONFIG.council;
@@ -706,9 +727,23 @@ function testimony(
       .map((entry) => entry.id);
   }
   witnessIds = witnessIds.slice(0, cfg.testimonyWitnessCap);
+  const claimVariant = (
+    witnessId: string,
+    aboutId: string,
+    present: boolean,
+  ): number =>
+    pickVariant(
+      ["testimony", witnessId, aboutId],
+      (present
+        ? CONFIG.chatter.templates.testimonyPresent
+        : CONFIG.chatter.templates.testimonyHeard
+      )?.length ?? 1,
+    );
   for (const witnessId of witnessIds) {
     const witness = byId(crew, witnessId);
     if (witness === undefined) continue;
+    const present = data.presentIds.includes(witnessId);
+    let spokenAbout: string | null = null;
     if (data.truthCulprit !== null && witnessId === data.truthCulprit) {
       // The scapegoat: least trusted by the culprit, kin to none.
       let scapegoat: CrewMember | undefined;
@@ -730,32 +765,71 @@ function testimony(
           const discount = 0.5 + 0.5 * Math.max(0, trustOf(officer.beliefs, witness.id));
           driftSuspicion(officer.beliefs, scapegoat.id, cfg.scapegoatPush * discount);
         }
+        spokenAbout = scapegoat.id;
         statements.push({
           witness: witness.id,
           about: scapegoat.id,
           kind: "scapegoat",
+          present,
+          tag: data.truthKnown ? "lie" : null,
+          variant: claimVariant(witness.id, scapegoat.id, present),
         });
       }
-      continue;
-    }
-    // An honest witness names their strongest suspicion.
-    let about: string | null = null;
-    let top = 0.25;
-    for (const id of Object.keys(witness.beliefs.suspicion)) {
-      if (id === witness.id || id === data.victimId) continue;
-      const value = suspicionOf(witness.beliefs, id);
-      if (value > top) {
-        top = value;
-        about = id;
+    } else {
+      // An honest witness names their strongest suspicion.
+      let about: string | null = null;
+      let top = 0.25;
+      for (const id of Object.keys(witness.beliefs.suspicion)) {
+        if (id === witness.id || id === data.victimId) continue;
+        const value = suspicionOf(witness.beliefs, id);
+        if (value > top) {
+          top = value;
+          about = id;
+        }
+      }
+      if (about !== null) {
+        for (const officer of officers) {
+          if (officer === witness) continue;
+          const discount = 0.5 + 0.5 * Math.max(0, trustOf(officer.beliefs, witness.id));
+          driftSuspicion(officer.beliefs, about, cfg.testimonyPush * discount);
+        }
+        spokenAbout = about;
+        statements.push({
+          witness: witness.id,
+          about,
+          kind: "suspicion",
+          present,
+          tag: !data.truthKnown
+            ? null
+            : data.truthCulprit !== null && about === data.truthCulprit
+              ? null
+              : "not true",
+          variant: claimVariant(witness.id, about, present),
+        });
       }
     }
-    if (about === null) continue;
-    for (const officer of officers) {
-      if (officer === witness) continue;
-      const discount = 0.5 + 0.5 * Math.max(0, trustOf(officer.beliefs, witness.id));
-      driftSuspicion(officer.beliefs, about, cfg.testimonyPush * discount);
+    // Kept quiet: the witness stood there, holds the truth at
+    // strength, and named someone else (or nothing at all). The
+    // culprit is excluded: the culprit did not keep quiet, they
+    // lied, and the scapegoat statement above carries that.
+    if (
+      present &&
+      data.truthKnown &&
+      data.truthCulprit !== null &&
+      witnessId !== data.truthCulprit &&
+      spokenAbout !== data.truthCulprit &&
+      suspicionOf(witness.beliefs, data.truthCulprit) >=
+        CONFIG.chatter.withheldSuspicion
+    ) {
+      statements.push({
+        witness: witness.id,
+        about: data.truthCulprit,
+        kind: "withheld",
+        present: true,
+        tag: null,
+        variant: 0,
+      });
     }
-    statements.push({ witness: witness.id, about, kind: "suspicion" });
   }
   return statements;
 }
@@ -782,6 +856,17 @@ function runJudicialSitting(
   };
   let frame = frameSitting(state, crew, motion);
 
+  // Whether the log can grade this sitting's speech and close it
+  // with a truth line: the truth must be the sitting's own record
+  // (a death's ledger and attacker, a sabotage's culprit, a
+  // theft's witnessed hand), never a guess. A certified
+  // accusation's inquiry knows no truth, and says none.
+  const truthKnown =
+    pending.kind === "inquiry" &&
+    (pending.causeKind === "death" ||
+      pending.causeKind === "sabotage" ||
+      pending.causeKind === "theft");
+
   // Witnesses are heard first (their pushes land now), then the
   // board names its accused: the preset suspect, or the person
   // the sitting officers' suspicions jointly point to.
@@ -790,8 +875,10 @@ function runJudicialSitting(
       ? testimony(crew, frame, {
           victimId: pending.victimId,
           truthCulprit: pending.truthCulprit,
+          truthKnown,
           presentIds,
           causeKind: pending.causeKind,
+          room: deathRecord?.room ?? null,
         })
       : [];
   let accusedId = pending.accusedId;
@@ -830,6 +917,29 @@ function runJudicialSitting(
       witness: statement.witness,
       about: statement.about,
       kind: statement.kind,
+      present: statement.present,
+      tag: statement.tag,
+      variant: statement.variant,
+      room: deathRecord?.room ?? null,
+    });
+  }
+  // The accused answers. Speech only: a denial moves no belief
+  // and no vote; the board judges what it already holds. Graded
+  // like any other claim where the truth is the sitting's to
+  // know: a guilty denial is a lie, an innocent one is true.
+  if (accusedId !== null) {
+    w.emit("council_testimony", [accusedId], {
+      witness: accusedId,
+      about: accusedId,
+      kind: "denial",
+      present: false,
+      tag:
+        truthKnown && accusedId === pending.truthCulprit ? "lie" : null,
+      variant: pickVariant(
+        ["denial", w.tick, accusedId],
+        CONFIG.chatter.templates.denial?.length ?? 1,
+      ),
+      room: deathRecord?.room ?? null,
     });
   }
 
@@ -862,6 +972,7 @@ function runJudicialSitting(
       cause: believedCause,
       truthCause,
       truthCulprit: pending.truthCulprit,
+      truthKnown,
       convicted: false,
       votes: [],
       strength: 0,
@@ -939,6 +1050,7 @@ function runJudicialSitting(
     cause: believedCause,
     truthCause,
     truthCulprit: pending.truthCulprit,
+    truthKnown,
     convicted,
     votes,
     strength: r3(strength),
@@ -1164,6 +1276,7 @@ function runMotionSitting(
     cause: pending.kind,
     truthCause: null,
     truthCulprit: null,
+    truthKnown: false,
     convicted: carried,
     votes,
     strength: r3(strength),
@@ -1806,6 +1919,7 @@ function runCourseSitting(
     cause: "course",
     truthCause: null,
     truthCulprit: null,
+    truthKnown: false,
     convicted: carried,
     votes,
     strength: r3(strength),

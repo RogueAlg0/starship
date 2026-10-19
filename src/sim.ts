@@ -127,6 +127,7 @@ export function buildWorld(
   const ctx: CrewContext = {
     ship,
     weather,
+    voyage,
     history: [],
     meal: null,
     lastGameTick: new Map(),

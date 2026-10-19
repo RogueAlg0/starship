@@ -11,6 +11,7 @@ import type { CrewMember } from "../entities/crew.ts";
 import { r3 } from "../log/events.ts";
 import { clamp01 } from "../world/systems.ts";
 import { CONFIG } from "../scenario/config.ts";
+import { maybeGossipSpeech } from "./speech.ts";
 
 export interface Beliefs {
   /** Directed trust toward each person id, in [-1, 1]. */
@@ -152,6 +153,16 @@ export function spreadGossip(
         suspicion: r3(after),
       });
     }
+    // And some of it is said out loud. The speech layer reads the
+    // transfer and writes only its own events; the suspicion has
+    // already moved, and moves the same whether or not it is
+    // spoken (see ./speech.ts, and the no-feedback test).
+    maybeGossipSpeech(w, speaker, listener, id, {
+      tipped: before < threshold && after >= threshold,
+      rehearsal:
+        held >=
+        accusationThresholdFor(speaker) - CONFIG.chatter.rehearsalWindow,
+    });
   }
 }
 
@@ -286,9 +297,25 @@ export function stepSociety(w: World, crew: readonly CrewMember[]): void {
           -CONFIG.accusation.listenerTrustHit,
         );
       }
+      // The watcher's breakdown of the accusation, exposed from
+      // the state that produced it (no new mechanics): means is
+      // the accused's capability on the ship's systems, motive is
+      // the heat of the hottest grudge the accused carries (in
+      // this engine sabotage is grudge-driven, so that is the
+      // motive term of the model), and opportunity is the
+      // accuser's own suspicion, which is built from the presence
+      // evidence: who was seen near the room, and when.
+      let motive = 0;
+      for (const mate of crew) {
+        if (mate === other) continue;
+        motive = Math.max(motive, -trustOf(other.beliefs, mate.id));
+      }
       w.emit("accusation", [accuser.id], {
         accused: other.id,
         suspicion: Math.round(suspicion * 1000) / 1000,
+        means: r3(other.repairSkill),
+        motive: r3(Math.max(0, motive)),
+        opportunity: r3(suspicion),
       });
     }
   }

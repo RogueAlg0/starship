@@ -112,7 +112,15 @@ describe("boards of inquiry", () => {
     expect(finding?.data.truthCulprit ?? null).toBeNull();
     expect(finding?.data.truthCause).toBe("suffocation");
     const chronicle = renderChronicle(run.world.events.events);
-    expect(chronicle).toContain("The log records the truth apart from the verdict");
+    // The truth line: what actually happened (no hand did it),
+    // and the verdict on the verdict, consistent with the finding.
+    expect(chronicle).toContain("The truth:");
+    expect(chronicle).toContain("died of suffocation, and no hand did it");
+    expect(chronicle).toContain(
+      finding?.data.convicted === true
+        ? "The council was wrong."
+        : "The council was right.",
+    );
     expect(chronicle).toContain("has died");
   }, 60_000);
 });

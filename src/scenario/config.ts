@@ -456,6 +456,167 @@ export const CONFIG = {
   },
 
   /**
+   * Crew chatter: speech from beliefs (the Chatter section of
+   * DESIGN). The social machinery already moves suspicion and
+   * company silently; this layer gives some of it a voice. Lines
+   * are template-composed from real state only, selection is a
+   * pure hash of the moment (no RNG stream is drawn, so speech
+   * can never shift the simulation it reports), and the fractions
+   * and cooldowns below are the dosage: a ship that talks
+   * occasionally, not a transcript of every minute.
+   */
+  chatter: {
+    /** Master gate. Exists so tests can prove the speech layer
+     *  feeds nothing back: a run with this off must differ from a
+     *  run with it on only by the chatter events themselves. */
+    enabled: true,
+    /** Fraction of gossip transfers that are spoken aloud. */
+    gossipSpeakFraction: 0.5,
+    /** Fraction of shared-leisure socialize occasions that find
+     *  a voice, before topic and cooldown checks. */
+    socialSpeakFraction: 0.2,
+    /** The same, for a pair at a meal table. */
+    tableSpeakFraction: 0.2,
+    /** One person speaks at most one general line per this many
+     *  ticks, and at most one gossip line per the shorter span. */
+    speakerCooldownTicks: 288,
+    gossipCooldownTicks: 36,
+    /** And the ship as a whole: spoken lines stand at least this
+     *  many ticks apart, so a meal window cannot produce a
+     *  chorus of announcements in a single hour. */
+    shipGapTicks: 12,
+    /** Voyage talk (the port ahead, the port alongside) is the
+     *  filler of shipboard speech: always available, so it must
+     *  also pass this second gate or it crowds out everything
+     *  else a person might say. */
+    fillerSpeakFraction: 0.5,
+    /** The stricter gate inside the filler gate for the voyage
+     *  topics themselves: the countdown is true every day, and
+     *  remarked on only sometimes. */
+    voyageSpeakFraction: 0.35,
+    /** Chatter lines the highlights view may carry per ship day:
+     *  the notable few (a tip that tips, a rehearsal, a lie), and
+     *  never more than this, however loud the day gets. */
+    highlightsPerDay: 1,
+    /** A speaker whose own suspicion of the subject stands
+     *  within this of their accusation threshold is rehearsing
+     *  an accusation: the line is notable. Kept narrow: gossip
+     *  only transfers suspicions of 0.48 and up, so a wide window
+     *  would mark nearly every spoken suspicion. */
+    rehearsalWindow: 0.05,
+    /** A witness who was there, and holds the truth at or above
+     *  this, and names someone else (or nothing), has kept
+     *  quiet: the log notes it for the watcher. */
+    withheldSuspicion: 0.4,
+    /** A crime is talk while it is younger than this. */
+    crimeTalkTicks: 1440,
+    /** A course decision is talk while it is younger than this. */
+    recentCourseTicks: 72,
+    /** Line templates by topic. Placeholders: {about} and
+     *  {target} are people, {system} a ship system, {port} a
+     *  port name, {days} a day count, {store} a store, {part} a
+     *  body part, {state} a condition word, {room} a room. Plain
+     *  speech, composed from the facts at hand, nothing else. */
+    templates: {
+      suspicion: [
+        "I saw {about} near the {system} the night it was hit.",
+        "Keep an eye on {about}. Ever since the {system}, I do.",
+        "It was {about} around the {system}. That's what I think.",
+      ],
+      suspicionNoAct: [
+        "I don't trust {about}. No reason I can name.",
+        "Watch yourself around {about}.",
+        "{about} gives me a bad feeling. That's all it is.",
+      ],
+      theftSeen: [
+        "I saw {about} with their hands in the stores.",
+        "{about} took food. I was there. I saw it.",
+      ],
+      theftHeard: [
+        "Someone's been in the stores, and I think it's {about}.",
+        "The stores are light, and {about} eats well. Notice that?",
+      ],
+      system: [
+        "The {system} is {state}. Hear it?",
+        "Someone ought to see to the {system} before it gives out.",
+        "If the {system} goes, we're in real trouble.",
+      ],
+      storm: [
+        "This storm gets in your teeth.",
+        "Radiation's up. Keep clear of the hull-side rooms.",
+        "Whole ship hums in a storm. Hate it.",
+      ],
+      rationing: [
+        "Rationing on {store} now. Eat slow.",
+        "They've cut the {store} again. Half of half.",
+        "Short {store}, short tempers. Mind yours.",
+      ],
+      underway: [
+        "{port} in {days} days. Feels longer.",
+        "About {days} days out from {port} yet.",
+        "Still {days} days to {port}.",
+        "Count it how you like: {days} days to {port}.",
+      ],
+      underwaySoon: [
+        "We make {port} tomorrow, with luck.",
+        "{port} tomorrow. I can almost smell dock air.",
+      ],
+      inport: [
+        "Good to be alongside at {port}, even a day.",
+        "{port} air beats ship air. No offence.",
+      ],
+      course: [
+        "Council says {port} next. Hope they're right.",
+        "So it's {port}. The table has spoken.",
+      ],
+      hungry: [
+        "I could eat the plates, I swear.",
+        "Is it supper yet? Feels like a week.",
+      ],
+      tired: [
+        "I'm dead on my feet.",
+        "Watch ends, I'm horizontal. That's the plan.",
+      ],
+      hurt: [
+        "My {part} is still not right.",
+        "Took a knock to the {part}. It'll mend.",
+      ],
+      sick: [
+        "Feel rotten. Something's going around.",
+        "Don't stand close. I'm coming down with something.",
+      ],
+      grudge: [
+        "Don't seat me by {target}. That's all I ask.",
+        "{target} and me aren't square. Leave it there.",
+      ],
+      bond: [
+        "Glad you're on this ship. Don't tell the others.",
+        "You and me keep this ship honest.",
+        "Wouldn't sail with a better crew. Present company counted.",
+        "You ever need a hand, you come to me.",
+      ],
+      /** Testimony, spoken to the board. {room} is where it
+       *  happened, for the witness who stood there. */
+      testimonyPresent: [
+        "I was there. It was {about}.",
+        "I stood in the {room} when it happened. It was {about}.",
+        "I saw enough. It was {about}.",
+      ],
+      testimonyHeard: [
+        "It was {about}. That's my belief, and I'll stand on it.",
+        "I say it was {about}.",
+        "Ask me who, I'll tell you plain: {about}.",
+      ],
+      /** The accused, answering the board. */
+      denial: [
+        "I did nothing of the sort.",
+        "It wasn't me. Wrong soul.",
+        "I had no hand in it.",
+      ],
+    } as Record<string, string[]>,
+  },
+
+  /**
    * The galaxy, step 1: a procedural sector of named ports and the
    * factions that hold them, and the voyage as one leg between two
    * ports. Generation draws only from the "galaxy" stream, so the

@@ -987,6 +987,62 @@ hatch and voted on none of it, starts dinner.
   presents. Design the captain-as-accused inquiry first and the
   rest of the table inherits it.
 
+## Crew chatter: speech from beliefs (built Oct 18, 2026)
+
+The crew talked before this chapter only as mechanics: gossip
+moved suspicion in silence, and a sitting summarised its
+testimony as arithmetic. Now they say words, and every word is
+built from state the speaker actually holds. There is no
+flavour pool disconnected from the ship.
+
+- Speech rides the existing social machinery. When two people
+  share leisure or a meal table, and when gossip transfers a
+  suspicion, a fraction of occasions (config-gated) also
+  produce a spoken line. The topic is whatever is true for the
+  speaker, in salience order: a broken system, their own wound
+  or sickness, a hurt system, the storm, rationing, a course
+  decision just taken, hunger, tiredness, a grudge, and only
+  then the filler of shipboard talk (a strong bond, the port
+  ahead). Lines are templates composed from the facts: names,
+  systems, ports, days, body parts.
+- Gossip made audible. A spoken suspicion says what the
+  speaker believes, in the speaker's words. The line is speech
+  in-world either way; the grade is the log's.
+- Watcher tags. The full chronicle grades speech the engine
+  can check, in brackets, for the watcher only: [lie] when
+  the speaker is in the log's culprit set and points
+  elsewhere, [not true] when a spoken suspicion names
+  someone the log's record clears, [kept quiet] when a
+  witness at an inquiry was present, held suspicion of the
+  true culprit, and testified about someone else instead.
+  Untagged means the log does not know, or the words match
+  what it knows. The tags obey the chronicle's truth setting
+  like every truth marker in the log; with it off, the
+  chronicle is the crew's-eye record and prints none of them.
+- Testimony is speech. At an inquiry each statement prints as
+  a quoted line in the full chronicle, with the time and the
+  room as the witness believes them; the accused's denial
+  prints likewise, graded [lie] when the log knows the hand
+  was theirs. Accusations print their reasoning: means (the
+  accused's repair craft), motive (the accused's hottest
+  grudge), opportunity (the accuser's suspicion, their
+  presence evidence).
+- The truth line. After an inquiry finding whose truth the
+  engine holds, one line prints in both chronicle modes: what
+  actually happened, and whether the council was right or
+  wrong. Discipline sittings, certified accusations, and
+  motions carry no knowable truth, and no line prints: the
+  log does not invent a certainty to grade by.
+- No feedback. Speech is chosen by pure hashes of the moment
+  (tick, speaker, listener, subject); it draws no random
+  stream and reads no state it could change. Beliefs, votes,
+  and decisions never read the speech layer: the same run
+  with chatter silenced is the same run, event for event,
+  apart from the chatter events themselves. The dosage is
+  tuned to a few lines a day in the full chronicle, and the
+  highlights carry only notable lines (a tip, a rehearsal, a
+  lie), capped per day in config.
+
 ## Crew skills: the hands learn (designed Oct 18, 2026, not built)
 
 RuneScape gives a character a level per skill and raises it by

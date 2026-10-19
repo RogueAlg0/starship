@@ -1424,3 +1424,96 @@ visible.
 Still deferred: the distress-call and diversion half of the
 course jurisdiction (waits on the rescue chain); admissions;
 a believed-stores model for the table.
+
+## Crew chatter, built (Oct 18, 2026)
+
+The maintainer asked whether there is any crew chatter. There
+was none: socialising and gossip existed as mechanics, gossip
+moved suspicion in silence, and only the tipping moment
+printed. This build gives the crew words, on three surfaces:
+the full chronicle (quoted speech), the highlights (notable
+lines only, capped), and the deck (text speech bubbles over
+the speaker, the line rendered to a canvas once on its event).
+
+Model. A new module, src/perception/speech.ts, is called from
+the three places talk already happens: spreadGossip (after a
+real transfer), resolveSocialize (shared leisure), and meal
+table pairs. It reads state and the event log, composes a line
+from templates in CONFIG.chatter.templates, and writes only
+chatter events plus a per-person last-spoke tick. Testimony
+speech rides the council's existing testimony computation:
+each statement now carries present/tag/variant, the accused's
+denial is emitted as a statement of its own, and a witness who
+was present, suspected the true culprit, and named someone
+else is recorded as a withheld statement.
+
+No randomness. Speech selection draws no RNG stream at all:
+gates and variant picks are pure hashes (hash32 over tick,
+speaker, listener, subject). A new stream was considered and
+rejected: any stream draw inside gossip or socialising would
+shift every later draw on that stream and churn every
+existing hash for zero benefit, since speech must not change
+outcomes anyway. Proven by test: seed 7 over 30 days with
+CONFIG.chatter.enabled on and off produces identical event
+streams (chatter events aside), identical decision logs, and
+identical beliefs. Decisions on seed 42 are unchanged at
+51,192 over 4,320 ticks.
+
+Dosage, tuned on seed 42 and measured across the fleet at 90
+days. Full chronicle chatter: 2.7 to 4.1 lines per day.
+Highlights chatter: 0.9 to 1.8 lines per week, under a hard
+renderer cap of 1 per day (CONFIG.chatter.highlightsPerDay).
+Tagged lines: 23 to 62 per 90 days. The tuning that got there:
+a per-speaker cooldown of 288 ticks, a ship-wide minimum gap
+of 12 ticks between any two lines (without it, a meal window
+produced a chorus), voyage countdown talk demoted to filler
+behind two extra gates (it is true every day, which is why it
+must be rare), and the rehearsal window narrowed to 0.05
+(gossip only transfers suspicions of 0.48 and up, so a wider
+window marked nearly every spoken suspicion notable).
+
+Watcher grades. [not true]: a spoken suspicion names someone
+outside the culprit set the log itself records (sabotage
+culprits and thieves so far). [lie]: the speaker is in that
+set and points elsewhere; a culprit's inquiry denial is
+graded the same way. [kept quiet]: the withheld statement
+above. Testimony claims are graded against the sitting's
+recorded truth where the sitting has one.
+
+Judgment calls, recorded plainly:
+
+- The truth line replaces the older parenthetical that kept
+  truth apart from the verdict. It prints in both chronicle
+  modes, but under the chronicle's knowsTruth setting, like
+  the parenthetical it replaces and like every watcher tag:
+  with the truth setting off, the chronicle is the crew's-eye
+  log and carries no watcher knowledge at all. The line
+  prints only where the sitting's record carries a truth
+  (truthKnown: an inquiry into a death, a sabotage, or a
+  theft with a recorded culprit or a recorded absence of one).
+  Discipline sittings and certified accusations print nothing:
+  there is no ground truth to grade them against, and the log
+  does not invent one.
+- Accusation reasoning is exposure, not new mechanics. Means
+  is the accused's repairSkill, the same number the accusation
+  computation already weighs; motive is the hottest grudge
+  heat the accused holds; opportunity is the accuser's
+  suspicion value itself, which is the presence-evidence
+  composite after the sabotage plot's evidence pass. The
+  three ride the accusation event payload.
+- Speech text is composed twice from one payload: the
+  chronicle and the viewer's bubble both call the speech
+  module's text builders, so the deck and the log cannot
+  disagree about what was said. The event carries parts, not
+  prose, so a re-render in another voice stays possible.
+
+Hash shift, stated honestly: chatter events enter the event
+log and therefore the stream hash. Seed 42: at 4,320 ticks,
+34,075 events and hash 07652594b1415cb0 before; 34,182 events
+and hash 8db3af2e6030063a after (107 chatter events in the
+span). At 12,960 ticks: 98,819 events and hash
+47ecd59339a03280 before; 99,194 events and hash
+d77edb7898a4b6fd after. Decisions are unchanged at both spans
+(51,192 and 147,236). Every non-chatter event, decision, and
+belief is unchanged, per the no-feedback test above. Replay
+across chatter stays exact (test/chatter.test.ts).

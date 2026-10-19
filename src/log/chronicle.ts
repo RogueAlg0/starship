@@ -15,6 +15,12 @@
 // path). Both share the one implementation below, so the two can never
 // drift apart.
 
+import {
+  chatterText,
+  denialText,
+  testimonyText,
+  type SpeechNames,
+} from "../perception/speech.ts";
 import { CONFIG } from "../scenario/config.ts";
 import type { SimEvent } from "./events.ts";
 
@@ -92,6 +98,8 @@ class Renderer implements ChronicleRenderer {
   private readonly seenSnub = new Set<string>();
   private readonly seenStrain = new Set<string>();
   private readonly resting = new Set<string>();
+  /** Notable chatter lines already carried as highlights, per day. */
+  private readonly chatterHighlights = new Map<number, number>();
 
   constructor(options?: ChronicleOptions) {
     this.knowsTruth = options?.knowsTruth ?? CONFIG.chronicle.knowsTruth;
@@ -554,12 +562,39 @@ class Renderer implements ChronicleRenderer {
       case "council_testimony": {
         const witness = person(str(data, "witness"));
         const about = person(str(data, "about"));
+        const kind = str(data, "kind");
+        const tag = str(data, "tag");
+        const tagSuffix = tag !== "" && this.knowsTruth ? ` [${tag}]` : "";
+        if (kind === "denial") {
+          // The accused answers the board: speech, quoted, and a
+          // full-chronicle line only; the summary needs no denial.
+          line(`${ts} — ${witness}: "${denialText(data)}"${tagSuffix}`, false);
+          break;
+        }
+        if (kind === "withheld") {
+          // A witness who was there and kept quiet. Pure watcher
+          // knowledge: with the log's truth setting off, it does
+          // not print at all.
+          if (this.knowsTruth) {
+            line(
+              `${ts} — (The log notes: ${witness} was there, and said nothing of ${about}.) [kept quiet]`,
+              false,
+            );
+          }
+          break;
+        }
         line(
           `${ts} — Testimony: ${witness} names ${about}.` +
-            (str(data, "kind") === "scapegoat" && this.knowsTruth
+            (kind === "scapegoat" && this.knowsTruth
               ? ` (The log records: ${witness} is the culprit, naming a scapegoat.)`
               : ""),
           true,
+        );
+        // The claim itself, as spoken, with the watcher's grade:
+        // a full-chronicle line under the summary.
+        line(
+          `${ts} — ${witness} testifies: "${testimonyText(data, { person, system, room })}"${tagSuffix}`,
+          false,
         );
         break;
       }
@@ -597,20 +632,47 @@ class Renderer implements ChronicleRenderer {
               `${ts} — The board finds: cause, ${str(data, "cause")}; ${person(accused)} is acquitted.`;
           }
           line(text + voteText, true);
-          if (this.knowsTruth) {
+          // The truth line: what actually happened, and whether
+          // the board's finding matches it. Watcher knowledge,
+          // printed under the log's truth setting like every
+          // truth marker here, in both chronicle modes, and only
+          // where the sitting's record carries a truth to tell
+          // (truthKnown): where the engine cannot know a truth,
+          // nothing prints rather than an invented certainty.
+          // Right means the finding matches on both counts the
+          // board pronounced: the hand, and (for a death) the
+          // cause.
+          if (this.knowsTruth && data.truthKnown === true) {
             const truthCause = str(data, "truthCause");
             const truthCulprit = str(data, "truthCulprit");
-            if (truthCause !== "" || truthCulprit !== "") {
-              line(
-                `${ts} — (The log records the truth apart from the verdict: ` +
-                  `cause ${truthCause || "as found"}` +
-                  (truthCulprit !== ""
-                    ? `; the hand was ${person(truthCulprit)}'s`
-                    : "; no hand but circumstance") +
-                  `.)`,
-                true,
-              );
+            const victim = str(data, "victim");
+            const culpritRight =
+              accused === ""
+                ? truthCulprit === ""
+                : data.convicted === true
+                  ? accused === truthCulprit
+                  : accused !== truthCulprit;
+            const causeWrong =
+              victim !== "" &&
+              truthCause !== "" &&
+              str(data, "cause") !== truthCause;
+            const right = culpritRight && !causeWrong;
+            let facts: string;
+            if (victim !== "") {
+              facts =
+                `${person(victim)} died of ${truthCause}` +
+                (truthCulprit !== ""
+                  ? `, and the hand was ${person(truthCulprit)}'s`
+                  : ", and no hand did it");
+            } else if (str(data, "cause") === "theft") {
+              facts = `the hand in the stores was ${person(truthCulprit)}'s`;
+            } else {
+              facts = `the sabotage was ${person(truthCulprit)}'s work`;
             }
+            line(
+              `${ts} — The truth: ${facts}. The council was ${right ? "right" : "wrong"}.`,
+              true,
+            );
           }
         } else {
           const words: Record<string, string> = {
@@ -957,6 +1019,31 @@ class Renderer implements ChronicleRenderer {
         );
         break;
       }
+      case "chatter": {
+        // A spoken line, quoted. The words are the speaker's; the
+        // grade in brackets is the log's, printed only when the
+        // log's truth setting allows, like every truth marker
+        // here. Full mode carries every line; highlights carry
+        // only the notable ones, capped per day in config.
+        const names: SpeechNames = { person, system, room };
+        const text = chatterText(data, names);
+        if (text === "") break;
+        let rendered =
+          `${ts} — ${person(str(data, "speaker"))} tells ` +
+          `${person(str(data, "listener"))}: "${text}"`;
+        const tag = str(data, "tag");
+        if (tag !== "" && this.knowsTruth) rendered += ` [${tag}]`;
+        let highlight = false;
+        if (data.notable === true) {
+          const carried = this.chatterHighlights.get(day) ?? 0;
+          if (carried < CONFIG.chatter.highlightsPerDay) {
+            this.chatterHighlights.set(day, carried + 1);
+            highlight = true;
+          }
+        }
+        line(rendered, highlight);
+        break;
+      }
       case "rest": {
         if (actor === undefined || this.resting.has(actor)) break;
         this.resting.add(actor);
@@ -1035,8 +1122,15 @@ class Renderer implements ChronicleRenderer {
       }
       case "accusation": {
         if (actor === undefined) break;
+        const two = (value: number): string => value.toFixed(2);
+        const reasoning =
+          typeof data.means === "number"
+            ? ` (their reasoning: means ${two(num(data, "means"))}, ` +
+              `motive ${two(num(data, "motive"))}, ` +
+              `opportunity ${two(num(data, "opportunity"))})`
+            : "";
         line(
-          `${ts} — ${person(actor)} accuses ${person(str(data, "accused"))} of sabotage. ` +
+          `${ts} — ${person(actor)} accuses ${person(str(data, "accused"))} of sabotage${reasoning}. ` +
             `It is an accusation, not a finding.`,
           true,
         );

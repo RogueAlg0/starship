@@ -33,8 +33,10 @@ import {
   type WatchName,
 } from "./routine.ts";
 import { applySabotage, sabotageCandidate } from "../plots/sabotage.ts";
+import { maybeSocialSpeech } from "../perception/speech.ts";
 import { CONFIG } from "../scenario/config.ts";
 import { createBody, totalSeverity, type BodyState } from "../world/health.ts";
+import type { Voyage } from "../world/galaxy.ts";
 import type { Ship } from "../world/ship.ts";
 import { gateRepairDelta } from "../world/stores.ts";
 import {
@@ -96,6 +98,9 @@ export class CrewMember {
   lastSabotageTick = -1000000;
   /** Tick of this person's last leisure event, for the leisure cooldown. */
   lastLeisureTick = -1000000;
+  /** Tick of this person's last spoken chatter line. Owned by the
+   *  speech layer (src/perception/speech.ts); read by nothing else. */
+  lastChatterTick = -1000000;
   /** System currently being repaired, for repair-session event dedupe. */
   repairTarget: string | null = null;
 
@@ -149,6 +154,9 @@ export interface MealServiceState {
 export interface CrewContext {
   ship: Ship;
   weather: Weather;
+  /** The voyage, for the speech layer's situation read (the port
+   *  ahead, the leg being sailed). Read-only here, like the rest. */
+  voyage: Voyage;
   /** Recent presence snapshots, one per tick, oldest first. */
   history: Record<string, number>[];
   /** The meal window currently gathering, if anyone has eaten in it. */
@@ -578,6 +586,7 @@ function resolveSocialize(
   w: World,
   member: CrewMember,
   target: CrewMember,
+  ctx: CrewContext,
 ): void {
   const refused =
     target.activity === "rest" ||
@@ -630,6 +639,12 @@ function resolveSocialize(
     if (targetLean !== 0) {
       driftTrust(target.beliefs, member.id, Math.sign(targetLean) * drift);
     }
+    // Talk, occasionally, out loud: the speech layer reads the
+    // pair and the ship's situation and writes only its own
+    // events. The gossip above may already have spoken for one
+    // of them; the shared cooldown in the speech layer keeps a
+    // pair from holding forth in stereo.
+    maybeSocialSpeech(w, member, target, ctx.ship, ctx.weather, ctx.voyage, "social");
   }
 }
 
@@ -803,7 +818,7 @@ function applyChoice(
   }
   if (key.startsWith("socialize:")) {
     const target = crew.find((c) => c.id === key.slice("socialize:".length));
-    if (target !== undefined) resolveSocialize(w, member, target);
+    if (target !== undefined) resolveSocialize(w, member, target, ctx);
     return;
   }
   if (key.startsWith("sabotage:")) {
@@ -979,6 +994,9 @@ function recordMealAttendance(
     state.pairs.add(pairKey);
     spreadGossip(w, member, other);
     spreadGossip(w, other, member);
+    // Table talk, once per pair per window: the speech layer
+    // decides whether either of them has anything to say.
+    maybeSocialSpeech(w, member, other, ctx.ship, ctx.weather, ctx.voyage, "table");
   }
   return tablemates;
 }

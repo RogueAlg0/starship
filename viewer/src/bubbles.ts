@@ -177,6 +177,53 @@ interface Active {
   icon: BubbleIcon;
   kind: "thought" | "speech";
   born: number;
+  /**
+   * A spoken line, pre-rendered to a canvas when the line was
+   * set (on its event, never per frame): when present, the
+   * bubble is a text bubble sized to the canvas, not an icon.
+   */
+  textCanvas?: HTMLCanvasElement;
+}
+
+const TEXT_FONT = "9px monospace";
+const TEXT_MAX_W = 148;
+const TEXT_LINE_H = 11;
+
+/**
+ * Render a spoken line into a small canvas, once: word-wrapped
+ * to the bubble's measure, dark ink on nothing (the bubble body
+ * is painted under it at draw time). Returns null when no 2d
+ * context is available.
+ */
+function renderTextBubble(text: string): HTMLCanvasElement | null {
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  if (ctx === null) return null;
+  ctx.font = TEXT_FONT;
+  const words = text.split(" ");
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    const next = current === "" ? word : `${current} ${word}`;
+    if (ctx.measureText(next).width > TEXT_MAX_W && current !== "") {
+      lines.push(current);
+      current = word;
+    } else {
+      current = next;
+    }
+  }
+  if (current !== "") lines.push(current);
+  let width = 0;
+  for (const line of lines) width = Math.max(width, ctx.measureText(line).width);
+  canvas.width = Math.max(1, Math.ceil(width));
+  canvas.height = Math.max(1, lines.length * TEXT_LINE_H);
+  ctx.font = TEXT_FONT;
+  ctx.fillStyle = "#20242c";
+  ctx.textAlign = "left";
+  lines.forEach((line, i) => {
+    ctx.fillText(line, 0, (i + 1) * TEXT_LINE_H - 3);
+  });
+  return canvas;
 }
 
 /** What is on this person's mind right now, by the bubble priority. */
@@ -223,10 +270,26 @@ export class BubbleLayer {
   private readonly cooldownUntil = new Map<string, number>();
   private readonly cycles = new Map<string, number>();
   private readonly pendingSpeech = new Map<string, BubbleIcon>();
+  private readonly pendingLines = new Map<string, HTMLCanvasElement>();
 
   /** An event just made this person speak. Shows at the next update. */
   speech(id: string, icon: BubbleIcon): void {
     this.pendingSpeech.set(id, icon);
+  }
+
+  /**
+   * An event gave this person actual words: the line is rendered
+   * to a canvas here, once, and the draw step only blits it. A
+   * line outranks an icon: it is the thing actually being said.
+   * Shows at the next update.
+   */
+  speechLine(id: string, text: string): void {
+    const canvas = renderTextBubble(text);
+    if (canvas === null) {
+      this.pendingSpeech.set(id, "dots");
+      return;
+    }
+    this.pendingLines.set(id, canvas);
   }
 
   update(now: number, crew: readonly CrewMember[]): void {
@@ -234,6 +297,15 @@ export class BubbleLayer {
       this.active.set(id, { icon, kind: "speech", born: now });
     }
     this.pendingSpeech.clear();
+    for (const [id, canvas] of this.pendingLines) {
+      this.active.set(id, {
+        icon: "dots",
+        kind: "speech",
+        born: now,
+        textCanvas: canvas,
+      });
+    }
+    this.pendingLines.clear();
     for (const member of crew) {
       const current = this.active.get(member.id);
       if (current !== undefined) {
@@ -272,8 +344,9 @@ export class BubbleLayer {
       else if (age > LIFE_MS - FADE_OUT_MS) {
         alpha = (LIFE_MS - age) / FADE_OUT_MS;
       }
-      const w = 13;
-      const h = 11;
+      const text = bubble.textCanvas;
+      const w = text !== undefined ? text.width + 8 : 13;
+      const h = text !== undefined ? text.height + 6 : 11;
       const bx = Math.max(
         1,
         Math.min(widthPx - w - 1, Math.round(pos.x - w / 2)),
@@ -300,7 +373,11 @@ export class BubbleLayer {
         ctx.closePath();
       }
       ctx.fill();
-      ctx.drawImage(iconCanvas(bubble.icon), bx + 3, by + 2);
+      if (text !== undefined) {
+        ctx.drawImage(text, bx + 4, by + 3);
+      } else {
+        ctx.drawImage(iconCanvas(bubble.icon), bx + 3, by + 2);
+      }
       ctx.restore();
     }
   }

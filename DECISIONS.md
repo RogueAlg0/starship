@@ -943,3 +943,154 @@ a2ccd3627b927733, about 5,700 ticks/sec in the suite's own
 timing and about 4,100 through the CLI with file sinks;
 decisions unchanged at 51,840, because traffic decides
 nothing. Bundle grew 339,331 -> 362,414 B (dist).
+
+## Galaxy step 3: stores and port calls, built (Oct 18, 2026)
+
+The ship eats, burns, and breathes. The voyage is no longer one
+leg and a full stop: the Voyage class now holds an itinerary
+generated whole at build, the way traffic schedules are. Leg 1
+is the charter, drawn exactly as step 1 drew it (same stream,
+same band, the capital-A `arrival`); later legs are picked as
+the table is laid down — never the port she lies in, never
+straight back the way she came when the band offers an
+alternative, weighted toward ports the run has not visited — and
+their arrivals are plainer `port_call` events. Between legs she
+lies in port one to three drawn days, bent by the port's
+character (a free port or a shipyard keeps her a day longer; a
+company town, zero, turns her around on the company's clock).
+Positions stay a pure function of the tick given the itinerary,
+read off a voyage clock; the traffic ledger test still derives
+every contact from the position functions alone.
+
+Five stores — food, water, oxygen margin, fuel, spare parts —
+ride in integer milli-units under a fractional carry, and read
+in days of supply: quantity over the day's draw. Production is a
+system's rate times its condition (the hydroponics rig at 106%
+of appetite, the recycler at 108%, life support at 120%, the
+fabricator at 3,600 milli-units a day while the engineering
+department stands its watches). Consumption is the crew living,
+the engines burning by the light-day, and repairs paying for
+the condition they restore out of the parts locker: a short
+locker buys a smaller repair, an empty one crawls at 0.35.
+Thresholds speak once per crossing per arming (`stores_low`
+below 10 days, `stores_critical` below 4, re-arming only above
+threshold plus 2). Zero stores bite at the level of needs only
+— hunger that cannot recover, morale pressure, a straining
+life support. Nobody dies of an empty store in this build: the
+consequences and death engine is not built, and that boundary
+is deliberate, recorded here so a later build lifts it on
+purpose rather than by drift.
+
+Rationing is INTERIM. The Council chapter says the
+quartermaster proposes and the council disposes, but the
+Council is not built; until it is, the quartermaster imposes
+rationing as an emergency act below 12 days (his traits bend
+the trigger: anxious earlier, kind later — one table, two
+hooks), and it lifts above 16 or on arrival. When the Council
+lands, the imposition becomes a proposal and this entry is
+superseded. There is NO money in this build: resupply is by
+charter right and port reciprocity, capped by the port
+character's table, and prices are future work that must not
+be half-invented here. Harbour news is COLOUR in this build —
+berthings, recent comings, faction rumour — and moves no
+belief; news-as-evidence arrives with the bounty step.
+
+The port call is the spring the step-2 entry stubbed: in the
+first hours the manifest (an agrarian fills the food, a
+refinery the tanks, a shipyard the locker plus dockyard hands
+on the worst system, a shrine almost nothing material and a
+gift of morale, a company town everything and a port-dues
+line, a listening post nearly nothing but news); across the
+stay, shore leave in rotations — off-watch crew ashore, off
+the deck, off the roster's face, restoring company faster
+than any hour aboard — and one flavour incident per call at
+most. Every port fills fuel to at least the departure floor
+(55% of the tanks, more than the longest leg in the band):
+emergency bunkering is a right of the road.
+
+Theft came with the stores, on the beliefs machinery's terms.
+A hoarding trait joins the pool; when food is rationed or
+under 8 days, a hoarding hand may take 350 milli-units into a
+private cache on a "stores"-stream draw. A witness in the
+stores room makes evidence (suspicion, through driftSuspicion;
+no new accusation path was built — the existing one hears it
+from there). Unwitnessed, the loss sleeps until the
+quartermaster's tally: a `stores_discrepancy`, with suspicion
+landing on the thief only when someone awake stood in a room
+adjoining the stores — partial evidence, a direction to look.
+Caches are eaten in secret at the day boundary, and the books
+reconcile to the milli-unit (a test holds the identity over a
+forced-scarcity month). Ashore crew are alibis: the sabotage
+evidence path, the gossip tables, and the society step all
+skip them.
+
+Drift, and a catch worth naming: the first design froze the
+voyage clock at an empty tank. The hosted copy's accuracy pass
+found the same bug in its own build and named it — fuel rises
+only in port, so a frozen ship never arrives and never
+refuels: a permanent soft-lock, reachable in normal play. The
+rule as built: a drifting ship makes way on momentum at a
+quarter of her voyage clock (CONFIG.galaxy.driftRate), the leg
+stretches fourfold, `dead_in_space` fires once, and arrival
+stays reachable from any state. A test pins it (tank held at
+zero from mid-leg: the Arrival still fires inside the bound,
+and the manifest refuels her at the dock). The fleet check
+agrees with the design intent — across seeds 1-60 at 90 days,
+no ship drifted at all and none ended stranded: the departure
+floor makes the drift a safety valve, not a story.
+
+Balance, daily seeds plus 99 over 90 days, measured at the
+final tuning: food never below 36.9 days, water never below
+32.5, oxygen margin never below 24.2, fuel never below 10.8,
+four port calls per ship (three on seed 16), rationing zero
+days, thefts zero — scarcity never came, so the theft and
+rationing machinery is proven by constructed tests, not by
+the table. Spare parts are the one
+store that empties: in a damage cluster the locker drains
+(8,000-14,000 milli-units of repairs a day against 3,600 of
+fabrication) and sits empty for stretches of the worst month
+(5 to 15 sampled days per seed) while repairs crawl at the
+floor and the next port refills it. That is the chapter's
+shortfall rule working, recorded plainly rather than tuned
+away: a higher repair cost was measured and rejected, because
+it made the crawl permanent and starved the other stores
+through unrepaired recyclers.
+
+The viewer: a stores strip under the weather banner (five
+slim bars, whole days, a trend arrow from the standing net
+flow, bands matching the alert tiers, write-on-change on the
+slow cadence); stores alerts through the existing stack
+(low = major, critical = critical, rationing = major, a tap
+going to the quartermaster or the store's producer system);
+ashore crew absent from deck and minimap, "Ashore" on the
+roster row, "Ashore at <port>" on the person card; the map's
+marker wearing a docked ring in port and the header reading
+"In port at <name> · day N of M · sails <day, time>" on the
+existing idiom; resupply, rationing, theft, thresholds,
+discrepancy, harbour news, shore leave, and port calls all
+highlight-class.
+
+Not built, by the brief's fence: the locked stores door and
+stores access control, graded ration levels (one interim
+level only), mercy theft, prices and money in any form, news
+moving beliefs, and anything of the consequences engine.
+Hostile weather for stores (spoiled food, contaminated water)
+was not in the brief either and is not built.
+
+Gates: tests 80/80 (12 new in test/stores.test.ts; the galaxy
+suite gains the itinerary block — charter first, chained legs
+and stays, stay arithmetic, the no-backtrack rule, arrivals
+matched leg for leg against a 90-day stream; the traffic
+suite's port-traffic derivation now reads the port from the
+itinerary), purity green, typecheck clean on both configs,
+replay exact via the CLI against the regenerated runs/seed42.
+New seed-42 fingerprint: 4,320 ticks, 34,079 events (406
+fewer than step 2 — the trait pool grew a hoarding entry, so
+crews draw different traits and the month's drama re-deals),
+hash 9e324b16a2333ec6, about 3,900 ticks/sec through the CLI
+on a clean run; a same-session A/B in a bare harness against
+the step-2 code reads 2,243 against 2,170 ticks/sec, about a
+3% cost for the new system. The 90-day reference run: 12,960
+ticks, 102,785 events, hash b25d0ee3a83c6af1. Bundle grew
+362,414 -> 414,182 B (dist): the stores engine joins the
+viewer's imports.

@@ -40,6 +40,13 @@ import {
   AlertStackView,
   type AlertItem,
 } from "./alerts.ts";
+import {
+  daysOf,
+  STORE_KEYS,
+  STORE_LABELS,
+  STORE_PRODUCER_KIND,
+  type StoreKey,
+} from "../../src/world/stores.ts";
 import { dailySeed } from "./daily.ts";
 import { DeckView } from "./deck.ts";
 import { Minimap } from "./minimap.ts";
@@ -466,6 +473,73 @@ function feedAlert(event: SimEvent): void {
       );
       break;
     }
+    case "stores_low":
+    case "stores_critical": {
+      const key = eventStr(event, "store") as StoreKey;
+      const days = Math.floor(eventNum(event, "days"));
+      const system = run.ship.systems.find(
+        (s) => s.kind === STORE_PRODUCER_KIND[key],
+      );
+      alertStack.post(
+        {
+          tier: event.type === "stores_critical" ? "critical" : "major",
+          category: "stores",
+          text:
+            event.type === "stores_critical"
+              ? `${STORE_LABELS[key]} stores are critical: ${days} days remain.`
+              : `${STORE_LABELS[key]} stores run low: ${days} days remain.`,
+          focus: { room: system?.room, systemId: system?.id },
+        },
+        now,
+      );
+      break;
+    }
+    case "rationing_imposed": {
+      const by = eventStr(event, "by");
+      if (by === "") break;
+      alertStack.post(
+        {
+          tier: "major",
+          category: "stores",
+          text:
+            `${personName(by)} imposes rationing: ` +
+            `${eventStr(event, "store")} at ${Math.floor(eventNum(event, "days"))} days.`,
+          focus: { personId: by },
+        },
+        now,
+      );
+      break;
+    }
+    case "theft": {
+      // Only a witnessed theft is news aboard; the rest is a tally
+      // the chronicle finds later, or never.
+      if (event.data.witnessed !== true) break;
+      alertStack.post(
+        {
+          tier: "major",
+          category: "sabotage",
+          text:
+            `${personName(eventStr(event, "witness"))} saw ` +
+            `${personName(eventStr(event, "thief"))} take food from the stores.`,
+          focus: { personId: eventStr(event, "thief") },
+        },
+        now,
+      );
+      break;
+    }
+    case "dead_in_space": {
+      const system = run.ship.systems.find((s) => s.kind === "engines");
+      alertStack.post(
+        {
+          tier: "major",
+          category: "stores",
+          text: `Out of fuel: the ${run.ship.name} drifts, dead in space.`,
+          focus: { room: system?.room, systemId: system?.id },
+        },
+        now,
+      );
+      break;
+    }
     default:
       break;
   }
@@ -497,6 +571,8 @@ function syncAlerts(): void {
 interface CrewUi {
   row: HTMLDivElement;
   face: HTMLCanvasElement;
+  /** The role line: it carries the "Ashore" marker in port. */
+  roleEl: HTMLDivElement;
   /** Face state signature the row portrait currently shows. */
   sig: string;
   bars: Map<NeedKey, HTMLDivElement>;
@@ -561,6 +637,7 @@ function buildCrewPanel(): void {
     crewUi.set(member.id, {
       row,
       face,
+      roleEl: role,
       sig: stateSignature(state),
       bars,
     });
@@ -886,9 +963,19 @@ function renderPersonCard(): void {
   const deckNo = (deck?.deckOfRoom(member.room) ?? 0) + 1;
   const watchWord = member.watch === "night" ? "Night watch" : "Day watch";
   const blockWord = BLOCK_WORDS[blockAt(member.routine, run.tick)];
-  personWhereEl.textContent =
-    `Currently ${activity} in the ${room?.name ?? "ship"}, Deck ${deckNo}. ` +
-    `${watchWord} · ${blockWord}.`;
+  if (member.ashore) {
+    const portIndex = run.galaxy.voyage.portIndexAt(run.tick);
+    const portName =
+      portIndex !== null
+        ? run.galaxy.sector.portAt(portIndex).name
+        : "the port";
+    personWhereEl.textContent =
+      `Ashore at ${portName}. ${watchWord} · ${blockWord}.`;
+  } else {
+    personWhereEl.textContent =
+      `Currently ${activity} in the ${room?.name ?? "ship"}, Deck ${deckNo}. ` +
+      `${watchWord} · ${blockWord}.`;
+  }
   personBioEl.textContent = bioText(member);
   buildDossier(member);
   personRecentEl.replaceChildren();
@@ -969,8 +1056,8 @@ function renderPortCard(): void {
     bio += ` This voyage began here, ${oneDecimal(voyage.legDays)} days under charter for ${voyage.destinationPort.name}.`;
   } else if (port.index === voyage.destination) {
     bio += voyage.inPortAt(run.tick)
-      ? " This voyage ended here; the ship is in port."
-      : ` This voyage ends here, ${oneDecimal(voyage.daysOutAt(run.tick))} days out of ${oneDecimal(voyage.legDays)}.`;
+      ? " The charter ended here; the ship lies in port, and sails on."
+      : ` The charter ends here, ${oneDecimal(voyage.daysOutAt(run.tick))} days out of ${oneDecimal(voyage.legDays)}.`;
   }
   portBioEl.textContent = bio;
 }
@@ -1134,6 +1221,17 @@ const HIGHLIGHT_TYPES: ReadonlySet<string> = new Set([
   "sabotage_committed",
   "system_failed", // the crossing into failure
   "system_repaired",
+  "port_call", // every later arrival, plainer than the first
+  "resupply", // the manifest: what the port gave
+  "shore_leave", // the rotations ashore
+  "harbour_news", // what the port is saying
+  "rationing_imposed", // the quartermaster's emergency act
+  "rationing_lifted",
+  "theft", // witnessed hands in the stores
+  "stores_low", // the thresholds
+  "stores_critical",
+  "stores_discrepancy", // the tally that does not tally
+  "dead_in_space", // an empty tank, under way
 ]);
 
 function linePasses(entry: LogLine): boolean {
@@ -1521,33 +1619,115 @@ function updateRibbon(): void {
 let lastRouteText = "";
 
 /**
- * The header's route readout: where the voyage runs, how much of
- * it is sailed, and what remains (or that the ship is in port).
- * Written only when it changes, on the slow-UI cadence.
+ * The header's route readout: the leg being sailed and what
+ * remains of it, or the port being lived in, with the stay's day
+ * and the sailing time. Written only when it changes, on the
+ * slow-UI cadence.
  */
 function updateRoute(): void {
   const voyage = run.galaxy.voyage;
-  const days = oneDecimal(voyage.legDays);
+  const sector = run.galaxy.sector;
+  const tick = run.tick;
+  const tpd = CONFIG.time.ticksPerDay;
+  const vt = voyage.voyageTimeAt(tick);
+  const stay = voyage.stayAt(tick);
   let text: string;
-  if (voyage.inPortAt(run.tick)) {
-    const arrivalDay =
-      Math.floor(voyage.legTicks / CONFIG.time.ticksPerDay) + 1;
+  if (stay !== null) {
+    const port = sector.portAt(stay.port);
+    const dayOfStay = Math.floor((vt - stay.arriveTick) / tpd) + 1;
+    const stayDays = Math.round((stay.departTick - stay.arriveTick) / tpd);
+    const sails = shipClock(Math.ceil(tick + (stay.departTick - vt)));
     text =
-      `${voyage.originPort.name} → ${voyage.destinationPort.name} · ` +
-      `in port at ${voyage.destinationPort.name} since day ${arrivalDay} ` +
-      `(${days} days under way)`;
+      `In port at ${port.name} · day ${dayOfStay} of ${stayDays} · ` +
+      `sails day ${sails.day}, ${sails.time}`;
   } else {
-    const out = oneDecimal(voyage.daysOutAt(run.tick));
-    const toGo = oneDecimal(
-      (voyage.legTicks - run.tick) / CONFIG.time.ticksPerDay,
-    );
-    text =
-      `${voyage.originPort.name} → ${voyage.destinationPort.name} · ` +
-      `${out} of ${days} days out · ${toGo} to go`;
+    const leg = voyage.currentLegAt(tick);
+    if (leg !== null) {
+      const from = sector.portAt(leg.from).name;
+      const to = sector.portAt(leg.to).name;
+      const out = oneDecimal(voyage.daysOutAt(tick));
+      const total = oneDecimal((leg.arriveTick - leg.departTick) / tpd);
+      const toGo = oneDecimal((leg.arriveTick - vt) / tpd);
+      text = `${from} → ${to} · ${out} of ${total} days out · ${toGo} to go`;
+    } else {
+      const portIndex = voyage.portIndexAt(tick);
+      text =
+        portIndex !== null
+          ? `In port at ${sector.portAt(portIndex).name}`
+          : "";
+    }
   }
   if (text !== lastRouteText) {
     lastRouteText = text;
     routeEl.textContent = text;
+  }
+}
+
+// ------------------------------------------------------------- stores
+
+const STRIP_LABELS: Record<StoreKey, string> = {
+  food: "Food",
+  water: "Water",
+  oxygen: "O2 margin",
+  fuel: "Fuel",
+  parts: "Parts",
+};
+
+interface StoreCell {
+  fill: HTMLDivElement;
+  value: HTMLSpanElement;
+  sig: string;
+}
+
+const storeCells = new Map<StoreKey, StoreCell>();
+{
+  const strip = must<HTMLElement>("stores-strip");
+  for (const key of STORE_KEYS) {
+    const cell = document.createElement("div");
+    cell.className = "store-cell";
+    const label = document.createElement("span");
+    label.className = "slabel";
+    label.textContent = STRIP_LABELS[key];
+    const bar = document.createElement("div");
+    bar.className = "sbar";
+    const fill = document.createElement("div");
+    bar.appendChild(fill);
+    const value = document.createElement("span");
+    value.className = "sval";
+    cell.append(label, bar, value);
+    strip.appendChild(cell);
+    storeCells.set(key, { fill, value, sig: "" });
+  }
+}
+
+/**
+ * The stores strip: five slim bars with whole-day counts and a
+ * trend arrow from the standing net flow, banded by the alert
+ * tiers. Write-on-change, on the slow cadence, like the rest of
+ * the header.
+ */
+function updateStoresStrip(): void {
+  for (const key of STORE_KEYS) {
+    const cell = storeCells.get(key);
+    if (cell === undefined) continue;
+    const store = run.stores.byKey[key];
+    const days = daysOf(run.stores, key);
+    const whole = Math.floor(days);
+    const net = run.stores.netMilliPerDay[key];
+    const arrow = net > 50 ? "↑" : net < -50 ? "↓" : "→";
+    const band =
+      days < CONFIG.stores.criticalDays
+        ? "crit"
+        : days < CONFIG.stores.lowDays
+          ? "warn"
+          : "";
+    const pct = Math.round((store.qtyMilli / store.capMilli) * 1000) / 10;
+    const sig = `${whole}|${arrow}|${band}|${pct}`;
+    if (cell.sig === sig) continue;
+    cell.sig = sig;
+    cell.fill.style.width = `${pct}%`;
+    cell.fill.className = band;
+    cell.value.textContent = `${whole}d ${arrow}`;
   }
 }
 
@@ -1556,6 +1736,7 @@ function updateSlowUi(): void {
   weatherBanner.classList.toggle("storm", weatherName === "radiation storm");
   updateRibbon();
   updateRoute();
+  updateStoresStrip();
   syncAlerts();
 
   if (cardPortIndex !== null && performance.now() - lastPortRenderMs > 1000) {
@@ -1574,6 +1755,12 @@ function updateSlowUi(): void {
   for (const member of run.crew) {
     const ui = crewUi.get(member.id);
     if (ui === undefined) continue;
+    const roleText = member.ashore
+      ? `${member.title} · Ashore`
+      : member.title;
+    if (ui.roleEl.textContent !== roleText) {
+      ui.roleEl.textContent = roleText;
+    }
     for (const key of NEED_KEYS) {
       const fill = ui.bars.get(key);
       if (fill === undefined) continue;
@@ -1661,7 +1848,10 @@ function frame(nowMs: number): void {
     const tickMs = playing
       ? 1000 / (SPEEDS[speedIndex] as (typeof SPEEDS)[number]).ticksPerSecond
       : Number.POSITIVE_INFINITY;
-    deck.frame(run.crew, {
+    // Crew ashore at a port call are not on the deck at all: their
+    // dots, their windows, and their minimap marks stay at the port.
+    const aboard = run.crew.filter((m) => !m.ashore);
+    deck.frame(aboard, {
       now: nowMs,
       dtMs: deckDtMs,
       tickMs,
@@ -1698,10 +1888,11 @@ function frame(nowMs: number): void {
     nowMs - lastMinimapMs > 250
   ) {
     lastMinimapMs = nowMs;
+    const aboard = run.crew.filter((m) => !m.ashore);
     minimap.draw(
       run.ship,
-      run.crew,
-      deck.minimapSnapshot(run.crew),
+      aboard,
+      deck.minimapSnapshot(aboard),
       deck.visibleDeck,
       nowMs,
     );

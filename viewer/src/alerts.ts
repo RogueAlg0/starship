@@ -42,7 +42,8 @@ export type AlertCategory =
   | "grudge"
   | "trust"
   | "repair"
-  | "bond";
+  | "bond"
+  | "stores";
 
 /** Where a click takes the viewer: a person, or a room to flash. */
 export interface AlertFocus {
@@ -67,7 +68,10 @@ export interface AlertItem {
 }
 
 export interface AlertEventInput {
-  tier: "major" | "minor";
+  /** A critical MOMENT (a store crossing its critical line) is
+   *  timed like a long major; critical STATES come from the
+   *  condition sync and hold until they clear. */
+  tier: "critical" | "major" | "minor";
   category: AlertCategory;
   text: string;
   focus: AlertFocus;
@@ -159,8 +163,13 @@ export class AlertStack {
    */
   post(input: AlertEventInput, nowMs: number): boolean {
     const key = `evt:${input.category}:${++this.seq}`;
-    const span =
-      (input.tier === "major" ? MAJOR_BASE_MS : MINOR_BASE_MS) * this.scale();
+    const base =
+      input.tier === "critical"
+        ? MAJOR_BASE_MS * 2
+        : input.tier === "major"
+          ? MAJOR_BASE_MS
+          : MINOR_BASE_MS;
+    const span = base * this.scale();
     const item: AlertItem = {
       key,
       tier: input.tier,
@@ -484,6 +493,20 @@ const ICONS: Record<AlertCategory, SpriteDef> = {
     ],
     pal: { h: "#e86a92" },
   },
+  stores: {
+    rows: [
+      ".........",
+      ".xxxxxxx.",
+      "xooooooox",
+      "xo.ooo.ox",
+      "xooooooox",
+      "xo.ooo.ox",
+      "xooooooox",
+      ".xxxxxxx.",
+      ".........",
+    ],
+    pal: { x: "#a8763e", o: "#e8a33d" },
+  },
 };
 
 interface Chip {
@@ -562,7 +585,12 @@ export class AlertStackView {
     }
     // Create or refresh chips, newest on top.
     for (const item of visible) {
-      const shape = item.tier === "critical" ? "x" : "bar";
+      // The × shape belongs to states (infinite span); a timed
+      // critical moment burns a bar like any other moment.
+      const shape =
+        item.tier === "critical" && !Number.isFinite(item.spanMs)
+          ? "x"
+          : "bar";
       let chip = this.chips.get(item.key);
       if (chip !== undefined && !chip.leaving && chip.shape !== shape) {
         // The alert changed shape (a timed major escalated to a
@@ -610,7 +638,7 @@ export class AlertStackView {
     root.appendChild(main);
 
     let fill: HTMLDivElement | null = null;
-    if (item.tier === "critical") {
+    if (item.tier === "critical" && !Number.isFinite(item.spanMs)) {
       const x = document.createElement("button");
       x.type = "button";
       x.className = "alert-x";
@@ -633,7 +661,10 @@ export class AlertStackView {
       fill,
       item,
       leaving: false,
-      shape: item.tier === "critical" ? "x" : "bar",
+      shape:
+        item.tier === "critical" && !Number.isFinite(item.spanMs)
+          ? "x"
+          : "bar",
       barKey: "",
     };
     this.armBar(chip);

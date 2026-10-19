@@ -194,6 +194,7 @@ export const CONFIG = {
       "stubborn",
       "gentle",
       "restless",
+      "hoarding",
     ],
     minTraits: 2,
     /** Directed pairs seeded with low trust, so grudges have a head start. */
@@ -240,6 +241,7 @@ export const CONFIG = {
     stubborn: {},
     gentle: {},
     restless: {},
+    hoarding: {},
   } as Record<
     string,
     {
@@ -491,6 +493,32 @@ export const CONFIG = {
     /** A voyage is chartered to a port this many days out, when the
      *  sector offers one; otherwise the nearest thing to the band. */
     minLegDays: 12,
+    /**
+     * Port stays between legs, in whole ship days: the drawn stay
+     * runs minStayDays..maxStayDays, bent by the port's character
+     * (a free port keeps a ship a day longer; a shipyard's dock
+     * schedule does too). The company town's entry is zero on
+     * purpose: company towns turn ships around on the company's
+     * clock, neither faster nor slower.
+     */
+    minStayDays: 1,
+    maxStayDays: 3,
+    stayDayModifier: {
+      "free port": 1,
+      shipyard: 1,
+      "company town": 0,
+    } as Record<string, number>,
+    /**
+     * Drift: a ship whose fuel is gone still makes way on
+     * momentum, at this fraction of her voyage clock (the leg
+     * stretches by its reciprocal). Drift must never be zero
+     * progress: fuel rises only in port, so a frozen clock would
+     * strand a ship forever — arrival stays reachable from any
+     * state, only later. (Caught by the hosted copy's accuracy
+     * pass, which found the frozen version of this bug in its own
+     * build; see DECISIONS.)
+     */
+    driftRate: 0.25,
     maxLegDays: 26,
     /** What a port is, in the sector's economy and imagination. */
     portCharacters: [
@@ -564,6 +592,157 @@ export const CONFIG = {
    * crosses inside sensor range of the player's ship and closes
    * when it leaves, and both edges are computed, never drawn.
    */
+
+  /**
+   * Stores: what the ship eats, burns, and breathes (the Stores
+   * chapter). Five stores, all read in DAYS OF SUPPLY for the
+   * current crew, with absolute quantities tracked underneath in
+   * integer milli-units. One food unit is one crew-day of eating,
+   * so a store's days are its milli-units over the day's draw:
+   * crew count x 1000 for food, water, and oxygen; cruise burn for
+   * fuel; a nominal daily draw for spare parts, so all five bars
+   * speak the same language.
+   */
+  stores: {
+    /** Tank and locker sizes, in days of supply. The parts
+     *  locker is sized against burst, not trend: one bad week of
+     *  storm and sabotage repairs can draw ten days of parts, and
+     *  the locker, not the fabricator, is what absorbs it. */
+    capacityDays: { food: 45, water: 40, oxygen: 25, fuel: 60, parts: 45 },
+    /** What fraction of capacity a healthy ship sails with. The
+     *  food buffer is the chapter's 30 to 45 days: 0.85 of 45. */
+    departureFraction: {
+      food: 0.85,
+      water: 0.85,
+      oxygen: 1,
+      fuel: 0.9,
+      parts: 0.7,
+    },
+    /** Production per day at system condition 1, as a multiple of
+     *  the day's consumption: a healthy hydroponics rig grows a
+     *  little more than the crew eats, and the margin is the game. */
+    productionFactor: { food: 1.06, water: 1.08, oxygen: 1.2 },
+    /** Spare parts the fabricator turns out per day at condition 1
+     *  while engineering is staffed, in milli-units. Tuned with
+     *  the repair cost below against measured flows: routine wear
+     *  draws about 1,300 milli-units a day and the fabricator
+     *  covers it with margin, but a damage cluster (storm plus
+     *  sabotage) draws 8,000 to 14,000 a day, and no honest rate
+     *  covers that — the locker and the ports absorb clusters,
+     *  and a hard month can still empty the locker for days at a
+     *  time, which is the chapter's shortfall rule working, not
+     *  starvation: repairs crawl, nobody goes hungry. A much
+     *  higher repair cost was tried and rejected: it made the
+     *  crawl permanent and starved the other stores through
+     *  unrepaired recyclers. */
+    partsMilliPerDay: 3600,
+    /** Fuel burn: milli-units per light-day under way. Docked, the
+     *  ship sips at the docked fraction of the under-way draw. */
+    fuelMilliPerLightDay: 1000,
+    fuelDockedFraction: 0.08,
+    /** A repair costs parts in proportion to the condition it
+     *  restores: milli-units per whole point of condition. When
+     *  the locker cannot pay, a repair restores only what the
+     *  parts buy; at empty it crawls at the shortfall floor. */
+    repairPartsMilliPerCondition: 10000,
+    repairPartsShortfallFloor: 0.35,
+    /** Thresholds, in days of supply. A crossing speaks once; the
+     *  store re-arms only after resupply carries it back above the
+     *  threshold plus the hysteresis band. */
+    lowDays: 10,
+    criticalDays: 4,
+    hysteresisDays: 2,
+    /**
+     * Rationing, interim form (see DECISIONS): below the trigger
+     * the quartermaster imposes it as an emergency act; it lifts
+     * above the lift line or on arrival. The quartermaster's
+     * traits bend the trigger: an anxious quartermaster rations
+     * early, a kind one late. Two hooks, no more.
+     */
+    rationing: {
+      triggerDays: 12,
+      liftDays: 16,
+      consumptionFactor: 0.7,
+      hungerCap: 0.55,
+      moralePerDay: 0.02,
+      traitTriggerShift: { anxious: 2, kind: -2 } as Record<string, number>,
+    },
+    /** Theft and hoarding: small hands in the stores, on scarcity. */
+    theft: {
+      /** Food below this many days (or rationed) tempts a thief. */
+      scarceDays: 8,
+      chancePerDay: 0.25,
+      /** The hour of the ship's day the temptation is drawn. */
+      checkTickOfDay: 53,
+      /** One theft's take, in milli-units of food. */
+      takeMilli: 350,
+      witnessSuspicion: 0.5,
+      partialSuspicion: 0.45,
+      inventoryMinDelayTicks: 144,
+      inventoryDelaySpanTicks: 288,
+      /** What a cache feeds its owner per day, eaten in secret. */
+      cacheEatMilliPerDay: 300,
+    },
+    /** Zero-store consequences, needs-level only in this build. */
+    zero: {
+      foodMoralePerDay: 0.05,
+      oxygenStrainPerDay: 0.01,
+    },
+    /** Port calls: what a stay does to the stores and the crew. */
+    port: {
+      /** Resupply lands this many ticks into the stay. */
+      resupplyDelayTicks: 6,
+      /** Harbour news arrives this many ticks into the stay. */
+      newsDelayTicks: 30,
+      /** Shore leave rotates in blocks of this many ticks. */
+      leaveBlockTicks: 36,
+      leaveGroupSize: 4,
+      shoreSocialPerTick: 0.004,
+      shoreMoralePerTick: 0.002,
+      /** Chance a call earns one flavour incident line. */
+      incidentChance: 0.5,
+      /** No port lets a ship sail shorter of fuel than this
+       *  fraction of her tanks: emergency bunkering is a right of
+       *  the road, whatever the port sells above it. */
+      minDepartureFuelFraction: 0.55,
+      /** Dockyard repair assist at a shipyard, per tick. */
+      repairAssistPerTick: 0.0008,
+      /** A shrine's gift is morale, not mass. */
+      shrineMoraleGift: 0.15,
+      /**
+       * What a port can fill each store TO, as a fraction of
+       * capacity, by the port's character. There is no money in
+       * this build: resupply is by charter right and port
+       * reciprocity, and the character's table is the whole cap.
+       */
+      supply: {
+        industrial: { food: 0.7, water: 0.95, oxygen: 0.9, fuel: 0.8, parts: 0.95 },
+        agrarian: { food: 1, water: 0.9, oxygen: 0.8, fuel: 0.7, parts: 0.5 },
+        "free port": { food: 1, water: 1, oxygen: 1, fuel: 1, parts: 1 },
+        refinery: { food: 0.6, water: 0.7, oxygen: 0.8, fuel: 1, parts: 0.85 },
+        shrine: { food: 0.45, water: 0.5, oxygen: 0.6, fuel: 0.6, parts: 0.15 },
+        "company town": { food: 0.95, water: 0.95, oxygen: 0.95, fuel: 0.95, parts: 0.95 },
+        shipyard: { food: 0.7, water: 0.8, oxygen: 0.85, fuel: 0.8, parts: 1 },
+        "listening post": { food: 0.35, water: 0.4, oxygen: 0.5, fuel: 0.55, parts: 0.2 },
+      } as Record<string, Record<string, number>>,
+      /** Flavour: one per call at most, beliefs-safe colour. */
+      incidentLines: [
+        "A wedding in the dock chapel at {port} delayed the liberty boats, happily.",
+        "A brawl in a dockside bar at {port} was witnessed by half the liberty party and harmed no one aboard.",
+        "The market at {port} ran a festival of lights while the ship lay berthed.",
+        "A choir from the mission at {port} sang the liberty party back to the airlock.",
+        "Longshore crews at {port} struck for a day over tea; the ship's boats ran the gap.",
+        "A lost child at {port} was returned to her family by two of the liberty party, to general applause.",
+      ],
+      /** Harbour rumour, when no traffic gives the port news. */
+      rumourLines: [
+        "Harbour talk at {port} says {faction} is hiring hulls for quiet work.",
+        "Harbour talk at {port} says {faction} quartermasters are buying food ahead of something.",
+        "Harbour talk at {port} tells of a {faction} courier overdue and unmissed.",
+        "Harbour talk at {port} says the {faction} berthing office has new orders and old grudges.",
+      ],
+    },
+  },
   traffic: {
     /** Other ships per sector: enough that the sky is not empty,
      *  few enough that a contact still means something. */

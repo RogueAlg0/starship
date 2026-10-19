@@ -33,6 +33,12 @@ import {
   Traffic,
 } from "./world/traffic.ts";
 import { generateShip, type Ship } from "./world/ship.ts";
+import {
+  checkStoresState,
+  createStores,
+  stepStores,
+  type StoresState,
+} from "./world/stores.ts";
 import { checkShipState, stepSystems } from "./world/systems.ts";
 import { Weather } from "./world/weather.ts";
 
@@ -44,6 +50,8 @@ export interface BuiltWorld {
   /** The sector this voyage crosses, the leg being sailed, and
    *  the other ships under way in the sector. */
   galaxy: { sector: Sector; voyage: Voyage; traffic: Traffic };
+  /** What the ship eats, burns, and breathes: the five stores. */
+  stores: StoresState;
   /** Records of the live source; empty when a replay source was supplied. */
   readonly decisions: DecisionRecord[];
   /**
@@ -89,6 +97,10 @@ export function buildWorld(
     generateTraffic(world.rng.get("traffic"), sector, ship.name),
     voyage,
   );
+  // Stores are loaded at departure: fixed quantities in config,
+  // no draws, so the loading cannot shift any other stream.
+  const stores = createStores(crew.length);
+  ship.stores = stores;
   const weather = new Weather();
   const ctx: CrewContext = {
     ship,
@@ -127,6 +139,10 @@ export function buildWorld(
   engine.addSystem({ name: "weather", step: (w) => weather.step(w) });
   engine.addSystem({ name: "voyage", step: (w) => voyage.step(w) });
   engine.addSystem({ name: "traffic", step: (w) => traffic.step(w) });
+  engine.addSystem({
+    name: "stores",
+    step: (w) => stepStores(w, ship, crew, { sector, voyage, traffic }),
+  });
   engine.addSystem({ name: "crew", step: (w) => stepCrew(w, crew, ctx) });
   engine.addSystem({ name: "society", step: (w) => stepSociety(w, crew) });
   engine.addSystem({
@@ -140,6 +156,9 @@ export function buildWorld(
   );
   engine.addInvariant("traffic contact state matches geometry", () =>
     checkTrafficState(traffic, voyage, world.tick),
+  );
+  engine.addInvariant("stores within their tanks", () =>
+    checkStoresState(stores),
   );
 
   let started = false;
@@ -162,6 +181,7 @@ export function buildWorld(
     ship,
     crew,
     galaxy: { sector, voyage, traffic },
+    stores,
     get decisions() {
       return decisions instanceof UtilitySource ? decisions.records : [];
     },
@@ -189,6 +209,8 @@ export interface RunContext {
   /** The sector this voyage crosses, the leg being sailed, and
    *  the other ships under way in the sector. */
   readonly galaxy: { sector: Sector; voyage: Voyage; traffic: Traffic };
+  /** What the ship eats, burns, and breathes: the five stores. */
+  readonly stores: StoresState;
   /** Records of the live source; empty when a replay source was supplied. */
   readonly decisions: DecisionRecord[];
   /** The current tick (ticks completed so far). */
@@ -211,6 +233,7 @@ export function createRun(
     ship: built.ship,
     crew: built.crew,
     galaxy: built.galaxy,
+    stores: built.stores,
     get decisions() {
       return built.decisions;
     },

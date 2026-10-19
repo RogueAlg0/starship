@@ -1,14 +1,18 @@
-// The galaxy, step 1: a procedural sector and the voyage leg.
+// The galaxy: a procedural sector and the voyage across it.
 //
 // A sector is 6 to 9 named ports scattered on a jittered grid, held
 // by 3 to 5 procedurally named factions (each with a home port) or
-// by nobody. The voyage is one leg across it: an origin, a
-// destination chartered a reasonable sail away, and a travel clock.
-// The ship's position is a pure function of the tick count —
-// elapsed ticks over leg ticks, interpolated between the two port
-// positions — so there is no drift to accumulate and nothing for
-// replay to reproduce but the arithmetic itself. Generation draws
-// only from the "galaxy" stream and is never in the tick loop.
+// by nobody. The voyage is an itinerary generated whole at build,
+// the way traffic schedules are: a chartered first leg, then port
+// stays and further legs until the table covers the traffic
+// horizon. The ship's position is a pure function of the tick given
+// the itinerary — elapsed voyage-time over leg ticks, interpolated
+// between the two port positions — with one wrinkle: a ship dead
+// in space (fuel gone, see stores) makes way on momentum at a
+// quarter of her voyage clock, and the drift spans that record
+// those stretches are themselves deterministic run state, so
+// replay reproduces the same slow hours. Generation draws only
+// from the "galaxy" stream and is never in the tick loop.
 
 import type { World } from "../engine/engine.ts";
 import type { Rng } from "../engine/rng.ts";
@@ -198,34 +202,130 @@ export function generateSector(rng: Rng): Sector {
   return new Sector(ports, factions);
 }
 
+/** One leg of the itinerary, on the voyage clock (see Voyage). */
+export interface VoyageLeg {
+  from: number;
+  to: number;
+  /** Voyage-time ticks: when the leg departs and when it arrives. */
+  departTick: number;
+  arriveTick: number;
+  distanceLightDays: number;
+}
+
+/** One stay in port, between two legs of the itinerary. */
+export interface PortStay {
+  index: number;
+  port: number;
+  /** Voyage-time ticks bounding the stay. */
+  arriveTick: number;
+  departTick: number;
+}
+
+/** Leg length in ticks for a distance, at cruise: the one formula. */
+function legTicksFor(sector: Sector, from: number, to: number): number {
+  const distance = sector.distanceBetween(sector.portAt(from), sector.portAt(to));
+  return Math.max(
+    1,
+    Math.round(
+      (distance / CONFIG.galaxy.cruiseLightDaysPerDay) *
+        CONFIG.time.ticksPerDay,
+    ),
+  );
+}
+
 /**
- * The voyage: one leg, chartered at generation. The destination is
- * drawn from the ports a reasonable sail away (the config band in
- * days at cruise speed); when the sector offers none, the port
- * nearest the band serves. The leg's length in ticks is fixed here
- * and never moves again.
+ * Pick the next port of the itinerary: never the port the ship lies
+ * in, never straight back to the port she came from when any
+ * alternative exists, preferring the chartered band of reasonable
+ * sails (and, like the charter, falling back to the port nearest
+ * the band), and weighted toward ports this run has not visited.
+ */
+function pickNextPort(
+  rng: Rng,
+  sector: Sector,
+  current: number,
+  previous: number,
+  visited: ReadonlySet<number>,
+): number {
+  const g = CONFIG.galaxy;
+  const from = sector.portAt(current);
+  const daysOf = (index: number): number =>
+    sector.distanceBetween(from, sector.portAt(index)) / g.cruiseLightDaysPerDay;
+  const candidates = sector.ports
+    .map((p) => p.index)
+    .filter((index) => index !== current);
+  let pool = candidates.filter((index) => {
+    const days = daysOf(index);
+    return days >= g.minLegDays && days <= g.maxLegDays;
+  });
+  if (pool.length === 0) {
+    let best = candidates[0] as number;
+    let bestGap = Number.POSITIVE_INFINITY;
+    for (const index of candidates) {
+      const days = daysOf(index);
+      const gap = days < g.minLegDays ? g.minLegDays - days : days - g.maxLegDays;
+      if (gap < bestGap) {
+        bestGap = gap;
+        best = index;
+      }
+    }
+    pool = [best];
+  }
+  const noBacktrack = pool.filter((index) => index !== previous);
+  if (noBacktrack.length > 0) pool = noBacktrack;
+  if (pool.length === 1) return pool[0] as number;
+  let total = 0;
+  for (const index of pool) total += visited.has(index) ? 1 : 3;
+  let roll = rng.next() * total;
+  for (const index of pool) {
+    roll -= visited.has(index) ? 1 : 3;
+    if (roll < 0) return index;
+  }
+  return pool[pool.length - 1] as number;
+}
+
+/**
+ * The voyage: an itinerary, generated whole at build. Leg 1 is the
+ * CHARTER: its destination is drawn from the ports a reasonable
+ * sail away (the config band in days at cruise speed), and its
+ * arrival is the voyage's Arrival — the `arrival` event, capital A.
+ * Later legs are picked as the itinerary is laid down, and their
+ * arrivals are plain `port_call` events. Between legs the ship lies
+ * in port for a stay of one to three drawn days, bent a day by the
+ * port's character.
+ *
+ * Positions read off the VOYAGE CLOCK: voyage-time is the tick
+ * slowed by the spans the ship has spent dead in space (fuel gone;
+ * the stores system opens and closes those drift spans, through
+ * which the clock runs at the drift rate). With no drift the two
+ * clocks are the same clock, and position is a pure function of
+ * the tick given the itinerary.
  */
 export class Voyage {
   readonly sector: Sector;
-  readonly origin: number;
-  readonly destination: number;
-  /** Route length in light-days. */
-  readonly distanceLightDays: number;
-  /** Ticks under way until arrival: the leg's whole clock. */
-  readonly legTicks: number;
-  /** The tick the arrival fired, or null while under way. */
+  readonly legs: VoyageLeg[] = [];
+  readonly stays: PortStay[] = [];
+  /** The tick the charter arrival fired, or null while under way. */
   arrivedTick: number | null = null;
+  /** Legs whose arrival has been announced, in order. */
+  private announcedLegs = 0;
+  /** Real-tick spans during which the ship drifts on momentum:
+   *  the voyage clock runs at CONFIG.galaxy.driftRate through
+   *  them. Never zero: a frozen clock would strand her forever,
+   *  since fuel rises only in port. */
+  private driftSpans: { start: number; end: number | null }[] = [];
 
   constructor(rng: Rng, sector: Sector) {
     this.sector = sector;
     const g = CONFIG.galaxy;
-    this.origin = rng.int(sector.ports.length);
-    const originPort = sector.portAt(this.origin);
+    const tpd = CONFIG.time.ticksPerDay;
+    const origin = rng.int(sector.ports.length);
+    const originPort = sector.portAt(origin);
     const inBand: number[] = [];
     let fallback = -1;
     let fallbackGap = Number.POSITIVE_INFINITY;
     for (const port of sector.ports) {
-      if (port.index === this.origin) continue;
+      if (port.index === origin) continue;
       const days =
         sector.distanceBetween(originPort, port) / g.cruiseLightDaysPerDay;
       if (days >= g.minLegDays && days <= g.maxLegDays) {
@@ -237,19 +337,70 @@ export class Voyage {
         fallback = port.index;
       }
     }
-    this.destination =
-      inBand.length > 0 ? rng.pick(inBand) : fallback;
-    this.distanceLightDays = sector.distanceBetween(
-      originPort,
-      sector.portAt(this.destination),
-    );
-    this.legTicks = Math.max(
-      1,
-      Math.round(
-        (this.distanceLightDays / g.cruiseLightDaysPerDay) *
-          CONFIG.time.ticksPerDay,
+    const destination = inBand.length > 0 ? rng.pick(inBand) : fallback;
+    const charterTicks = legTicksFor(sector, origin, destination);
+    this.legs.push({
+      from: origin,
+      to: destination,
+      departTick: 0,
+      arriveTick: charterTicks,
+      distanceLightDays: sector.distanceBetween(
+        originPort,
+        sector.portAt(destination),
       ),
-    );
+    });
+
+    // The rest of the itinerary, laid down until the table covers
+    // the traffic horizon: stays and legs alternating, each stay's
+    // length drawn and bent by its port's character.
+    const horizonTicks = CONFIG.traffic.scheduleHorizonDays * tpd;
+    const visited = new Set<number>([origin, destination]);
+    let current = destination;
+    let previous = origin;
+    let stayStart = charterTicks;
+    while (stayStart < horizonTicks) {
+      const character = sector.portAt(current).character;
+      const bend = g.stayDayModifier[character] ?? 0;
+      const days = Math.max(
+        1,
+        g.minStayDays +
+          rng.int(g.maxStayDays - g.minStayDays + 1) +
+          bend,
+      );
+      const departTick = stayStart + days * tpd;
+      this.stays.push({
+        index: this.stays.length,
+        port: current,
+        arriveTick: stayStart,
+        departTick,
+      });
+      const next = pickNextPort(rng, sector, current, previous, visited);
+      const ticks = legTicksFor(sector, current, next);
+      this.legs.push({
+        from: current,
+        to: next,
+        departTick,
+        arriveTick: departTick + ticks,
+        distanceLightDays: sector.distanceBetween(
+          sector.portAt(current),
+          sector.portAt(next),
+        ),
+      });
+      visited.add(next);
+      previous = current;
+      current = next;
+      stayStart = departTick + ticks;
+    }
+  }
+
+  /** The charter leg's origin port index. */
+  get origin(): number {
+    return (this.legs[0] as VoyageLeg).from;
+  }
+
+  /** The charter leg's destination port index. */
+  get destination(): number {
+    return (this.legs[0] as VoyageLeg).to;
   }
 
   get originPort(): Port {
@@ -260,58 +411,214 @@ export class Voyage {
     return this.sector.portAt(this.destination);
   }
 
-  /** Days under way the whole leg takes, by the charter arithmetic. */
+  /** Charter route length in light-days. */
+  get distanceLightDays(): number {
+    return (this.legs[0] as VoyageLeg).distanceLightDays;
+  }
+
+  /** Ticks under way on the charter leg: its whole clock. */
+  get legTicks(): number {
+    return (this.legs[0] as VoyageLeg).arriveTick;
+  }
+
+  /** Days under way the charter leg takes. */
   get legDays(): number {
     return this.legTicks / CONFIG.time.ticksPerDay;
   }
 
-  /** Fraction of the route covered at a tick, clamped to [0, 1]. */
+  /** Ports this itinerary has called at, in order, charter first. */
+  get visitedPorts(): number[] {
+    return this.legs.map((leg) => leg.to);
+  }
+
+  /** True while a drift span stands open. */
+  get drifting(): boolean {
+    return this.driftSpans.some((span) => span.end === null);
+  }
+
+  /** Open a drift span at a real tick: the voyage clock slows
+   *  to the drift rate from here. */
+  beginDrift(tick: number): void {
+    if (!this.drifting) this.driftSpans.push({ start: tick, end: null });
+  }
+
+  /** Close the open drift span at a real tick. */
+  endDrift(tick: number): void {
+    const open = this.driftSpans.find((span) => span.end === null);
+    if (open !== undefined) open.end = tick;
+  }
+
+  /**
+   * Voyage-time at a real tick: the tick, less the share of each
+   * drift span that momentum did not cover. Through a drift span
+   * the voyage clock advances at driftRate, so voyage-time is
+   * fractional there — the itinerary arithmetic reads it the same.
+   */
+  voyageTimeAt(tick: number): number {
+    let vt = tick;
+    for (const span of this.driftSpans) {
+      if (tick <= span.start) continue;
+      const end = span.end ?? tick;
+      const overlap = Math.max(0, Math.min(tick, end) - span.start);
+      vt -= overlap * (1 - CONFIG.galaxy.driftRate);
+    }
+    return vt;
+  }
+
+  /** Real ticks spent drifting before a real tick. */
+  driftTicksBefore(tick: number): number {
+    let drift = 0;
+    for (const span of this.driftSpans) {
+      if (tick <= span.start) continue;
+      const end = span.end ?? tick;
+      drift += Math.max(0, Math.min(tick, end) - span.start);
+    }
+    return drift;
+  }
+
+  /** The leg being sailed at a voyage-time, or null in a stay. */
+  private legAtVoyageTime(vt: number): VoyageLeg | null {
+    for (const leg of this.legs) {
+      if (vt >= leg.departTick && vt < leg.arriveTick) return leg;
+    }
+    return null;
+  }
+
+  /** The stay being lived at a voyage-time, or null under way. */
+  private stayAtVoyageTime(vt: number): PortStay | null {
+    for (const stay of this.stays) {
+      if (vt >= stay.arriveTick && vt < stay.departTick) return stay;
+    }
+    return null;
+  }
+
+  /** The leg under way at a tick, or null while in port. */
+  currentLegAt(tick: number): VoyageLeg | null {
+    return this.legAtVoyageTime(this.voyageTimeAt(tick));
+  }
+
+  /** The stay being lived at a tick, or null while under way. The
+   *  origin before departure is not a stay: the ship is loading,
+   *  not calling. */
+  stayAt(tick: number): PortStay | null {
+    return this.stayAtVoyageTime(this.voyageTimeAt(tick));
+  }
+
+  /** Fraction of the current leg covered at a tick, in [0, 1]. */
   progressAt(tick: number): number {
-    if (tick <= 0) return 0;
-    if (tick >= this.legTicks) return 1;
-    return tick / this.legTicks;
+    const vt = this.voyageTimeAt(tick);
+    if (vt <= 0) return 0;
+    const leg = this.legAtVoyageTime(vt);
+    if (leg !== null) {
+      return (vt - leg.departTick) / (leg.arriveTick - leg.departTick);
+    }
+    return 1;
   }
 
-  /** The ship's sector position at a tick: a pure function of it. */
+  /** The ship's sector position at a tick, from the itinerary. */
   positionAt(tick: number): { x: number; y: number } {
-    const t = this.progressAt(tick);
-    const a = this.originPort;
-    const b = this.destinationPort;
-    return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+    const vt = this.voyageTimeAt(tick);
+    if (vt <= 0) {
+      const origin = this.originPort;
+      return { x: origin.x, y: origin.y };
+    }
+    const leg = this.legAtVoyageTime(vt);
+    if (leg !== null) {
+      const a = this.sector.portAt(leg.from);
+      const b = this.sector.portAt(leg.to);
+      const t = (vt - leg.departTick) / (leg.arriveTick - leg.departTick);
+      return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+    }
+    const stay = this.stayAtVoyageTime(vt);
+    if (stay !== null) {
+      const port = this.sector.portAt(stay.port);
+      return { x: port.x, y: port.y };
+    }
+    const last = this.legs[this.legs.length - 1] as VoyageLeg;
+    const port = this.sector.portAt(last.to);
+    return { x: port.x, y: port.y };
   }
 
-  /** Whole and part days under way at a tick. */
+  /** Days under way on the current leg at a tick. */
   daysOutAt(tick: number): number {
-    return Math.min(Math.max(tick, 0), this.legTicks) / CONFIG.time.ticksPerDay;
+    const vt = this.voyageTimeAt(tick);
+    const leg = this.legAtVoyageTime(vt);
+    if (leg !== null) {
+      return (vt - leg.departTick) / CONFIG.time.ticksPerDay;
+    }
+    const stay = this.stayAtVoyageTime(vt);
+    if (stay !== null) {
+      const finished = this.legs[stay.index] as VoyageLeg;
+      return (finished.arriveTick - finished.departTick) / CONFIG.time.ticksPerDay;
+    }
+    return 0;
   }
 
-  /** True once the leg is complete at a tick: the ship is in port. */
+  /** True when the ship lies in port at a tick. */
   inPortAt(tick: number): boolean {
-    return tick >= this.legTicks;
+    return this.portIndexAt(tick) !== null;
   }
 
   /**
    * The port the ship is berthed at, as an index: the origin
-   * before she sails and the destination once she has arrived,
-   * and null while she is under way between them.
+   * before she sails, the stay's port while she lies there, and
+   * null while she is under way between them.
    */
   portIndexAt(tick: number): number | null {
-    if (tick <= 0) return this.origin;
-    if (tick >= this.legTicks) return this.destination;
-    return null;
+    const vt = this.voyageTimeAt(tick);
+    if (vt <= 0) return this.origin;
+    const stay = this.stayAtVoyageTime(vt);
+    if (stay !== null) return stay.port;
+    if (this.legAtVoyageTime(vt) !== null) return null;
+    const last = this.legs[this.legs.length - 1] as VoyageLeg;
+    return last.to;
   }
 
-  /** The voyage system: arrival fires exactly once, on its tick. */
+  /**
+   * The voyage system: arrivals fire exactly once each, in
+   * itinerary order. The charter's arrival is `arrival`; every
+   * later one is a `port_call`.
+   */
   step(w: World): void {
-    if (this.arrivedTick !== null) return;
-    if (w.tick < this.legTicks) return;
-    this.arrivedTick = w.tick;
-    w.emit("arrival", [], {
-      port: this.destinationPort.name,
-      portIndex: this.destination,
-      days: r3(this.legDays),
-      distance: r3(this.distanceLightDays),
-    });
+    const vt = this.voyageTimeAt(w.tick);
+    while (this.announcedLegs < this.legs.length) {
+      const leg = this.legs[this.announcedLegs] as VoyageLeg;
+      if (vt < leg.arriveTick) return;
+      const index = this.announcedLegs;
+      this.announcedLegs++;
+      const port = this.sector.portAt(leg.to);
+      if (index === 0) {
+        this.arrivedTick = w.tick;
+        w.emit("arrival", [], {
+          port: port.name,
+          portIndex: leg.to,
+          days: r3(this.legDays),
+          distance: r3(this.distanceLightDays),
+        });
+      } else {
+        // The stay that begins with this arrival is the one the
+        // itinerary laid down after this leg (absent only past the
+        // table's horizon end, where no run sails).
+        const stay = this.stays[index] as PortStay | undefined;
+        const faction = this.sector.factionOf(port);
+        w.emit("port_call", [], {
+          port: port.name,
+          portIndex: leg.to,
+          character: port.character,
+          faction: faction === null ? null : faction.name,
+          days: r3(
+            (leg.arriveTick - leg.departTick) / CONFIG.time.ticksPerDay,
+          ),
+          stayDays:
+            stay === undefined
+              ? 0
+              : r3(
+                  (stay.departTick - stay.arriveTick) /
+                    CONFIG.time.ticksPerDay,
+                ),
+        });
+      }
+    }
   }
 }
 
@@ -325,15 +632,25 @@ export function checkVoyageState(voyage: Voyage, tick: number): void {
     );
   }
   if (voyage.arrivedTick !== null) {
-    if (voyage.arrivedTick !== voyage.legTicks) {
+    // The charter arrival fired on the first tick whose voyage-time
+    // reached the leg's end: no earlier, no later.
+    if (voyage.voyageTimeAt(voyage.arrivedTick) < voyage.legTicks) {
       throw new Error(
-        `arrival fired at tick ${voyage.arrivedTick}, leg is ${voyage.legTicks}`,
+        `arrival fired at tick ${voyage.arrivedTick}, before the leg ended`,
+      );
+    }
+    if (
+      voyage.arrivedTick > 0 &&
+      voyage.voyageTimeAt(voyage.arrivedTick - 1) >= voyage.legTicks
+    ) {
+      throw new Error(
+        `arrival fired at tick ${voyage.arrivedTick}, after the leg ended`,
       );
     }
     if (tick < voyage.arrivedTick) {
       throw new Error(`tick ${tick} precedes the recorded arrival`);
     }
-  } else if (tick >= voyage.legTicks) {
+  } else if (voyage.voyageTimeAt(tick) >= voyage.legTicks) {
     throw new Error(`tick ${tick} is past the leg but arrival never fired`);
   }
 }

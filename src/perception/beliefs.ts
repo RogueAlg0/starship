@@ -246,6 +246,9 @@ export function stepSociety(w: World, crew: readonly CrewMember[]): void {
   }
 
   for (const accuser of crew) {
+    // Accusations are spoken aboard, in company. A member ashore
+    // at a port call holds their tongue until they are back.
+    if (accuser.ashore) continue;
     const threshold = accusationThresholdFor(accuser);
     for (const other of crew) {
       if (other === accuser) continue;

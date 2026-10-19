@@ -128,12 +128,16 @@ export function applySabotage(
   // so old distrust poisons new evidence.
   const windowSize = Math.max(1, history.length);
   for (const observer of crew) {
+    // A member ashore saw nothing and was seen nowhere: leave at a
+    // port call is an alibi the evidence must honour.
+    if (observer.ashore) continue;
     const anxiousBonus = observer.traits.reduce(
       (sum, trait) => sum + (CONFIG.traitEffects[trait]?.suspicion ?? 0),
       0,
     );
     for (const suspect of crew) {
       if (suspect === observer) continue;
+      if (suspect.ashore) continue;
       let evidence = 0;
       for (let i = 0; i < history.length; i++) {
         const snapshot = history[i] as Record<string, number>;

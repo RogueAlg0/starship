@@ -11,6 +11,7 @@
 
 import type { Rng } from "../engine/rng.ts";
 import { CONFIG } from "../scenario/config.ts";
+import type { StoresState } from "./stores.ts";
 import { makeSystem, rollRoomSystems, type ShipSystem } from "./systems.ts";
 
 export interface Room {
@@ -24,6 +25,13 @@ export class Ship {
   readonly name: string;
   readonly rooms: Room[];
   readonly systems: ShipSystem[];
+  /**
+   * The ship's stores (food, water, oxygen margin, fuel, parts),
+   * attached by the run builder after generation: stores are
+   * voyage state, not hull state, and a bare generated ship in a
+   * test harness may sail without them.
+   */
+  stores: StoresState | null = null;
   private readonly systemsById: Map<string, ShipSystem>;
 
   constructor(name: string, rooms: Room[], systems: ShipSystem[]) {

@@ -184,6 +184,213 @@ class Renderer implements ChronicleRenderer {
         );
         break;
       }
+      case "port_call": {
+        line(
+          `${ts} — The ${this.shipName} makes port at ${str(data, "port")} ` +
+            `(${str(data, "character")}), ${oneDecimal(num(data, "days"))} days under way.`,
+          true,
+        );
+        break;
+      }
+      case "resupply": {
+        const words: Record<string, string> = {
+          food: "food",
+          water: "water",
+          oxygen: "oxygen",
+          fuel: "fuel",
+          parts: "parts",
+        };
+        const manifest = Array.isArray(data.manifest) ? data.manifest : [];
+        const parts = manifest.map((entry) => {
+          const m = asRecord(entry);
+          const label = words[str(m, "store")] ?? str(m, "store");
+          const days = num(m, "days");
+          if (m.full === true) {
+            return days > 0
+              ? `${label} +${oneDecimal(days)} days, full`
+              : `${label} full`;
+          }
+          return `${label} +${oneDecimal(days)} days`;
+        });
+        let text =
+          parts.length > 0
+            ? `${ts} — Taken aboard at ${str(data, "port")}: ${parts.join(", ")}.`
+            : `${ts} — No stores taken aboard at ${str(data, "port")}; the ship wanted for nothing.`;
+        if (data.gift === true) {
+          text +=
+            " The shrine's gift was company and quiet, and the crew came back lighter.";
+        }
+        line(text, true);
+        break;
+      }
+      case "port_dues": {
+        line(
+          `${ts} — Port dues at ${str(data, "port")} were assessed and paid in kind, per the charter.`,
+          false,
+        );
+        break;
+      }
+      case "repair_assist": {
+        line(
+          `${ts} — Dockyard crews at ${str(data, "port")} set to work on the ${system(str(data, "system"))}.`,
+          true,
+        );
+        break;
+      }
+      case "shore_leave": {
+        const members = Array.isArray(data.members)
+          ? data.members.map((id) => person(String(id)))
+          : [];
+        if (members.length === 0) break;
+        const names =
+          members.length === 1
+            ? members[0]
+            : `${members.slice(0, -1).join(", ")} and ${members[members.length - 1]}`;
+        line(
+          `${ts} — Shore leave at ${str(data, "port")}: ${names} went ashore.`,
+          true,
+        );
+        break;
+      }
+      case "harbour_news": {
+        const kind = str(data, "kind");
+        if (kind === "berthing") {
+          line(
+            `${ts} — Harbour news at ${str(data, "port")}: the ${str(data, "type")} ` +
+              `${str(data, "ship")} lies berthed here.`,
+            true,
+          );
+        } else if (kind === "recent") {
+          const ago = num(data, "daysAgo");
+          line(
+            `${ts} — Harbour news at ${str(data, "port")}: the ${str(data, "type")} ` +
+              `${str(data, "ship")} made port here ${ago} ${ago === 1 ? "day" : "days"} since and has sailed.`,
+            true,
+          );
+        } else {
+          const lines = CONFIG.stores.port.rumourLines;
+          const template =
+            lines[num(data, "variant") % lines.length] ?? lines[0] ?? "";
+          line(
+            `${ts} — ` +
+              template
+                .replaceAll("{port}", str(data, "port"))
+                .replaceAll("{faction}", str(data, "faction")),
+            true,
+          );
+        }
+        break;
+      }
+      case "port_incident": {
+        const lines = CONFIG.stores.port.incidentLines;
+        const template =
+          lines[num(data, "variant") % lines.length] ?? lines[0] ?? "";
+        line(
+          `${ts} — ` + template.replaceAll("{port}", str(data, "port")),
+          true,
+        );
+        break;
+      }
+      case "stores_low": {
+        const titles: Record<string, string> = {
+          food: "Food",
+          water: "Water",
+          oxygen: "Oxygen margin",
+          fuel: "Fuel",
+          parts: "Spare parts",
+        };
+        const label = titles[str(data, "store")] ?? str(data, "store");
+        line(
+          `${ts} — ${label} stores run low: ${oneDecimal(num(data, "days"))} days remain.`,
+          true,
+        );
+        break;
+      }
+      case "stores_critical": {
+        const titles: Record<string, string> = {
+          food: "Food",
+          water: "Water",
+          oxygen: "Oxygen margin",
+          fuel: "Fuel",
+          parts: "Spare parts",
+        };
+        const label = titles[str(data, "store")] ?? str(data, "store");
+        line(
+          `${ts} — ${label} stores are critical: ${oneDecimal(num(data, "days"))} days remain.`,
+          true,
+        );
+        break;
+      }
+      case "rationing_imposed": {
+        const by = str(data, "by");
+        line(
+          by !== ""
+            ? `${ts} — ${person(by)} imposes rationing: ${str(data, "store")} stands at ` +
+                `${oneDecimal(num(data, "days"))} days.`
+            : `${ts} — Rationing is imposed: ${str(data, "store")} stands at ` +
+                `${oneDecimal(num(data, "days"))} days.`,
+          true,
+        );
+        break;
+      }
+      case "rationing_lifted": {
+        line(
+          str(data, "reason") === "arrival"
+            ? `${ts} — Rationing is lifted in port: ${str(data, "store")} stands at ` +
+                `${oneDecimal(num(data, "days"))} days.`
+            : `${ts} — Rationing is lifted: ${str(data, "store")} stands at ` +
+                `${oneDecimal(num(data, "days"))} days.`,
+          true,
+        );
+        break;
+      }
+      case "theft": {
+        // A witnessed theft is ship's news. An unwitnessed one is
+        // truth only the log holds, printed only when the log's
+        // truth setting allows it — like sabotage.
+        if (data.witnessed === true) {
+          line(
+            `${ts} — ${person(str(data, "witness"))} saw ${person(str(data, "thief"))} ` +
+              `take food from the stores.`,
+            true,
+          );
+        } else if (this.knowsTruth) {
+          line(
+            `${ts} — (The log records what the crew does not know: ` +
+              `${person(str(data, "thief"))} took food from the stores.)`,
+            true,
+          );
+        }
+        break;
+      }
+      case "stores_discrepancy": {
+        const suspect = str(data, "suspect");
+        const by = str(data, "by");
+        line(
+          suspect !== "" && by !== ""
+            ? `${ts} — The stores do not tally: ${oneDecimal(num(data, "days"))} days of food ` +
+                `unaccounted for. ${person(by)} has questions for ${person(suspect)}.`
+            : `${ts} — The stores do not tally: ${oneDecimal(num(data, "days"))} days of food ` +
+                `unaccounted for, and no one can say where it went.`,
+          true,
+        );
+        break;
+      }
+      case "dead_in_space": {
+        line(
+          `${ts} — The ${this.shipName} lies dead in space, out of fuel, ` +
+            `${oneDecimal(num(data, "distanceLeft"))} light-days short of ${str(data, "boundFor")}.`,
+          true,
+        );
+        break;
+      }
+      case "life_support_strain": {
+        line(
+          `${ts} — With the oxygen margin gone, the life support runs hot and strains.`,
+          true,
+        );
+        break;
+      }
       case "contact": {
         // Transponders are truthful in this step (see DECISIONS):
         // the log prints what she reports, and what she reports is

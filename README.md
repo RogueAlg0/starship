@@ -30,12 +30,16 @@ first incident generator: grudges incite sabotage, suspicion forms from
 who was seen nearby, and accusations are spoken as beliefs, not
 findings. Every run renders a chronicle, the event log as a readable
 ship's log. The galaxy's first layer is built: each seed generates a
-sector of named ports and factions, and the voyage is a leg between
-two of them, with a departure, a travel clock, and an arrival. The
-sector is not empty: other ships fly fixed schedules across it, and
-the ones that pass within sensor range are met as contacts in the
-log, named on the chart, and glimpsed from the hull. See DESIGN.md
-for the full design and DECISIONS.md for the standing choices.
+sector of named ports and factions, and the voyage is an itinerary
+across it: a chartered first leg, then port calls and further legs,
+each port with its own character. The ship lives off her stores —
+food, water, oxygen margin, fuel, spare parts — produced by her
+systems, consumed by her crew and her engines, and refilled by
+what each port can give. The sector is not empty: other ships fly
+fixed schedules across it, and the ones that pass within sensor
+range are met as contacts in the log, named on the chart, and
+glimpsed from the hull. See DESIGN.md for the full design and
+DECISIONS.md for the standing choices.
 
 ## Requirements
 
@@ -88,12 +92,22 @@ sabotage mechanics (a strong grudge acted on; a bystander wrongly
 suspected), a full-slice replay over 2,000 ticks, and a 30-day
 performance sanity run, and the galaxy: sector generation
 determinism and bounds (port counts, separations, faction home
-ports), the leg's distance-and-speed arithmetic, a monotonic route,
-an arrival that fires exactly once on its named tick for every
-daily seed, and traffic: schedule determinism and sanity, position
+ports), the charter leg's distance-and-speed arithmetic, a monotonic
+route, an arrival that fires exactly once on its named tick for every
+daily seed, the itinerary (legs and stays chained, stay lengths bent
+by port character, no sailing straight back when the band offers an
+alternative, arrivals in a 90-day run matched leg for leg against
+the table), traffic: schedule determinism and sanity, position
 purity, constructed contact cases, and a contact ledger re-derived
 from the position functions alone and matched against the event
-stream. `npm run check` runs the type check and the tests.
+stream, and stores: production as rate times condition, rationed
+consumption, resupply capped by port character and never above
+capacity, rationing's trigger and lift hysteresis and its
+trait-bent trigger, theft accounting that reconciles to the
+milli-unit, a fuel-empty drift that slows the voyage clock but
+can never strand the ship, and quantities inside their tanks over
+90-day runs on several seeds. `npm run check` runs the type check
+and the tests.
 
 ## Layout
 
@@ -112,10 +126,12 @@ stream. `npm run check` runs the type check and the tests.
 - `src/scenario/`: configuration. Every tunable number and table lives
   in `config.ts`.
 - `src/world/`: the procedural ship, its systems (condition, wear,
-  strain, repair), shipboard weather, and the galaxy: the procedural
-  sector (ports and factions), the voyage leg across it, and the
-  sector's traffic: other ships on schedules generated at build,
-  whose positions are pure functions of the tick.
+  strain, repair), shipboard weather, the ship's stores (five
+  stores in days of supply, the port call, rationing, and theft),
+  and the galaxy: the procedural sector (ports and factions), the
+  voyage itinerary across it, and the sector's traffic: other ships
+  on schedules generated at build, whose positions are pure
+  functions of the tick.
 - `src/entities/`: the crew of twelve and their per-tick behaviour.
 - `src/perception/`: beliefs: directed trust and bond, suspicion,
   grudges, and the society step that forms grudges and speaks
@@ -229,12 +245,27 @@ system's station, and a tap on the hull returning to its deck.
 opens the sector chart: the seed's ports as named points in their
 factions' colours (a ring for a faction home port, plain grey for
 an independent), the chartered route dashed across the grid, and
-the ship as a marker walking it, the sailed part drawn solid. The
-header names the leg (origin → destination, days out, days to go,
-and in port after arrival), and tapping a port opens its card:
-faction, character, and its distance from the ship right now, in
-light-days and in days at cruise. The chart's static layer paints
-once per voyage; per frame only the marker and pulses move.
+the ship as a marker walking the itinerary, the sailed part of
+the current leg drawn solid. The header names the current leg
+(port → port, days out, days to go) or the port being lived in
+("In port at <name> · day N of M · sails <day, time>"), the
+marker wears a docked ring while she lies in port, and tapping a
+port opens its card: faction, character, and its distance from
+the ship right now, in light-days and in days at cruise. The
+chart's static layer paints once per voyage; per frame only the
+marker and pulses move.
+
+**Stores and port calls.** A strip under the weather banner
+carries the five stores as slim bars in days of supply, with a
+trend arrow from the standing net flow and bands that match the
+alert tiers; stores news (a store running low or critical,
+rationing imposed) arrives through the same alert stack as
+everything else, and a tap goes to the quartermaster or the
+store's producing system. In port the manifest, the shore-leave
+rotations, and the harbour news print in the chronicle as
+highlights; crew ashore are absent from the deck and the
+minimap, marked "Ashore" on the roster, with the person card
+reading "Ashore at <port>".
 
 For link publishing, `npm run viewer:static` writes a single
 self-contained page at `viewer/dist-static/index.html` with the bundle

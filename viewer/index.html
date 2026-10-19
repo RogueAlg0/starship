@@ -177,6 +177,37 @@
   #weather-banner b { color: var(--text); }
   #weather-banner.storm { color: var(--warn); }
   #weather-banner.storm b { color: var(--warn); }
+  /* The stores strip: five slim bars under the weather, one per
+     store, in days of supply with a trend arrow. Bands match the
+     alert tiers: green, amber under ten days, red under four. */
+  #stores-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    padding: 5px 12px;
+    font-size: 12.5px;
+    color: var(--muted);
+    background: #0d1320;
+    border-bottom: 1px solid var(--line);
+  }
+  .store-cell { display: flex; align-items: center; gap: 6px; }
+  .store-cell .slabel {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .store-cell .sbar {
+    width: 54px;
+    height: 6px;
+    background: #0a0f18;
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .store-cell .sbar > div { height: 100%; background: var(--good); border-radius: 3px; }
+  .store-cell .sbar > div.warn { background: var(--warn); }
+  .store-cell .sbar > div.crit { background: var(--bad); }
+  .store-cell .sval { color: var(--text); font-variant-numeric: tabular-nums; }
+  .alert.tier-critical .alert-life-fill { background: var(--bad); }
   main {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -533,6 +564,7 @@
 </header>
 <div id="day-ribbon" aria-label="The ship's day: watch phase, current block, and the next routine beat"></div>
 <div id="weather-banner">Space weather: <b id="weather-name">calm</b></div>
+<div id="stores-strip" aria-label="Ship stores, in days of supply"></div>
 <main>
   <section aria-label="Ship schematic">
     <h2>Ship</h2>

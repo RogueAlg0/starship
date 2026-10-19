@@ -35,6 +35,7 @@ import {
 import { applySabotage, sabotageCandidate } from "../plots/sabotage.ts";
 import { CONFIG } from "../scenario/config.ts";
 import type { Ship } from "../world/ship.ts";
+import { gateRepairDelta } from "../world/stores.ts";
 import {
   applyConditionDelta,
   clamp01,
@@ -66,6 +67,10 @@ export class CrewMember {
   readonly routine: Routine;
   /** What they did most recently; read by crewmates deciding to approach. */
   activity = "idle";
+  /** Ashore on leave during a port call: off the ship entirely —
+   *  no acting, no witnessing, no deck dot — while the stores
+   *  system's rotation holds. Set and cleared by that system. */
+  ashore = false;
   lastAccusationTick = -1000000;
   lastSabotageTick = -1000000;
   /** Tick of this person's last leisure event, for the leisure cooldown. */
@@ -379,6 +384,7 @@ function buildCandidates(
       block === "free" || block === "meal" ? routine.freeSocialFactor : 1;
     for (const other of crew) {
       if (other === member || other.room !== member.room) continue;
+      if (other.ashore) continue;
       if (trustOf(member.beliefs, other.id) < CONFIG.relationships.socializeMinTrust) {
         continue;
       }
@@ -397,6 +403,7 @@ function buildCandidates(
       const company = crew.some(
         (other) =>
           other !== member &&
+          !other.ashore &&
           other.room === member.room &&
           other.activity !== "rest",
       );
@@ -615,7 +622,21 @@ function applyChoice(
     return;
   }
   if (key === "eat") {
-    member.needs.hunger = clamp01(member.needs.hunger + CONFIG.needs.eatRestore);
+    // Eating draws on the stores in spirit (the flat daily draw is
+    // the stores system's own accounting): under rationing the
+    // plate is smaller and hunger caps at the ration line, and
+    // with food gone there is nothing to restore from at all.
+    const stores = ship.stores;
+    const foodOut = stores !== null && stores.byKey.food.qtyMilli <= 0;
+    const cap =
+      stores !== null && stores.rationing.food
+        ? CONFIG.stores.rationing.hungerCap
+        : 1;
+    if (!foodOut && member.needs.hunger < cap) {
+      member.needs.hunger = clamp01(
+        Math.min(cap, member.needs.hunger + CONFIG.needs.eatRestore),
+      );
+    }
     member.activity = "eat";
     const data: Record<string, unknown> = { room: member.room };
     const mealName = mealWindowAt(w.tick);
@@ -677,7 +698,15 @@ function applyChoice(
       CONFIG.systems.repairPerTick *
       (0.5 + member.repairSkill) *
       (1 + traitEffect(member, "repair"));
-    applyConditionDelta(w, system, amount, member.id, "repair");
+    // A repair pays for the condition it restores out of the parts
+    // locker; a short locker buys a smaller repair.
+    applyConditionDelta(
+      w,
+      system,
+      gateRepairDelta(ship, amount),
+      member.id,
+      "repair",
+    );
     member.activity = "repair";
     member.needs.energy = clamp01(
       member.needs.energy - CONFIG.needs.workEnergyCost,
@@ -713,6 +742,7 @@ function applyChoice(
     const partner = crew.find(
       (other) =>
         other !== member &&
+        !other.ashore &&
         other.room === member.room &&
         other.activity !== "rest",
     );
@@ -770,6 +800,7 @@ function resolveGame(
   const company = crew.filter(
     (other) =>
       other !== member &&
+      !other.ashore &&
       other.room === member.room &&
       other.activity !== "rest",
   );
@@ -840,7 +871,8 @@ function recordMealAttendance(
   if (!state.eaters.includes(member.id)) state.eaters.push(member.id);
 
   const present = crew.filter(
-    (other) => other.room === member.room && other.activity !== "rest",
+    (other) =>
+      !other.ashore && other.room === member.room && other.activity !== "rest",
   );
   const size = CONFIG.routine.gameMaxPlayers;
   let table: CrewMember[] = [member];
@@ -947,6 +979,7 @@ export function stepCrew(
 
   const occupancy = new Array<number>(ctx.ship.roomCount).fill(0);
   for (const member of crew) {
+    if (member.ashore) continue;
     occupancy[member.room] = (occupancy[member.room] as number) + 1;
   }
 
@@ -961,6 +994,21 @@ export function stepCrew(
       member.needs.social - CONFIG.needs.socialDecay,
     );
     updateMorale(w, member, ctx, occupancy[member.room] as number);
+
+    // Ashore on leave: the body is at the port, not the post. Needs
+    // still decay (applied above), company and novelty restore the
+    // social self faster than any hour aboard, and no decision is
+    // drawn: there is nothing to decide from a dockside cafe.
+    if (member.ashore) {
+      member.needs.social = clamp01(
+        member.needs.social + CONFIG.stores.port.shoreSocialPerTick,
+      );
+      member.needs.morale = clamp01(
+        member.needs.morale + CONFIG.stores.port.shoreMoralePerTick,
+      );
+      member.activity = "ashore";
+      continue;
+    }
 
     // Crowding stress: too many people in one room frays small trusts.
     // A shared meal is the exception: a full mess at dinner is the

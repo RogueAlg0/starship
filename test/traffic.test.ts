@@ -437,14 +437,14 @@ describe("contacts in a run", () => {
       for (const seed of DAILY_SEEDS) {
         const run = createRun({ seed });
         run.run(TICKS_30_DAYS);
-        const { voyage } = run.galaxy;
+        const { voyage, sector } = run.galaxy;
         for (const e of run.world.events.events) {
           if (e.type !== "port_traffic") continue;
-          const expected =
-            e.tick >= voyage.legTicks
-              ? voyage.destinationPort.name
-              : voyage.originPort.name;
-          expect(e.data.port, `seed ${seed} tick ${e.tick}`).toBe(expected);
+          const portIndex = voyage.portIndexAt(e.tick);
+          expect(portIndex, `seed ${seed} tick ${e.tick}`).not.toBeNull();
+          expect(e.data.port, `seed ${seed} tick ${e.tick}`).toBe(
+            sector.portAt(portIndex as number).name,
+          );
         }
       }
     },

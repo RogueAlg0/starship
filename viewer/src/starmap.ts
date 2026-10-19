@@ -218,16 +218,21 @@ export class StarMapView {
     }
     const pos = this.voyage.positionAt(tick);
     const ship = this.project(pos.x, pos.y);
-    const from = this.project(
-      this.voyage.originPort.x,
-      this.voyage.originPort.y,
-    );
-    const to = this.project(
-      this.voyage.destinationPort.x,
-      this.voyage.destinationPort.y,
-    );
+    // The leg being sailed now (the charter's dashed line is in the
+    // static layer; later legs draw their own here).
+    const leg = this.voyage.currentLegAt(tick);
+    const legFrom =
+      leg === null
+        ? this.voyage.originPort
+        : this.sector.portAt(leg.from);
+    const legTo =
+      leg === null
+        ? this.voyage.destinationPort
+        : this.sector.portAt(leg.to);
+    const from = this.project(legFrom.x, legFrom.y);
+    const to = this.project(legTo.x, legTo.y);
 
-    // The part of the route already sailed, drawn solid over the dash.
+    // The part of this leg already sailed, drawn solid over the dash.
     ctx.strokeStyle = "rgba(232, 163, 61, 0.85)";
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -242,6 +247,15 @@ export class StarMapView {
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.arc(to.px, to.py, pulse, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // In port, the marker wears a docked ring: berthed, not sailing.
+    if (this.voyage.inPortAt(tick)) {
+      ctx.strokeStyle = "rgba(232, 163, 61, 0.9)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(ship.px, ship.py, 10.5, 0, Math.PI * 2);
       ctx.stroke();
     }
 

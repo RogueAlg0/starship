@@ -11762,21 +11762,21 @@
     }
   };
   var FLOORS = {
-    bridge: { base: "#2e3d59", alt: "#33455f", edge: "#22304a" },
-    engineering: { base: "#3a3f45", alt: "#353a40", edge: "#2a2e33" },
-    medbay: { base: "#bccfdd", alt: "#b0c2d4", edge: "#9db1c5", checker: true },
-    mess: { base: "#5a4430", alt: "#624a33", edge: "#46351f", checker: true },
-    quarters: { base: "#453550", alt: "#4a3a58", edge: "#382c46" },
-    hydroponics: { base: "#35472a", alt: "#394c2d", edge: "#28351f" },
-    cargo: { base: "#494c46", alt: "#43463f", edge: "#353832" },
-    airlock: { base: "#4d545e", alt: "#484f59", edge: "#383e47" },
-    lab: { base: "#97a7ba", alt: "#8e9eb2", edge: "#7e8ea3", checker: true },
-    gym: { base: "#333d4f", alt: "#374155", edge: "#29303e" }
+    bridge: { base: "#33507e", alt: "#2b446c", edge: "#1f3355" },
+    engineering: { base: "#4a4238", alt: "#3e382f", edge: "#2c2721" },
+    medbay: { base: "#cfe3d8", alt: "#b7d3c2", edge: "#97b7a2", checker: true },
+    mess: { base: "#6e4f30", alt: "#7a5734", edge: "#4c351d", checker: true },
+    quarters: { base: "#51386b", alt: "#5b4076", edge: "#3a2850" },
+    hydroponics: { base: "#3d5c2e", alt: "#456832", edge: "#2a421f" },
+    cargo: { base: "#5a5a42", alt: "#4e4e39", edge: "#38382a" },
+    airlock: { base: "#5c6066", alt: "#51555d", edge: "#3a3e45" },
+    lab: { base: "#a8c8c2", alt: "#93b5ad", edge: "#779e95", checker: true },
+    gym: { base: "#4a3a42", alt: "#53404a", edge: "#332831" }
   };
   var DEFAULT_FLOOR = {
-    base: "#333d4f",
-    alt: "#364154",
-    edge: "#28303e"
+    base: "#3a4763",
+    alt: "#414e6b",
+    edge: "#2a3348"
   };
   var ROOM_ACCENTS = {
     bridge: "#57a8e8",
@@ -14708,6 +14708,7 @@
 
   // viewer/src/deck.ts
   var TILE_PX = 8;
+  var BODY_SCALE = 1.3;
   var CUTAWAY_GAP_PX = 12;
   var BAND_H = 9;
   var CORR_Y = 9;
@@ -14729,6 +14730,18 @@
     lab: [9, 7],
     gym: [10, 8]
   };
+  function mixHex(a, b, t) {
+    const pa = Number.parseInt(a.slice(1), 16);
+    const pb = Number.parseInt(b.slice(1), 16);
+    const ch = (shift) => Math.round(
+      (pa >> shift & 255) + ((pb >> shift & 255) - (pa >> shift & 255)) * t
+    );
+    return `rgb(${ch(16)},${ch(8)},${ch(0)})`;
+  }
+  function hexA(hex, alpha) {
+    const n = Number.parseInt(hex.slice(1), 16);
+    return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${alpha})`;
+  }
   function strHash2(text) {
     let h = 2166136261;
     for (let i = 0; i < text.length; i++) {
@@ -15343,9 +15356,13 @@
         }
       }
     }
-    ctx.fillStyle = "#39465c";
+    ctx.fillStyle = "#7d90ad";
     for (let tx = 2; tx < deckW - 2; tx += 3) {
       ctx.fillRect((tx + OX) * TILE_PX + 2, (CORR_Y + OY) * TILE_PX + 12, 3, 1);
+    }
+    ctx.fillStyle = "#4c5b74";
+    for (let tx = 3; tx < deckW - 2; tx += 3) {
+      ctx.fillRect((tx + OX) * TILE_PX + 2, (CORR_Y + OY) * TILE_PX + 4, 3, 1);
     }
     if (layout.contentW < deckW - 3) {
       const x0 = layout.contentW - 1;
@@ -15417,6 +15434,14 @@
             ctx.fillRect(px, py + TILE_PX - 1, TILE_PX, 1);
             ctx.fillRect(px + TILE_PX - 1, py, 1, TILE_PX);
           }
+          const speck = hash01(seedKey + rect.index * 7, tx * 41 + ty * 67);
+          if (speck > 0.84) {
+            ctx.fillStyle = "rgba(255,255,255,0.06)";
+            ctx.fillRect(px + 2, py + 2, 2, 1);
+          } else if (speck < 0.1) {
+            ctx.fillStyle = "rgba(0,0,0,0.16)";
+            ctx.fillRect(px + 5, py + 6, 2, 1);
+          }
         }
       }
       {
@@ -15432,13 +15457,55 @@
           iy + ih / 2,
           Math.max(iw, ih) / 1.35
         );
-        grad.addColorStop(0, "rgba(255,232,190,0.07)");
+        grad.addColorStop(0, "rgba(255,232,190,0.13)");
         grad.addColorStop(1, "rgba(255,232,190,0)");
         ctx.fillStyle = grad;
+        ctx.fillRect(ix, iy, iw, ih);
+        const accent = roomAccent(rect.kind);
+        const ag = ctx.createRadialGradient(
+          ix + iw / 2,
+          iy + ih / 2,
+          1,
+          ix + iw / 2,
+          iy + ih / 2,
+          Math.max(iw, ih) / 2.1
+        );
+        ag.addColorStop(0, hexA(accent, 0.12));
+        ag.addColorStop(1, hexA(accent, 0));
+        ctx.fillStyle = ag;
         ctx.fillRect(ix, iy, iw, ih);
         ctx.strokeStyle = "rgba(0,0,0,0.16)";
         ctx.lineWidth = 2;
         ctx.strokeRect(ix + 1, iy + 1, iw - 2, ih - 2);
+      }
+      {
+        const ix = (rect.x + 1 + OX) * TILE_PX;
+        const iy = (rect.y + 1 + OY) * TILE_PX;
+        const iw = (rect.w - 2) * TILE_PX;
+        const ih = (rect.h - 2) * TILE_PX;
+        const accent = roomAccent(rect.kind);
+        if (rect.kind === "quarters" || rect.kind === "mess") {
+          const rx = ix + Math.floor(iw * 0.22);
+          const ry = iy + Math.floor(ih * 0.3);
+          const rw = Math.floor(iw * 0.56);
+          const rh = Math.floor(ih * 0.42);
+          ctx.fillStyle = hexA(accent, 0.16);
+          ctx.fillRect(rx, ry, rw, rh);
+          ctx.strokeStyle = hexA(accent, 0.4);
+          ctx.lineWidth = 1;
+          ctx.strokeRect(rx + 0.5, ry + 0.5, rw - 1, rh - 1);
+        } else if (rect.kind === "engineering" || rect.kind === "cargo") {
+          ctx.fillStyle = hexA("#e8a33d", 0.5);
+          for (let dx = ix + 2; dx < ix + iw - 3; dx += 6) {
+            ctx.fillRect(dx, iy + ih - 3, 3, 1);
+          }
+        } else if (rect.kind === "medbay" || rect.kind === "lab") {
+          const cx = ix + Math.floor(iw / 2);
+          const cy = iy + Math.floor(ih / 2);
+          ctx.fillStyle = hexA(accent, 0.4);
+          ctx.fillRect(cx - 3, cy - 1, 7, 2);
+          ctx.fillRect(cx - 1, cy - 3, 2, 7);
+        }
       }
       if (rect.kind === "airlock") {
         for (let ty = rect.y + 1; ty < rect.y + rect.h - 1; ty++) {
@@ -15454,7 +15521,7 @@
       const wy = (rect.y + OY) * TILE_PX;
       const ww = rect.w * TILE_PX;
       const wh = rect.h * TILE_PX;
-      ctx.fillStyle = "#39465c";
+      ctx.fillStyle = mixHex("#39465c", roomAccent(rect.kind), 0.22);
       ctx.fillRect(wx, wy, ww, TILE_PX);
       ctx.fillRect(wx, wy + wh - TILE_PX, ww, TILE_PX);
       ctx.fillRect(wx, wy, TILE_PX, wh);
@@ -15465,11 +15532,13 @@
       ctx.fillStyle = "#232c3d";
       ctx.fillRect(wx, wy + wh - 1, ww, 1);
       ctx.fillRect(wx + ww - 1, wy, 1, wh);
+      ctx.fillStyle = hexA(roomAccent(rect.kind), 0.65);
+      ctx.fillRect(wx + 1, wy + TILE_PX - 1, ww - 2, 1);
       const doorPx = (Math.floor(room.doorTile.x) + OX) * TILE_PX;
       const doorPy = (Math.floor(room.doorTile.y) + OY) * TILE_PX;
       ctx.fillStyle = floorTile(rect.kind, seedKey + rect.index, 0, 0);
       ctx.fillRect(doorPx, doorPy, TILE_PX, TILE_PX);
-      ctx.fillStyle = "#8fa6c4";
+      ctx.fillStyle = roomAccent(rect.kind);
       ctx.fillRect(doorPx + 1, doorPy + 3, TILE_PX - 2, 1);
       const label = rect.name.toUpperCase();
       ctx.font = "8px monospace";
@@ -16531,14 +16600,14 @@
         positions.set(member.id, { x: px, y: py });
         ctx.fillStyle = "rgba(0,0,0,0.35)";
         ctx.beginPath();
-        if (lying) ctx.ellipse(px, py - 2, 5.5, 1.6, 0, 0, Math.PI * 2);
-        else ctx.ellipse(px, py - 1, 3.5, 1.2, 0, 0, Math.PI * 2);
+        if (lying) ctx.ellipse(px, py - 2, 6.5, 1.9, 0, 0, Math.PI * 2);
+        else ctx.ellipse(px, py - 1, 4.4, 1.4, 0, 0, Math.PI * 2);
         ctx.fill();
         if (opts.selectedId === member.id) {
           ctx.strokeStyle = `rgba(255,215,106,${(0.7 + 0.3 * Math.sin(now / 300)).toFixed(3)})`;
           ctx.lineWidth = 1;
           ctx.beginPath();
-          ctx.ellipse(px, py - 1, 5, 2, 0, 0, Math.PI * 2);
+          ctx.ellipse(px, py - 1, 6, 2.4, 0, 0, Math.PI * 2);
           ctx.stroke();
         }
         ctx.save();
@@ -16552,13 +16621,16 @@
           const breathe = Math.sin(now / 2600 + st.phase) * 0.3;
           ctx.translate(px, py - 4 + breathe);
           ctx.rotate(Math.PI / 2);
+          ctx.scale(BODY_SCALE, BODY_SCALE);
           ctx.drawImage(sprite, -4, -6);
         } else if (st.facing < 0) {
-          ctx.translate(px, 0);
-          ctx.scale(-1, 1);
-          ctx.drawImage(sprite, -4, py - 12 + bob);
+          ctx.translate(px, py + bob);
+          ctx.scale(-BODY_SCALE, BODY_SCALE);
+          ctx.drawImage(sprite, -4, -12);
         } else {
-          ctx.drawImage(sprite, px - 4, py - 12 + bob);
+          ctx.translate(px, py + bob);
+          ctx.scale(BODY_SCALE, BODY_SCALE);
+          ctx.drawImage(sprite, -4, -12);
         }
         ctx.restore();
         if (st.moving) {

@@ -60,6 +60,13 @@ import {
 } from "./props.ts";
 
 export const TILE_PX = 8;
+/**
+ * Crew bodies draw larger than their native 8x12: at deck scale
+ * a one-tile figure vanishes, and the people are the show. The
+ * scale anchors at the feet, so positions, shadows, and bubbles
+ * (all keyed to the feet point) stay where they were.
+ */
+const BODY_SCALE = 1.3;
 /** Structural gap between the two deck plans in the cutaway, px. */
 export const CUTAWAY_GAP_PX = 12;
 
@@ -85,6 +92,24 @@ const SIZES: Record<string, [number, number]> = {
   lab: [9, 7],
   gym: [10, 8],
 };
+
+/** Blend two #rrggbb colours, t of the way from a to b. */
+function mixHex(a: string, b: string, t: number): string {
+  const pa = Number.parseInt(a.slice(1), 16);
+  const pb = Number.parseInt(b.slice(1), 16);
+  const ch = (shift: number): number =>
+    Math.round(
+      ((pa >> shift) & 255) +
+        (((pb >> shift) & 255) - ((pa >> shift) & 255)) * t,
+    );
+  return `rgb(${ch(16)},${ch(8)},${ch(0)})`;
+}
+
+/** A #rrggbb colour at an alpha, as an rgba() string. */
+function hexA(hex: string, alpha: number): string {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
 
 function strHash(text: string): number {
   let h = 2166136261;
@@ -998,9 +1023,15 @@ function renderStatic(
       }
     }
   }
-  ctx.fillStyle = "#39465c";
+  // Corridor guide lights: two dashed runs down the spine, so
+  // the corridor reads as a lit route, not a gap between rooms.
+  ctx.fillStyle = "#7d90ad";
   for (let tx = 2; tx < deckW - 2; tx += 3) {
     ctx.fillRect((tx + OX) * TILE_PX + 2, (CORR_Y + OY) * TILE_PX + 12, 3, 1);
+  }
+  ctx.fillStyle = "#4c5b74";
+  for (let tx = 3; tx < deckW - 2; tx += 3) {
+    ctx.fillRect((tx + OX) * TILE_PX + 2, (CORR_Y + OY) * TILE_PX + 4, 3, 1);
   }
 
   // The void where this deck runs shorter than the hull: tank farm
@@ -1087,6 +1118,16 @@ function renderStatic(
           ctx.fillRect(px, py + TILE_PX - 1, TILE_PX, 1);
           ctx.fillRect(px + TILE_PX - 1, py, 1, TILE_PX);
         }
+        // Surface texture: sparse sheen and wear specks, hashed
+        // per tile, so the floor reads as material, not flat fill.
+        const speck = hash01(seedKey + rect.index * 7, tx * 41 + ty * 67);
+        if (speck > 0.84) {
+          ctx.fillStyle = "rgba(255,255,255,0.06)";
+          ctx.fillRect(px + 2, py + 2, 2, 1);
+        } else if (speck < 0.1) {
+          ctx.fillStyle = "rgba(0,0,0,0.16)";
+          ctx.fillRect(px + 5, py + 6, 2, 1);
+        }
       }
     }
     // Baked light pool and inner shadow: the room reads as a lit
@@ -1105,13 +1146,60 @@ function renderStatic(
         iy + ih / 2,
         Math.max(iw, ih) / 1.35,
       );
-      grad.addColorStop(0, "rgba(255,232,190,0.07)");
+      grad.addColorStop(0, "rgba(255,232,190,0.13)");
       grad.addColorStop(1, "rgba(255,232,190,0)");
       ctx.fillStyle = grad;
+      ctx.fillRect(ix, iy, iw, ih);
+      // The room's own colour pooled at its centre: light with
+      // an address, so kinds read apart even in silhouette.
+      const accent = roomAccent(rect.kind);
+      const ag = ctx.createRadialGradient(
+        ix + iw / 2,
+        iy + ih / 2,
+        1,
+        ix + iw / 2,
+        iy + ih / 2,
+        Math.max(iw, ih) / 2.1,
+      );
+      ag.addColorStop(0, hexA(accent, 0.12));
+      ag.addColorStop(1, hexA(accent, 0));
+      ctx.fillStyle = ag;
       ctx.fillRect(ix, iy, iw, ih);
       ctx.strokeStyle = "rgba(0,0,0,0.16)";
       ctx.lineWidth = 2;
       ctx.strokeRect(ix + 1, iy + 1, iw - 2, ih - 2);
+    }
+    // Dressing painted on the floor itself: a rug where people
+    // live and eat, a safety line where they work, a cross where
+    // they heal. Cheap marks, big readability.
+    {
+      const ix = (rect.x + 1 + OX) * TILE_PX;
+      const iy = (rect.y + 1 + OY) * TILE_PX;
+      const iw = (rect.w - 2) * TILE_PX;
+      const ih = (rect.h - 2) * TILE_PX;
+      const accent = roomAccent(rect.kind);
+      if (rect.kind === "quarters" || rect.kind === "mess") {
+        const rx = ix + Math.floor(iw * 0.22);
+        const ry = iy + Math.floor(ih * 0.3);
+        const rw = Math.floor(iw * 0.56);
+        const rh = Math.floor(ih * 0.42);
+        ctx.fillStyle = hexA(accent, 0.16);
+        ctx.fillRect(rx, ry, rw, rh);
+        ctx.strokeStyle = hexA(accent, 0.4);
+        ctx.lineWidth = 1;
+        ctx.strokeRect(rx + 0.5, ry + 0.5, rw - 1, rh - 1);
+      } else if (rect.kind === "engineering" || rect.kind === "cargo") {
+        ctx.fillStyle = hexA("#e8a33d", 0.5);
+        for (let dx = ix + 2; dx < ix + iw - 3; dx += 6) {
+          ctx.fillRect(dx, iy + ih - 3, 3, 1);
+        }
+      } else if (rect.kind === "medbay" || rect.kind === "lab") {
+        const cx = ix + Math.floor(iw / 2);
+        const cy = iy + Math.floor(ih / 2);
+        ctx.fillStyle = hexA(accent, 0.4);
+        ctx.fillRect(cx - 3, cy - 1, 7, 2);
+        ctx.fillRect(cx - 1, cy - 3, 2, 7);
+      }
     }
     // Airlock hazard stripes inside the outer wall.
     if (rect.kind === "airlock") {
@@ -1124,12 +1212,15 @@ function renderStatic(
         }
       }
     }
-    // Walls: a raised border with a lighter top edge.
+    // Walls: a raised border with a lighter top edge. The steel
+    // is blended toward the room's accent, so the frame itself
+    // carries the room's colour identity, and a stripe of the
+    // accent runs along the inside of the top wall.
     const wx = (rect.x + OX) * TILE_PX;
     const wy = (rect.y + OY) * TILE_PX;
     const ww = rect.w * TILE_PX;
     const wh = rect.h * TILE_PX;
-    ctx.fillStyle = "#39465c";
+    ctx.fillStyle = mixHex("#39465c", roomAccent(rect.kind), 0.22);
     ctx.fillRect(wx, wy, ww, TILE_PX);
     ctx.fillRect(wx, wy + wh - TILE_PX, ww, TILE_PX);
     ctx.fillRect(wx, wy, TILE_PX, wh);
@@ -1140,12 +1231,14 @@ function renderStatic(
     ctx.fillStyle = "#232c3d";
     ctx.fillRect(wx, wy + wh - 1, ww, 1);
     ctx.fillRect(wx + ww - 1, wy, 1, wh);
+    ctx.fillStyle = hexA(roomAccent(rect.kind), 0.65);
+    ctx.fillRect(wx + 1, wy + TILE_PX - 1, ww - 2, 1);
     // Corridor door: floor showing through, with a sill line.
     const doorPx = (Math.floor(room.doorTile.x) + OX) * TILE_PX;
     const doorPy = (Math.floor(room.doorTile.y) + OY) * TILE_PX;
     ctx.fillStyle = floorTile(rect.kind, seedKey + rect.index, 0, 0);
     ctx.fillRect(doorPx, doorPy, TILE_PX, TILE_PX);
-    ctx.fillStyle = "#8fa6c4";
+    ctx.fillStyle = roomAccent(rect.kind);
     ctx.fillRect(doorPx + 1, doorPy + 3, TILE_PX - 2, 1);
     // Name plate on the top edge. The type is sized for the phone
     // the game is watched on: at 5px the plates were illegible at
@@ -2643,14 +2736,14 @@ export class DeckView {
       // Shadow, then the selection ring, then the body.
       ctx.fillStyle = "rgba(0,0,0,0.35)";
       ctx.beginPath();
-      if (lying) ctx.ellipse(px, py - 2, 5.5, 1.6, 0, 0, Math.PI * 2);
-      else ctx.ellipse(px, py - 1, 3.5, 1.2, 0, 0, Math.PI * 2);
+      if (lying) ctx.ellipse(px, py - 2, 6.5, 1.9, 0, 0, Math.PI * 2);
+      else ctx.ellipse(px, py - 1, 4.4, 1.4, 0, 0, Math.PI * 2);
       ctx.fill();
       if (opts.selectedId === member.id) {
         ctx.strokeStyle = `rgba(255,215,106,${(0.7 + 0.3 * Math.sin(now / 300)).toFixed(3)})`;
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.ellipse(px, py - 1, 5, 2, 0, 0, Math.PI * 2);
+        ctx.ellipse(px, py - 1, 6, 2.4, 0, 0, Math.PI * 2);
         ctx.stroke();
       }
       ctx.save();
@@ -2666,13 +2759,16 @@ export class DeckView {
         const breathe = Math.sin(now / 2600 + st.phase) * 0.3;
         ctx.translate(px, py - 4 + breathe);
         ctx.rotate(Math.PI / 2);
+        ctx.scale(BODY_SCALE, BODY_SCALE);
         ctx.drawImage(sprite, -4, -6);
       } else if (st.facing < 0) {
-        ctx.translate(px, 0);
-        ctx.scale(-1, 1);
-        ctx.drawImage(sprite, -4, py - 12 + bob);
+        ctx.translate(px, py + bob);
+        ctx.scale(-BODY_SCALE, BODY_SCALE);
+        ctx.drawImage(sprite, -4, -12);
       } else {
-        ctx.drawImage(sprite, px - 4, py - 12 + bob);
+        ctx.translate(px, py + bob);
+        ctx.scale(BODY_SCALE, BODY_SCALE);
+        ctx.drawImage(sprite, -4, -12);
       }
       ctx.restore();
       // Full hands, drawn over the body: a traveller on an errand

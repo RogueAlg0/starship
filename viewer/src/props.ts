@@ -348,22 +348,22 @@ interface FloorSpec {
 }
 
 const FLOORS: Record<string, FloorSpec> = {
-  bridge: { base: "#2e3d59", alt: "#33455f", edge: "#22304a" },
-  engineering: { base: "#3a3f45", alt: "#353a40", edge: "#2a2e33" },
-  medbay: { base: "#bccfdd", alt: "#b0c2d4", edge: "#9db1c5", checker: true },
-  mess: { base: "#5a4430", alt: "#624a33", edge: "#46351f", checker: true },
-  quarters: { base: "#453550", alt: "#4a3a58", edge: "#382c46" },
-  hydroponics: { base: "#35472a", alt: "#394c2d", edge: "#28351f" },
-  cargo: { base: "#494c46", alt: "#43463f", edge: "#353832" },
-  airlock: { base: "#4d545e", alt: "#484f59", edge: "#383e47" },
-  lab: { base: "#97a7ba", alt: "#8e9eb2", edge: "#7e8ea3", checker: true },
-  gym: { base: "#333d4f", alt: "#374155", edge: "#29303e" },
+  bridge: { base: "#33507e", alt: "#2b446c", edge: "#1f3355" },
+  engineering: { base: "#4a4238", alt: "#3e382f", edge: "#2c2721" },
+  medbay: { base: "#cfe3d8", alt: "#b7d3c2", edge: "#97b7a2", checker: true },
+  mess: { base: "#6e4f30", alt: "#7a5734", edge: "#4c351d", checker: true },
+  quarters: { base: "#51386b", alt: "#5b4076", edge: "#3a2850" },
+  hydroponics: { base: "#3d5c2e", alt: "#456832", edge: "#2a421f" },
+  cargo: { base: "#5a5a42", alt: "#4e4e39", edge: "#38382a" },
+  airlock: { base: "#5c6066", alt: "#51555d", edge: "#3a3e45" },
+  lab: { base: "#a8c8c2", alt: "#93b5ad", edge: "#779e95", checker: true },
+  gym: { base: "#4a3a42", alt: "#53404a", edge: "#332831" },
 };
 
 const DEFAULT_FLOOR: FloorSpec = {
-  base: "#333d4f",
-  alt: "#364154",
-  edge: "#28303e",
+  base: "#3a4763",
+  alt: "#414e6b",
+  edge: "#2a3348",
 };
 
 /** A room kind's accent colour: the plate tick and small trims. */

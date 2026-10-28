@@ -43,6 +43,11 @@ export class StarMapView {
   private readonly shipName: string;
   private readonly backdrop: SpaceBackdrop;
   private staticLayer: HTMLCanvasElement | null = null;
+  /** The charter (from -> to port indices) the static layer shows. */
+  private charterKey = "";
+  /** The charter frame() last computed; pick() lays out against it. */
+  private charterFromPort: Port;
+  private charterToPort: Port;
   private builtW = 0;
   private builtH = 0;
   private ox = 0;
@@ -65,6 +70,8 @@ export class StarMapView {
     this.voyage = voyage;
     this.traffic = traffic;
     this.shipName = shipName;
+    this.charterFromPort = voyage.originPort;
+    this.charterToPort = voyage.destinationPort;
     this.backdrop = new SpaceBackdrop(
       seedKey,
       Math.max(1, canvas.width),
@@ -93,13 +100,25 @@ export class StarMapView {
     );
   }
 
-  /** Lay out the chart and paint the static layer, once per size. */
-  private ensureStatic(): void {
+  /**
+   * Lay out the chart and paint the static layer: once per size,
+   * and again whenever the charter changes. The route and its two
+   * labels belong to the leg being sailed, so a layer baked for
+   * the first leg would lie about every later one.
+   */
+  private ensureStatic(charterFrom: Port, charterTo: Port): void {
     const w = this.canvas.width;
     const h = this.canvas.height;
-    if (this.staticLayer !== null && w === this.builtW && h === this.builtH) {
+    const key = `${charterFrom.index}->${charterTo.index}`;
+    if (
+      this.staticLayer !== null &&
+      w === this.builtW &&
+      h === this.builtH &&
+      key === this.charterKey
+    ) {
       return;
     }
+    this.charterKey = key;
     this.builtW = w;
     this.builtH = h;
     const span = CONFIG.galaxy.sectorSpanLightDays;
@@ -151,14 +170,8 @@ export class StarMapView {
     );
 
     // The chartered route, under everything that moves.
-    const from = this.project(
-      this.voyage.originPort.x,
-      this.voyage.originPort.y,
-    );
-    const to = this.project(
-      this.voyage.destinationPort.x,
-      this.voyage.destinationPort.y,
-    );
+    const from = this.project(charterFrom.x, charterFrom.y);
+    const to = this.project(charterTo.x, charterTo.y);
     ctx.strokeStyle = "rgba(219, 228, 240, 0.35)";
     ctx.lineWidth = 1.5;
     ctx.setLineDash([5, 4]);
@@ -186,7 +199,7 @@ export class StarMapView {
       ctx.beginPath();
       ctx.arc(px, py, 2.6, 0, Math.PI * 2);
       ctx.fill();
-      if (port.index === this.voyage.origin) {
+      if (port.index === charterFrom.index) {
         ctx.strokeStyle = "#dbe4f0";
         ctx.beginPath();
         ctx.arc(px, py, 10, 0, Math.PI * 2);
@@ -198,9 +211,9 @@ export class StarMapView {
       ctx.fillText(port.name, px + 9, py - 5);
       ctx.fillStyle = "#8fa3bf";
       ctx.font = "9px system-ui, sans-serif";
-      if (port.index === this.voyage.origin) {
+      if (port.index === charterFrom.index) {
         ctx.fillText("origin", px + 9, py + 9);
-      } else if (port.index === this.voyage.destination) {
+      } else if (port.index === charterTo.index) {
         ctx.fillText("destination", px + 9, py + 9);
       }
       ctx.font = "11px system-ui, sans-serif";
@@ -212,10 +225,6 @@ export class StarMapView {
   frame(tick: number, nowMs: number): void {
     const ctx = this.ctx;
     if (ctx === null) return;
-    this.ensureStatic();
-    if (this.staticLayer !== null) {
-      ctx.drawImage(this.staticLayer, 0, 0);
-    }
     const pos = this.voyage.positionAt(tick);
     const ship = this.project(pos.x, pos.y);
     // The leg being sailed now (the charter's dashed line is in the
@@ -237,6 +246,19 @@ export class StarMapView {
       legTo = this.sector.portAt(stay.port);
       const decided = this.voyage.courseDecisionFor(stay.index);
       if (decided !== null) decidedTo = this.sector.portAt(decided);
+    }
+    // The static layer's charter is this leg; before the first
+    // departure the frame's leg endpoints coincide at the origin
+    // berth, so the charter is the voyage's own first leg.
+    const charterFrom =
+      legFrom.index === legTo.index ? this.voyage.originPort : legFrom;
+    const charterTo =
+      legFrom.index === legTo.index ? this.voyage.destinationPort : legTo;
+    this.charterFromPort = charterFrom;
+    this.charterToPort = charterTo;
+    this.ensureStatic(charterFrom, charterTo);
+    if (this.staticLayer !== null) {
+      ctx.drawImage(this.staticLayer, 0, 0);
     }
     const from = this.project(legFrom.x, legFrom.y);
     const to = this.project(legTo.x, legTo.y);
@@ -359,7 +381,7 @@ export class StarMapView {
    *  ship, the witnessed ship, or empty space. The witnessed ship
    *  wins first, then traffic, then ports. */
   pick(x: number, y: number, tick: number): MapPick {
-    this.ensureStatic();
+    this.ensureStatic(this.charterFromPort, this.charterToPort);
     const pos = this.voyage.positionAt(tick);
     const ship = this.project(pos.x, pos.y);
     if (Math.hypot(x - ship.px, y - ship.py) <= 12) return { kind: "ship" };

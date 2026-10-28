@@ -502,6 +502,7 @@
     justify-content: flex-end;
     margin-bottom: 6px;
   }
+  [hidden] { display: none !important; }
   .log-toggle { display: flex; gap: 4px; }
   .log-toggle button {
     min-height: 30px;
@@ -509,6 +510,28 @@
     font-size: 12.5px;
     border-radius: 6px;
   }
+  #feed { display: flex; flex-direction: column; gap: 8px; padding: 4px 2px; }
+  .feed-card { background: #131a28; border: 1px solid #26314a; border-radius: 10px; padding: 8px 10px; }
+  .feed-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .feed-avatar { width: 28px; height: 28px; border-radius: 50%; border: 1px solid #39465c; image-rendering: pixelated; flex: none; }
+  .feed-avatar.ship { display: flex; align-items: center; justify-content: center; font-size: 15px; background: #1b2436; }
+  .feed-who { font-size: 12px; font-weight: 600; color: #d7e2f0; flex: 1; min-width: 0; }
+  .feed-time { font-size: 10px; color: #7e93b0; font-family: monospace; flex: none; }
+  .feed-text { font-size: 13px; line-height: 1.45; color: #c3cfe0; }
+  .feed-reply { display: flex; gap: 6px; margin-top: 6px; margin-left: 18px; padding: 6px 8px; background: #101623; border-radius: 8px; align-items: flex-start; }
+  .feed-reply .feed-avatar { width: 20px; height: 20px; }
+  .feed-reply-text { font-size: 12px; color: #a9bcd6; line-height: 1.4; }
+  .feed-reply-name { font-weight: 600; color: #d7e2f0; }
+  .poll-q { font-size: 13px; font-weight: 600; color: #e8eef7; margin: 2px 0 6px; }
+  .poll-row { margin-bottom: 5px; }
+  .poll-label { font-size: 11px; color: #a9bcd6; text-transform: capitalize; }
+  .poll-track { height: 6px; background: #0d1220; border-radius: 3px; overflow: hidden; margin: 2px 0; }
+  .poll-fill { height: 100%; background: #57a8e8; }
+  .poll-fill.against { background: #d87f6a; }
+  .poll-fill.abstain { background: #5d7186; }
+  .poll-names { font-size: 10px; color: #7e93b0; }
+  .poll-outcome { font-size: 12px; color: #d7e2f0; margin-top: 4px; }
+  .feed-empty { color: #7e93b0; font-size: 12px; padding: 8px 2px; }
   .log-toggle button.active {
     border-color: var(--accent);
     color: var(--accent);
@@ -744,14 +767,19 @@
         <div id="council-transcript"></div>
       </div>
     </section>
-    <section data-sheet="log" aria-label="Chronicle" hidden>
+    <section data-sheet="log" aria-label="Scuttlebutt" hidden>
       <div class="sheet-tools">
-        <div class="log-toggle" role="group" aria-label="Chronicle detail">
+        <div class="log-toggle" role="group" aria-label="Log view">
+          <button id="log-view-feed-btn" type="button" aria-pressed="true" class="active">Scuttlebutt</button>
+          <button id="log-view-chronicle-btn" type="button" aria-pressed="false">Chronicle</button>
+        </div>
+        <div class="log-toggle" id="log-detail-toggle" role="group" aria-label="Chronicle detail" hidden>
           <button id="log-highlights-btn" type="button" aria-pressed="true">Highlights</button>
           <button id="log-full-btn" type="button" aria-pressed="false">Full</button>
         </div>
       </div>
-      <div id="chronicle"></div>
+      <div id="feed"></div>
+      <div id="chronicle" hidden></div>
     </section>
     <section data-sheet="ship" aria-label="Ship" hidden>
       <h3>Stores</h3>
@@ -776,7 +804,7 @@
 <nav id="tabbar" aria-label="Panels">
   <button id="tab-crew" type="button" data-tab="crew">👤<small>Crew</small></button>
   <button id="tab-council" type="button" data-tab="council">⚖<small>Council</small></button>
-  <button id="tab-log" type="button" data-tab="log">📖<small>Log</small></button>
+  <button id="tab-log" type="button" data-tab="log">📖<small>Scuttlebutt</small></button>
   <button id="tab-ship" type="button" data-tab="ship">🚀<small>Ship</small></button>
   <button id="tab-map" type="button" data-tab="map">🗺<small>Map</small></button>
 </nav>
@@ -9825,6 +9853,347 @@
     return getFace(member, state).portrait;
   }
 
+  // viewer/src/feed.ts
+  function str3(event, key2) {
+    const value = event.data[key2];
+    return typeof value === "string" ? value : "";
+  }
+  function num3(event, key2) {
+    const value = event.data[key2];
+    return typeof value === "number" ? value : 0;
+  }
+  function pick2(seq, salt, bank) {
+    const index = Math.floor(hash01(seq, salt) * bank.length) % bank.length;
+    return bank[index];
+  }
+  var REPLIES_AGREE = [
+    "Anytime.",
+    "You had to be there. You were there, but still.",
+    "Saving this for the hearing.",
+    "Tea's on you, then.",
+    "Heard, and logged, and framed."
+  ];
+  var REPLIES_PROTEST = [
+    "That is not how it happened.",
+    "I was standing right there.",
+    "Post it under your own name next time. Oh. You did.",
+    "The log will sort this out.",
+    "Bold words from someone who eats my cooking."
+  ];
+  function maybeReply(event, author, bank) {
+    if (hash01(event.seq, 91) >= 0.45) return void 0;
+    return { author, text: pick2(event.seq, 97, bank) };
+  }
+  function feedItemFor(event, names) {
+    const seq = event.seq;
+    const tick = event.tick;
+    const actor = event.actors[0];
+    switch (event.type) {
+      case "chatter": {
+        const speaker = str3(event, "speaker");
+        if (speaker === "") return null;
+        const text = chatterText(event.data, names);
+        if (text === "") return null;
+        const listener = str3(event, "listener");
+        const post = { kind: "post", seq, tick, author: speaker, text };
+        if (listener !== "" && listener !== speaker) {
+          post.reply = maybeReply(event, listener, REPLIES_AGREE);
+        }
+        return post;
+      }
+      case "gossip": {
+        const to = str3(event, "to");
+        const about = str3(event, "about");
+        if (to === "" || about === "") return null;
+        const text = pick2(seq, 11, [
+          `Not naming names. Just saying some people are always near the scene. ${names.firstName(about)} knows.`,
+          `Watching ${names.firstName(about)} around the stores these days. That is all. That is the post.`,
+          `If ${names.firstName(about)} offers to fix something of yours, maybe hold off. No reason.`,
+          `Interesting week to suddenly be everyone's best friend, ${names.firstName(about)}.`
+        ]);
+        const post = { kind: "post", seq, tick, author: to, text };
+        post.reply = maybeReply(event, about, REPLIES_PROTEST);
+        return post;
+      }
+      case "bond_formed": {
+        const withId = str3(event, "with");
+        if (actor === void 0 || withId === "") return null;
+        const level = num3(event, "level");
+        const text = level >= 2 ? pick2(seq, 13, [
+          `${names.firstName(withId)} is my person now. The rest of you can form a queue.`,
+          `Long watches go short with ${names.firstName(withId)}. Official.`,
+          `If I am ever lost in a wreck, send ${names.firstName(withId)}. Nobody else. Send snacks too.`
+        ]) : pick2(seq, 13, [
+          `${names.firstName(withId)} is good people. Writing it here so it is on record.`,
+          `Shared a watch with ${names.firstName(withId)}. Would do it again.`
+        ]);
+        const post = { kind: "post", seq, tick, author: actor, text };
+        post.reply = maybeReply(event, withId, REPLIES_AGREE);
+        return post;
+      }
+      case "grudge_formed": {
+        const target = str3(event, "target");
+        if (actor === void 0 || target === "") return null;
+        const text = pick2(seq, 17, [
+          `Some people chew with their whole soul. No names. You know who you are.`,
+          `New rule: my tools come back to me, or the airlock gets a suggestion box.`,
+          `Smiled at ${names.firstName(target)} in the corridor today. Growth is tiring.`,
+          `Counting to ten is a lifestyle now. Ask me how it is going in a week.`
+        ]);
+        return { kind: "post", seq, tick, author: actor, text };
+      }
+      case "trust_broken": {
+        const withId = str3(event, "with");
+        if (actor === void 0 || withId === "") return null;
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: actor,
+          text: pick2(seq, 19, [
+            `Fool me once, the log sorts it out. Fool me twice and I start checking locks.`,
+            `Keeping my own counsel for a while. Nothing personal. Everything personal.`
+          ])
+        };
+      }
+      case "accusation": {
+        const accused = str3(event, "accused");
+        if (actor === void 0 || accused === "") return null;
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: actor,
+          text: pick2(seq, 23, [
+            `I said it in the open and I will say it here: check ${names.firstName(accused)}'s story.`,
+            `Accusation is on the record. Let the council earn its chairs.`
+          ])
+        };
+      }
+      case "leisure_game": {
+        const winner = str3(event, "winner");
+        const players = Array.isArray(event.data.participants) ? event.data.participants.filter(
+          (p) => typeof p === "string"
+        ) : [];
+        if (winner === "" || players.length === 0) return null;
+        const others = players.filter((p) => p !== winner).map((p) => names.firstName(p)).join(", ");
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: winner,
+          text: others === "" ? `Champion of the ${names.room(num3(event, "room"))}. Unopposed, undefeated.` : `Beat ${others} at the table in the ${names.room(num3(event, "room"))}. Rematch when you have recovered.`
+        };
+      }
+      case "meal_service": {
+        const notableA = str3(event, "notableA");
+        const notableB = str3(event, "notableB");
+        const meal = str3(event, "meal") === "breakfast" ? "Breakfast" : "Evening meal";
+        if (notableA !== "" && notableB !== "") {
+          if (str3(event, "notableKind") === "grudge") {
+            return {
+              kind: "post",
+              seq,
+              tick,
+              author: notableA,
+              text: `Sat across from ${names.firstName(notableB)}. Ate. Said nothing. Growth.`
+            };
+          }
+          return {
+            kind: "post",
+            seq,
+            tick,
+            author: notableA,
+            text: `${meal} with ${names.firstName(notableB)}. Best seat on the ship, every time.`
+          };
+        }
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: null,
+          text: `${meal} in the ${names.room(num3(event, "room"))}: ${num3(event, "count")} at table.`
+        };
+      }
+      case "system_repaired": {
+        const by = str3(event, "by");
+        const system = names.system(str3(event, "system"));
+        if (by === "") {
+          return {
+            kind: "post",
+            seq,
+            tick,
+            author: null,
+            text: `The ${system} is repaired.`
+          };
+        }
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: by,
+          text: pick2(seq, 29, [
+            `The ${system} hums again. You are welcome.`,
+            `${system}: fixed. Hands: filthy. Standards: kept.`,
+            `For the record, the ${system} did not fix itself.`
+          ])
+        };
+      }
+      case "system_failed": {
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: null,
+          text: `The ${names.system(str3(event, "system"))} in the ${names.room(num3(event, "room"))} has failed. Engineering has the call.`
+        };
+      }
+      case "sabotage_committed": {
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: null,
+          text: `Sabotage found: the ${names.system(str3(event, "system"))} in the ${names.room(num3(event, "room"))} is damaged. Report what you saw.`
+        };
+      }
+      case "weather": {
+        const to = str3(event, "to");
+        if (to === "") return null;
+        const text = to === "radiation storm" ? "Radiation storm. Suits stay on hooks, tempers stay short, and nobody goes visiting the hull." : to === "solar wind" ? "Solar wind rising. The old hands say the ship sings in it. The old hands are romantic and wrong." : to === "debris field" ? "Debris field. Every clang is a reminder the hull is thinner than your plans." : "Skies clear. The calm is back on the manifest.";
+        return { kind: "post", seq, tick, author: null, text };
+      }
+      case "departure": {
+        const from = str3(event, "from");
+        const to = str3(event, "to");
+        if (from === "" || to === "") return null;
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: null,
+          text: `Departing ${from} for ${to}. ${num3(event, "days").toFixed(1)} days under way, if the weather minds its manners.`
+        };
+      }
+      case "arrival":
+      case "port_call": {
+        const port = str3(event, "port");
+        if (port === "") return null;
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: null,
+          text: `Made port at ${port}. Shore leave rosters are with the quartermaster. Behave like the posters are watching.`
+        };
+      }
+      case "resupply": {
+        const port = str3(event, "port");
+        const manifest = Array.isArray(event.data.manifest) ? event.data.manifest.length : 0;
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: null,
+          text: manifest > 0 ? `Took aboard ${manifest} stores at ${port}. The tanks say thank you in their way.` : `No stores needed at ${port}. The ship wanted for nothing, and said so smugly.`
+        };
+      }
+      case "death": {
+        if (actor === void 0) return null;
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: null,
+          text: `The ${names.ship} records the death of ${names.person(actor)}. The watch roster keeps their name one more day.`
+        };
+      }
+      case "council_convened": {
+        if (str3(event, "kind") !== "inquiry") return null;
+        const accused = str3(event, "accused");
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: null,
+          text: accused !== "" ? `The council sits in inquiry on ${names.person(accused)}. Mess deck, closed doors, open ears.` : "The council sits in inquiry. Mess deck, closed doors, open ears."
+        };
+      }
+      case "rationing_imposed": {
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: null,
+          text: "Rationing is imposed. Portions shrink; tempers are asked not to."
+        };
+      }
+      case "rationing_lifted": {
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: null,
+          text: "Rationing is lifted. The mess sends its regards to the tanks."
+        };
+      }
+      case "council_finding": {
+        const votes = Array.isArray(event.data.votes) ? event.data.votes : [];
+        if (votes.length === 0) return null;
+        const byChoice = /* @__PURE__ */ new Map();
+        for (const entry of votes) {
+          if (typeof entry !== "object" || entry === null) continue;
+          const record = entry;
+          const member = typeof record.member === "string" ? record.member : "";
+          const choice = typeof record.choice === "string" ? record.choice : "";
+          if (member === "" || choice === "") continue;
+          const list = byChoice.get(choice) ?? [];
+          list.push(member);
+          byChoice.set(choice, list);
+        }
+        if (byChoice.size === 0) return null;
+        const kind = str3(event, "kind");
+        const accused = str3(event, "accused");
+        const accusedName = accused !== "" ? names.person(accused) : "the matter";
+        let question;
+        let outcome;
+        if (kind === "inquiry" || kind === "discipline") {
+          question = accused !== "" ? `Is ${accusedName} responsible?` : "Does the board find a cause?";
+          if (accused === "") {
+            outcome = `Finding: a cause, ${str3(event, "cause")}, and no culprit named.`;
+          } else if (event.data.convicted === true) {
+            outcome = `Finding: ${accusedName} is held responsible.`;
+          } else {
+            outcome = `Finding: ${accusedName} is cleared.`;
+          }
+        } else {
+          const phrases = {
+            rationing: "the rationing proposal",
+            lift: "lifting rationing",
+            ratification: "ratifying emergency rationing",
+            emergency: "emergency powers",
+            relief: "a motion of no confidence",
+            appointment: "the First Officer's appointment",
+            course: "the captain's course"
+          };
+          question = `The council votes on ${phrases[kind] ?? kind}.`;
+          outcome = event.data.convicted === true ? "The motion carries." : "The motion is refused.";
+        }
+        const order = ["for", "against", "abstain"];
+        const bars = order.filter((choice) => byChoice.has(choice)).map((choice) => ({
+          choice,
+          voters: byChoice.get(choice)
+        }));
+        for (const [choice, voters] of byChoice) {
+          if (!order.includes(choice)) bars.push({ choice, voters });
+        }
+        return { kind: "poll", seq, tick, question, outcome, bars };
+      }
+      default:
+        return null;
+    }
+  }
+
   // viewer/src/props.ts
   function spriteCanvas(def) {
     const h = def.rows.length;
@@ -14436,7 +14805,7 @@
       const plan = this.shipLayout.decks[this.shipLayout.deckOfRoom[member.room] ?? 0];
       const room = plan.rooms[member.room];
       const seedKey = this.shipLayout.seedKey;
-      const num3 = Number(member.id.replace(/\D/g, "")) || 0;
+      const num4 = Number(member.id.replace(/\D/g, "")) || 0;
       if (room === void 0) {
         return {
           point: { x: 2.5, y: CORR_Y + 1.5 },
@@ -14561,10 +14930,10 @@
           seated
         };
       }
-      const base = Math.floor(hash01(seedKey, num3 * 29 + member.room * 7) * tiles.length);
+      const base = Math.floor(hash01(seedKey, num4 * 29 + member.room * 7) * tiles.length);
       const tile = tiles[(base + slot) % tiles.length];
-      const jx = (hash01(seedKey, num3 * 53 + member.room) - 0.5) * 0.3;
-      const jy = (hash01(seedKey, num3 * 59 + member.room) - 0.5) * 0.3;
+      const jx = (hash01(seedKey, num4 * 53 + member.room) - 0.5) * 0.3;
+      const jy = (hash01(seedKey, num4 * 59 + member.room) - 0.5) * 0.3;
       return {
         point: { x: tile.x + jx, y: tile.y + jy },
         key: `i:${member.room}:${(base + slot) % tiles.length}`,
@@ -15089,7 +15458,7 @@
         exPerRoom.set(member.room, idx + 1);
       }
       for (const member of crew) {
-        const num3 = Number(member.id.replace(/\D/g, "")) || 0;
+        const num4 = Number(member.id.replace(/\D/g, "")) || 0;
         let st = this.people.get(member.id);
         const want = this.stationFor(
           member,
@@ -15121,7 +15490,7 @@
             anchorRoom: member.room,
             atLift: false,
             stationKey: want.key,
-            phase: hash01(shipLayout.seedKey, num3 * 67) * Math.PI * 2,
+            phase: hash01(shipLayout.seedKey, num4 * 67) * Math.PI * 2,
             vel: 0,
             lying: want.lying,
             seated: want.seated
@@ -15441,6 +15810,11 @@
     shipName;
     backdrop;
     staticLayer = null;
+    /** The charter (from -> to port indices) the static layer shows. */
+    charterKey = "";
+    /** The charter frame() last computed; pick() lays out against it. */
+    charterFromPort;
+    charterToPort;
     builtW = 0;
     builtH = 0;
     ox = 0;
@@ -15455,6 +15829,8 @@
       this.voyage = voyage;
       this.traffic = traffic;
       this.shipName = shipName;
+      this.charterFromPort = voyage.originPort;
+      this.charterToPort = voyage.destinationPort;
       this.backdrop = new SpaceBackdrop(
         seedKey,
         Math.max(1, canvas.width),
@@ -15476,13 +15852,20 @@
       if (port.faction === null) return INDEPENDENT_COLOUR;
       return FACTION_COLOURS[port.faction % FACTION_COLOURS.length] ?? INDEPENDENT_COLOUR;
     }
-    /** Lay out the chart and paint the static layer, once per size. */
-    ensureStatic() {
+    /**
+     * Lay out the chart and paint the static layer: once per size,
+     * and again whenever the charter changes. The route and its two
+     * labels belong to the leg being sailed, so a layer baked for
+     * the first leg would lie about every later one.
+     */
+    ensureStatic(charterFrom, charterTo) {
       const w = this.canvas.width;
       const h = this.canvas.height;
-      if (this.staticLayer !== null && w === this.builtW && h === this.builtH) {
+      const key2 = `${charterFrom.index}->${charterTo.index}`;
+      if (this.staticLayer !== null && w === this.builtW && h === this.builtH && key2 === this.charterKey) {
         return;
       }
+      this.charterKey = key2;
       this.builtW = w;
       this.builtH = h;
       const span = CONFIG.galaxy.sectorSpanLightDays;
@@ -15528,14 +15911,8 @@
         this.ox + 6,
         this.oy + span * this.scale - 6
       );
-      const from = this.project(
-        this.voyage.originPort.x,
-        this.voyage.originPort.y
-      );
-      const to = this.project(
-        this.voyage.destinationPort.x,
-        this.voyage.destinationPort.y
-      );
+      const from = this.project(charterFrom.x, charterFrom.y);
+      const to = this.project(charterTo.x, charterTo.y);
       ctx.strokeStyle = "rgba(219, 228, 240, 0.35)";
       ctx.lineWidth = 1.5;
       ctx.setLineDash([5, 4]);
@@ -15559,7 +15936,7 @@
         ctx.beginPath();
         ctx.arc(px, py, 2.6, 0, Math.PI * 2);
         ctx.fill();
-        if (port.index === this.voyage.origin) {
+        if (port.index === charterFrom.index) {
           ctx.strokeStyle = "#dbe4f0";
           ctx.beginPath();
           ctx.arc(px, py, 10, 0, Math.PI * 2);
@@ -15571,9 +15948,9 @@
         ctx.fillText(port.name, px + 9, py - 5);
         ctx.fillStyle = "#8fa3bf";
         ctx.font = "9px system-ui, sans-serif";
-        if (port.index === this.voyage.origin) {
+        if (port.index === charterFrom.index) {
           ctx.fillText("origin", px + 9, py + 9);
-        } else if (port.index === this.voyage.destination) {
+        } else if (port.index === charterTo.index) {
           ctx.fillText("destination", px + 9, py + 9);
         }
         ctx.font = "11px system-ui, sans-serif";
@@ -15584,10 +15961,6 @@
     frame(tick, nowMs) {
       const ctx = this.ctx;
       if (ctx === null) return;
-      this.ensureStatic();
-      if (this.staticLayer !== null) {
-        ctx.drawImage(this.staticLayer, 0, 0);
-      }
       const pos = this.voyage.positionAt(tick);
       const ship = this.project(pos.x, pos.y);
       const leg = this.voyage.currentLegAt(tick);
@@ -15604,6 +15977,14 @@
         legTo = this.sector.portAt(stay.port);
         const decided = this.voyage.courseDecisionFor(stay.index);
         if (decided !== null) decidedTo = this.sector.portAt(decided);
+      }
+      const charterFrom = legFrom.index === legTo.index ? this.voyage.originPort : legFrom;
+      const charterTo = legFrom.index === legTo.index ? this.voyage.destinationPort : legTo;
+      this.charterFromPort = charterFrom;
+      this.charterToPort = charterTo;
+      this.ensureStatic(charterFrom, charterTo);
+      if (this.staticLayer !== null) {
+        ctx.drawImage(this.staticLayer, 0, 0);
       }
       const from = this.project(legFrom.x, legFrom.y);
       const to = this.project(legTo.x, legTo.y);
@@ -15703,7 +16084,7 @@
      *  ship, the witnessed ship, or empty space. The witnessed ship
      *  wins first, then traffic, then ports. */
     pick(x, y, tick) {
-      this.ensureStatic();
+      this.ensureStatic(this.charterFromPort, this.charterToPort);
       const pos = this.voyage.positionAt(tick);
       const ship = this.project(pos.x, pos.y);
       if (Math.hypot(x - ship.px, y - ship.py) <= 12) return { kind: "ship" };
@@ -15791,6 +16172,9 @@
   var lastDeckMs = 0;
   var selectedCrew = null;
   var logMode = "highlights";
+  var logView = "feed";
+  var feedItems = [];
+  var feedDirty = false;
   var weatherName = "calm";
   var stickToBottom = true;
   var sheetTab = null;
@@ -15824,6 +16208,10 @@
   var chronicleEl = must("chronicle");
   var logHighlightsBtn = must("log-highlights-btn");
   var logFullBtn = must("log-full-btn");
+  var feedEl = must("feed");
+  var logViewFeedBtn = must("log-view-feed-btn");
+  var logViewChronicleBtn = must("log-view-chronicle-btn");
+  var logDetailToggle = must("log-detail-toggle");
   var sheetEl = must("sheet");
   var sheetBodyEl = must("sheet-body");
   var sheetTitleEl = must("sheet-title");
@@ -16003,7 +16391,7 @@
   var TAB_TITLES = {
     crew: "Crew",
     council: "Council",
-    log: "Log",
+    log: "Scuttlebutt",
     ship: "Ship",
     map: "Map"
   };
@@ -16028,7 +16416,7 @@
     for (const [key2, section] of sheetSections) {
       section.hidden = key2 !== tab;
     }
-    if (tab === "log" && stickToBottom) {
+    if (tab === "log" && stickToBottom && logView === "chronicle") {
       sheetBodyEl.scrollTop = sheetBodyEl.scrollHeight;
     } else {
       sheetBodyEl.scrollTop = 0;
@@ -16088,6 +16476,9 @@
   function eventNum(event, key2) {
     const value = event.data[key2];
     return typeof value === "number" ? value : 0;
+  }
+  function systemName(id) {
+    return run.ship.systems.find((s) => s.id === id)?.name ?? id;
   }
   function roomName(index) {
     return run.ship.rooms[index]?.name ?? `room ${index}`;
@@ -17143,6 +17534,8 @@
     window.history.replaceState(null, "", url);
     if (rebuild) rebuildChronicleDom();
   }
+  logViewFeedBtn.addEventListener("click", () => setLogView("feed"));
+  logViewChronicleBtn.addEventListener("click", () => setLogView("chronicle"));
   function initialLogMode(params2) {
     const fromUrl = params2.get("log");
     if (fromUrl === "full" || fromUrl === "highlights") return fromUrl;
@@ -17152,6 +17545,141 @@
     } catch {
     }
     return "highlights";
+  }
+  function feedNames() {
+    return {
+      person: (id) => personName(id),
+      firstName: (id) => personName(id).split(" ")[0] ?? personName(id),
+      system: (id) => systemName(id),
+      room: (index) => roomName(index),
+      ship: run.ship.name
+    };
+  }
+  function feedTime(tick) {
+    const tpd = CONFIG.time.ticksPerDay;
+    const day = Math.floor(tick / tpd) + 1;
+    const minutes = tick % tpd * 10;
+    const hh = String(Math.floor(minutes / 60)).padStart(2, "0");
+    const mm = String(minutes % 60).padStart(2, "0");
+    return `D${day} \xB7 ${hh}:${mm}`;
+  }
+  var MAX_FEED_DOM = 80;
+  function feedAvatar(author) {
+    if (author === null) {
+      const div = document.createElement("div");
+      div.className = "feed-avatar ship";
+      div.textContent = "\u{1F680}";
+      return div;
+    }
+    const canvas = document.createElement("canvas");
+    canvas.className = "feed-avatar";
+    canvas.width = 28;
+    canvas.height = 28;
+    const member = crewById(author);
+    const ctx = canvas.getContext("2d");
+    if (ctx !== null && member !== void 0) {
+      ctx.drawImage(getPortraitCanvas(member, faceStateOf(member)), 0, 0, 28, 28);
+    }
+    return canvas;
+  }
+  function buildFeedCard(item) {
+    const card = document.createElement("div");
+    card.className = "feed-card";
+    const head = document.createElement("div");
+    head.className = "feed-head";
+    const time = document.createElement("span");
+    time.className = "feed-time";
+    time.textContent = feedTime(item.tick);
+    if (item.kind === "poll") {
+      head.append(feedAvatar(null));
+      const who2 = document.createElement("div");
+      who2.className = "feed-who";
+      who2.textContent = `${run.ship.name} \xB7 Council vote`;
+      head.append(who2, time);
+      card.appendChild(head);
+      const q = document.createElement("div");
+      q.className = "poll-q";
+      q.textContent = item.question;
+      card.appendChild(q);
+      const total = item.bars.reduce((n, b) => n + b.voters.length, 0);
+      for (const bar of item.bars) {
+        const row = document.createElement("div");
+        row.className = "poll-row";
+        const label = document.createElement("div");
+        label.className = "poll-label";
+        label.textContent = `${bar.choice} \xB7 ${bar.voters.length}`;
+        const track = document.createElement("div");
+        track.className = "poll-track";
+        const fill2 = document.createElement("div");
+        fill2.className = `poll-fill ${bar.choice}`;
+        fill2.style.width = `${total > 0 ? Math.round(bar.voters.length / total * 100) : 0}%`;
+        track.appendChild(fill2);
+        const names = document.createElement("div");
+        names.className = "poll-names";
+        names.textContent = bar.voters.map((id) => personName(id)).join(", ");
+        row.append(label, track, names);
+        card.appendChild(row);
+      }
+      const outcome = document.createElement("div");
+      outcome.className = "poll-outcome";
+      outcome.textContent = item.outcome;
+      card.appendChild(outcome);
+      return card;
+    }
+    head.append(feedAvatar(item.author));
+    const who = document.createElement("div");
+    who.className = "feed-who";
+    if (item.author === null) {
+      who.textContent = run.ship.name;
+    } else {
+      const member = crewById(item.author);
+      who.textContent = member !== void 0 ? `${member.name} \xB7 ${member.title}` : personName(item.author);
+    }
+    head.append(who, time);
+    card.appendChild(head);
+    const text = document.createElement("div");
+    text.className = "feed-text";
+    text.textContent = item.text;
+    card.appendChild(text);
+    if (item.reply !== void 0) {
+      const reply = document.createElement("div");
+      reply.className = "feed-reply";
+      reply.append(feedAvatar(item.reply.author));
+      const rtext = document.createElement("div");
+      rtext.className = "feed-reply-text";
+      const rname = document.createElement("span");
+      rname.className = "feed-reply-name";
+      rname.textContent = personName(item.reply.author);
+      rtext.append(rname, document.createTextNode(` ${item.reply.text}`));
+      reply.appendChild(rtext);
+      card.appendChild(reply);
+    }
+    return card;
+  }
+  function renderFeed() {
+    feedEl.replaceChildren();
+    const items = feedItems.slice(-MAX_FEED_DOM).reverse();
+    const fragment = document.createDocumentFragment();
+    for (const item of items) fragment.appendChild(buildFeedCard(item));
+    if (items.length === 0) {
+      const div = document.createElement("div");
+      div.className = "feed-empty";
+      div.textContent = "Quiet so far. The ship is still clearing its throat.";
+      fragment.appendChild(div);
+    }
+    feedEl.appendChild(fragment);
+  }
+  function setLogView(view) {
+    logView = view;
+    feedEl.hidden = view !== "feed";
+    chronicleEl.hidden = view !== "chronicle";
+    logDetailToggle.hidden = view !== "chronicle";
+    logViewFeedBtn.classList.toggle("active", view === "feed");
+    logViewChronicleBtn.classList.toggle("active", view === "chronicle");
+    logViewFeedBtn.setAttribute("aria-pressed", String(view === "feed"));
+    logViewChronicleBtn.setAttribute("aria-pressed", String(view === "chronicle"));
+    if (view === "feed") renderFeed();
+    else rebuildChronicleDom();
   }
   function buildLineDiv(line) {
     const div = document.createElement("div");
@@ -17228,7 +17756,7 @@
         if (speaker !== "") {
           const text = chatterText(event.data, {
             person: (id) => personName(id),
-            system: (id) => run.ship.systemById(id)?.name ?? id,
+            system: (id) => systemName(id),
             room: (index) => roomName(index)
           });
           if (text !== "") deck?.speechLine(speaker, text);
@@ -17301,6 +17829,13 @@
       }
       trackCouncil(event);
       feedAlert(event);
+      const feedGate = event.type !== "chatter" || event.data.notable === true || hash01(event.seq, 53) < 0.18;
+      const feedItem = feedGate ? feedItemFor(event, feedNames()) : null;
+      if (feedItem !== null) {
+        feedItems.push(feedItem);
+        if (feedItems.length > 400) feedItems.shift();
+        feedDirty = true;
+      }
       for (const line of renderer.push(event)) {
         const entry = { line, type: event.type };
         allLines.push(entry);
@@ -17308,6 +17843,10 @@
       }
     }
     appendLinesToDom(batch);
+    if (feedDirty) {
+      feedDirty = false;
+      if (logView === "feed") renderFeed();
+    }
   }
   function refreshDailyBanner() {
     if (currentSeed === dailySeed()) {
@@ -17362,6 +17901,9 @@
     lastStormToastTick = Number.NEGATIVE_INFINITY;
     alertStack.reset();
     chronicleEl.replaceChildren();
+    feedItems.length = 0;
+    feedDirty = false;
+    if (logView === "feed") renderFeed();
     shipNameEl.textContent = run.ship.name;
     seedInput.value = String(seed);
     buildDeck();

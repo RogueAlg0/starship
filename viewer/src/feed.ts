@@ -9,7 +9,11 @@
 // deterministic as the run and no engine stream is ever drawn.
 
 import type { SimEvent } from "../../src/log/events.ts";
-import { chatterText } from "../../src/perception/speech.ts";
+import {
+  chatterText,
+  denialText,
+  testimonyText,
+} from "../../src/perception/speech.ts";
 import { hash01 } from "./faces.ts";
 
 export interface FeedNames {
@@ -27,7 +31,9 @@ export interface FeedPost {
   /** Crew id of the poster, or null for the ship itself. */
   author: string | null;
   text: string;
-  reply?: { author: string; text: string };
+  replies?: Array<{ author: string; text: string }>;
+  /** Crew ids whose faces react warmly, from bonds already formed. */
+  reactions?: string[];
 }
 
 export interface FeedPoll {
@@ -95,7 +101,8 @@ export function feedItemFor(event: SimEvent, names: FeedNames): FeedItem | null 
       const listener = str(event, "listener");
       const post: FeedPost = { kind: "post", seq, tick, author: speaker, text };
       if (listener !== "" && listener !== speaker) {
-        post.reply = maybeReply(event, listener, REPLIES_AGREE);
+        const reply = maybeReply(event, listener, REPLIES_AGREE);
+        if (reply !== undefined) post.replies = [reply];
       }
       return post;
     }
@@ -110,7 +117,8 @@ export function feedItemFor(event: SimEvent, names: FeedNames): FeedItem | null 
         `Interesting week to suddenly be everyone's best friend, ${names.firstName(about)}.`,
       ]);
       const post: FeedPost = { kind: "post", seq, tick, author: to, text };
-      post.reply = maybeReply(event, about, REPLIES_PROTEST);
+      const reply = maybeReply(event, about, REPLIES_PROTEST);
+      if (reply !== undefined) post.replies = [reply];
       return post;
     }
     case "bond_formed": {
@@ -129,7 +137,8 @@ export function feedItemFor(event: SimEvent, names: FeedNames): FeedItem | null 
               `Shared a watch with ${names.firstName(withId)}. Would do it again.`,
             ]);
       const post: FeedPost = { kind: "post", seq, tick, author: actor, text };
-      post.reply = maybeReply(event, withId, REPLIES_AGREE);
+      const reply = maybeReply(event, withId, REPLIES_AGREE);
+      if (reply !== undefined) post.replies = [reply];
       return post;
     }
     case "grudge_formed": {
@@ -362,6 +371,45 @@ export function feedItemFor(event: SimEvent, names: FeedNames): FeedItem | null 
         text: "Rationing is lifted. The mess sends its regards to the tanks.",
       };
     }
+    case "council_testimony": {
+      const witness = str(event, "witness");
+      if (witness === "") return null;
+      const text =
+        str(event, "kind") === "denial"
+          ? denialText(event.data)
+          : testimonyText(event.data, names);
+      if (text === "") return null;
+      const about = str(event, "about");
+      return {
+        kind: "post",
+        seq,
+        tick,
+        author: witness,
+        text:
+          about !== "" && about !== witness
+            ? `Testifying on ${names.firstName(about)}: "${text}"`
+            : `Testifying: "${text}"`,
+      };
+    }
+    case "council_sentence": {
+      const member = str(event, "member");
+      if (member === "") return null;
+      const words: Record<string, string> = {
+        brig: "confined to the brig",
+        quarters: "confined to quarters",
+        restriction: "restricted from the ship's systems",
+        mess_ban: "denied mess privileges",
+        extra_duties: "given extra duties",
+      };
+      const kind = str(event, "sentence");
+      return {
+        kind: "post",
+        seq,
+        tick,
+        author: null,
+        text: `Sentence: ${names.person(member)} is ${words[kind] ?? kind}.`,
+      };
+    }
     case "council_finding": {
       const votes = Array.isArray(event.data.votes)
         ? event.data.votes
@@ -429,5 +477,114 @@ export function feedItemFor(event: SimEvent, names: FeedNames): FeedItem | null 
     }
     default:
       return null;
+  }
+}
+
+const DEFENCE = [
+  "Leave them alone.",
+  "Say it to their face next time.",
+  "They have people on this ship. Remember that.",
+  "Careful. That one is spoken for.",
+] as const;
+
+/**
+ * The feed with a memory. feedItemFor alone is stateless; the
+ * builder tracks the run's bonds and grudges as their events
+ * arrive, so what decorates a post (the faces that react warmly,
+ * the friend who answers a cold post) only ever comes from
+ * relationships that already exist at that point in the run.
+ * Deaths clear a name from every set.
+ */
+export class FeedBuilder {
+  private readonly bonds = new Map<string, Set<string>>();
+  private readonly grudges = new Map<string, Set<string>>();
+
+  private link(
+    map: Map<string, Set<string>>,
+    from: string,
+    to: string,
+  ): void {
+    const set = map.get(from) ?? new Set<string>();
+    set.add(to);
+    map.set(from, set);
+  }
+
+  private unlink(map: Map<string, Set<string>>, from: string, to: string): void {
+    map.get(from)?.delete(to);
+  }
+
+  private track(event: SimEvent): void {
+    const actor = event.actors[0];
+    switch (event.type) {
+      case "bond_formed": {
+        const withId = str(event, "with");
+        if (actor === undefined || withId === "") break;
+        this.link(this.bonds, actor, withId);
+        this.link(this.bonds, withId, actor);
+        break;
+      }
+      case "grudge_formed": {
+        const target = str(event, "target");
+        if (actor === undefined || target === "") break;
+        this.link(this.grudges, actor, target);
+        break;
+      }
+      case "trust_broken": {
+        const withId = str(event, "with");
+        if (actor === undefined || withId === "") break;
+        this.unlink(this.bonds, actor, withId);
+        this.unlink(this.bonds, withId, actor);
+        break;
+      }
+      case "death": {
+        if (actor === undefined) break;
+        this.bonds.delete(actor);
+        this.grudges.delete(actor);
+        for (const set of this.bonds.values()) set.delete(actor);
+        for (const set of this.grudges.values()) set.delete(actor);
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  /** One event in, one decorated feed item (or null) out. */
+  push(event: SimEvent, names: FeedNames): FeedItem | null {
+    this.track(event);
+    const item = feedItemFor(event, names);
+    if (item === null || item.kind !== "post" || item.author === null) {
+      return item;
+    }
+    // A trial is solemn: testimony and accusations carry no reactions.
+    if (event.type === "council_testimony" || event.type === "accusation") {
+      return item;
+    }
+    const author = item.author;
+    // A friend of the grudge's target answers the cold post.
+    if (event.type === "grudge_formed") {
+      const target = str(event, "target");
+      const defenders = [...(this.bonds.get(target) ?? [])]
+        .filter((id) => id !== author)
+        .sort();
+      const first = defenders[0];
+      if (first !== undefined && hash01(event.seq, 137) < 0.6) {
+        item.replies = [
+          ...(item.replies ?? []),
+          { author: first, text: pick(event.seq, 139, DEFENCE) },
+        ];
+      }
+    }
+    // Warm faces: the author's bonded crew, never the post's subject.
+    const subject =
+      str(event, "with") || str(event, "about") || str(event, "target");
+    const warm = [...(this.bonds.get(author) ?? [])]
+      .filter((id) => id !== subject)
+      .sort()
+      .slice(0, 3);
+    if (warm.length > 0 && hash01(event.seq, 131) < 0.7) {
+      item.reactions = warm;
+    }
+    return item;
   }
 }

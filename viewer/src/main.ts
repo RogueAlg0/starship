@@ -47,7 +47,7 @@ import {
   hash01,
   stateSignature,
 } from "./faces.ts";
-import { feedItemFor, type FeedItem, type FeedNames } from "./feed.ts";
+import { FeedBuilder, type FeedItem, type FeedNames } from "./feed.ts";
 import {
   ALERT_KIND_DEFS,
   AlertStack,
@@ -135,6 +135,7 @@ let logMode: "highlights" | "full" = "highlights";
 let logView: "feed" | "chronicle" = "feed";
 const feedItems: FeedItem[] = [];
 let feedDirty = false;
+let feedBuilder = new FeedBuilder();
 let weatherName = "calm";
 let stickToBottom = true;
 /** Which sheet the bottom sheet shows, or null while it is closed. */
@@ -2040,29 +2041,49 @@ function buildFeedCard(item: FeedItem): HTMLDivElement {
         ? `${member.name} · ${member.title}`
         : personName(item.author);
   }
+  if (item.author !== null) {
+    const authorId = item.author;
+    head.classList.add("tappable");
+    head.addEventListener("click", () => {
+      selectCrew(authorId);
+      openPersonCard(authorId);
+    });
+  }
   head.append(who, time);
   card.appendChild(head);
   const text = document.createElement("div");
   text.className = "feed-text";
   text.textContent = item.text;
   card.appendChild(text);
-  if (item.reply !== undefined) {
+  for (const entry of item.replies ?? []) {
     const reply = document.createElement("div");
     reply.className = "feed-reply";
-    reply.append(feedAvatar(item.reply.author));
+    reply.append(feedAvatar(entry.author));
     const rtext = document.createElement("div");
     rtext.className = "feed-reply-text";
     const rname = document.createElement("span");
     rname.className = "feed-reply-name";
-    rname.textContent = personName(item.reply.author);
-    rtext.append(rname, document.createTextNode(` ${item.reply.text}`));
+    rname.textContent = personName(entry.author);
+    rtext.append(rname, document.createTextNode(` ${entry.text}`));
     reply.appendChild(rtext);
     card.appendChild(reply);
+  }
+  if (item.reactions !== undefined && item.reactions.length > 0) {
+    const row = document.createElement("div");
+    row.className = "feed-reactions";
+    for (const id of item.reactions) row.append(feedAvatar(id));
+    const heart = document.createElement("span");
+    heart.className = "heart";
+    heart.textContent = "♥";
+    row.appendChild(heart);
+    card.appendChild(row);
   }
   return card;
 }
 
 function renderFeed(): void {
+  const prevHeight = sheetBodyEl.scrollHeight;
+  const prevTop = sheetBodyEl.scrollTop;
   feedEl.replaceChildren();
   const items = feedItems.slice(-MAX_FEED_DOM).reverse();
   const fragment = document.createDocumentFragment();
@@ -2074,6 +2095,12 @@ function renderFeed(): void {
     fragment.appendChild(div);
   }
   feedEl.appendChild(fragment);
+  // New posts land at the top; a reader who has scrolled into the
+  // feed's history keeps their place instead of being yanked up.
+  if (prevTop > 0 && sheetTab === "log" && logView === "feed") {
+    sheetBodyEl.scrollTop =
+      prevTop + (sheetBodyEl.scrollHeight - prevHeight);
+  }
 }
 
 function setLogView(view: "feed" | "chronicle"): void {
@@ -2292,7 +2319,7 @@ function drainEvents(): void {
       event.type !== "chatter" ||
       event.data.notable === true ||
       hash01(event.seq, 53) < 0.18;
-    const feedItem = feedGate ? feedItemFor(event, feedNames()) : null;
+    const feedItem = feedGate ? feedBuilder.push(event, feedNames()) : null;
     if (feedItem !== null) {
       feedItems.push(feedItem);
       if (feedItems.length > 400) feedItems.shift();
@@ -2379,6 +2406,7 @@ function startVoyage(seed: number, opts?: { daily?: boolean }): void {
   chronicleEl.replaceChildren();
   feedItems.length = 0;
   feedDirty = false;
+  feedBuilder = new FeedBuilder();
   if (logView === "feed") renderFeed();
   shipNameEl.textContent = run.ship.name;
   seedInput.value = String(seed);

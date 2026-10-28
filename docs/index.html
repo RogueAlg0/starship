@@ -532,6 +532,12 @@
   .poll-names { font-size: 10px; color: #7e93b0; }
   .poll-outcome { font-size: 12px; color: #d7e2f0; margin-top: 4px; }
   .feed-empty { color: #7e93b0; font-size: 12px; padding: 8px 2px; }
+  .feed-head.tappable { cursor: pointer; }
+  .feed-reactions { display: flex; gap: 4px; align-items: center; margin-top: 6px; }
+  .feed-reactions .feed-avatar { width: 18px; height: 18px; }
+  .feed-reactions .heart { color: #e88ca0; font-size: 11px; margin-left: 2px; }
+  @keyframes feed-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+  .feed-card:first-child { animation: feed-in 0.3s ease-out; }
   .log-toggle button.active {
     border-color: var(--accent);
     color: var(--accent);
@@ -9897,7 +9903,8 @@
         const listener = str3(event, "listener");
         const post = { kind: "post", seq, tick, author: speaker, text };
         if (listener !== "" && listener !== speaker) {
-          post.reply = maybeReply(event, listener, REPLIES_AGREE);
+          const reply = maybeReply(event, listener, REPLIES_AGREE);
+          if (reply !== void 0) post.replies = [reply];
         }
         return post;
       }
@@ -9912,7 +9919,8 @@
           `Interesting week to suddenly be everyone's best friend, ${names.firstName(about)}.`
         ]);
         const post = { kind: "post", seq, tick, author: to, text };
-        post.reply = maybeReply(event, about, REPLIES_PROTEST);
+        const reply = maybeReply(event, about, REPLIES_PROTEST);
+        if (reply !== void 0) post.replies = [reply];
         return post;
       }
       case "bond_formed": {
@@ -9928,7 +9936,8 @@
           `Shared a watch with ${names.firstName(withId)}. Would do it again.`
         ]);
         const post = { kind: "post", seq, tick, author: actor, text };
-        post.reply = maybeReply(event, withId, REPLIES_AGREE);
+        const reply = maybeReply(event, withId, REPLIES_AGREE);
+        if (reply !== void 0) post.replies = [reply];
         return post;
       }
       case "grudge_formed": {
@@ -10137,6 +10146,39 @@
           text: "Rationing is lifted. The mess sends its regards to the tanks."
         };
       }
+      case "council_testimony": {
+        const witness = str3(event, "witness");
+        if (witness === "") return null;
+        const text = str3(event, "kind") === "denial" ? denialText(event.data) : testimonyText(event.data, names);
+        if (text === "") return null;
+        const about = str3(event, "about");
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: witness,
+          text: about !== "" && about !== witness ? `Testifying on ${names.firstName(about)}: "${text}"` : `Testifying: "${text}"`
+        };
+      }
+      case "council_sentence": {
+        const member = str3(event, "member");
+        if (member === "") return null;
+        const words = {
+          brig: "confined to the brig",
+          quarters: "confined to quarters",
+          restriction: "restricted from the ship's systems",
+          mess_ban: "denied mess privileges",
+          extra_duties: "given extra duties"
+        };
+        const kind = str3(event, "sentence");
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: null,
+          text: `Sentence: ${names.person(member)} is ${words[kind] ?? kind}.`
+        };
+      }
       case "council_finding": {
         const votes = Array.isArray(event.data.votes) ? event.data.votes : [];
         if (votes.length === 0) return null;
@@ -10193,6 +10235,88 @@
         return null;
     }
   }
+  var DEFENCE = [
+    "Leave them alone.",
+    "Say it to their face next time.",
+    "They have people on this ship. Remember that.",
+    "Careful. That one is spoken for."
+  ];
+  var FeedBuilder = class {
+    bonds = /* @__PURE__ */ new Map();
+    grudges = /* @__PURE__ */ new Map();
+    link(map, from, to) {
+      const set = map.get(from) ?? /* @__PURE__ */ new Set();
+      set.add(to);
+      map.set(from, set);
+    }
+    unlink(map, from, to) {
+      map.get(from)?.delete(to);
+    }
+    track(event) {
+      const actor = event.actors[0];
+      switch (event.type) {
+        case "bond_formed": {
+          const withId = str3(event, "with");
+          if (actor === void 0 || withId === "") break;
+          this.link(this.bonds, actor, withId);
+          this.link(this.bonds, withId, actor);
+          break;
+        }
+        case "grudge_formed": {
+          const target = str3(event, "target");
+          if (actor === void 0 || target === "") break;
+          this.link(this.grudges, actor, target);
+          break;
+        }
+        case "trust_broken": {
+          const withId = str3(event, "with");
+          if (actor === void 0 || withId === "") break;
+          this.unlink(this.bonds, actor, withId);
+          this.unlink(this.bonds, withId, actor);
+          break;
+        }
+        case "death": {
+          if (actor === void 0) break;
+          this.bonds.delete(actor);
+          this.grudges.delete(actor);
+          for (const set of this.bonds.values()) set.delete(actor);
+          for (const set of this.grudges.values()) set.delete(actor);
+          break;
+        }
+        default:
+          break;
+      }
+    }
+    /** One event in, one decorated feed item (or null) out. */
+    push(event, names) {
+      this.track(event);
+      const item = feedItemFor(event, names);
+      if (item === null || item.kind !== "post" || item.author === null) {
+        return item;
+      }
+      if (event.type === "council_testimony" || event.type === "accusation") {
+        return item;
+      }
+      const author = item.author;
+      if (event.type === "grudge_formed") {
+        const target = str3(event, "target");
+        const defenders = [...this.bonds.get(target) ?? []].filter((id) => id !== author).sort();
+        const first = defenders[0];
+        if (first !== void 0 && hash01(event.seq, 137) < 0.6) {
+          item.replies = [
+            ...item.replies ?? [],
+            { author: first, text: pick2(event.seq, 139, DEFENCE) }
+          ];
+        }
+      }
+      const subject = str3(event, "with") || str3(event, "about") || str3(event, "target");
+      const warm = [...this.bonds.get(author) ?? []].filter((id) => id !== subject).sort().slice(0, 3);
+      if (warm.length > 0 && hash01(event.seq, 131) < 0.7) {
+        item.reactions = warm;
+      }
+      return item;
+    }
+  };
 
   // viewer/src/props.ts
   function spriteCanvas(def) {
@@ -16175,6 +16299,7 @@
   var logView = "feed";
   var feedItems = [];
   var feedDirty = false;
+  var feedBuilder = new FeedBuilder();
   var weatherName = "calm";
   var stickToBottom = true;
   var sheetTab = null;
@@ -17635,28 +17760,48 @@
       const member = crewById(item.author);
       who.textContent = member !== void 0 ? `${member.name} \xB7 ${member.title}` : personName(item.author);
     }
+    if (item.author !== null) {
+      const authorId = item.author;
+      head.classList.add("tappable");
+      head.addEventListener("click", () => {
+        selectCrew(authorId);
+        openPersonCard(authorId);
+      });
+    }
     head.append(who, time);
     card.appendChild(head);
     const text = document.createElement("div");
     text.className = "feed-text";
     text.textContent = item.text;
     card.appendChild(text);
-    if (item.reply !== void 0) {
+    for (const entry of item.replies ?? []) {
       const reply = document.createElement("div");
       reply.className = "feed-reply";
-      reply.append(feedAvatar(item.reply.author));
+      reply.append(feedAvatar(entry.author));
       const rtext = document.createElement("div");
       rtext.className = "feed-reply-text";
       const rname = document.createElement("span");
       rname.className = "feed-reply-name";
-      rname.textContent = personName(item.reply.author);
-      rtext.append(rname, document.createTextNode(` ${item.reply.text}`));
+      rname.textContent = personName(entry.author);
+      rtext.append(rname, document.createTextNode(` ${entry.text}`));
       reply.appendChild(rtext);
       card.appendChild(reply);
+    }
+    if (item.reactions !== void 0 && item.reactions.length > 0) {
+      const row = document.createElement("div");
+      row.className = "feed-reactions";
+      for (const id of item.reactions) row.append(feedAvatar(id));
+      const heart = document.createElement("span");
+      heart.className = "heart";
+      heart.textContent = "\u2665";
+      row.appendChild(heart);
+      card.appendChild(row);
     }
     return card;
   }
   function renderFeed() {
+    const prevHeight = sheetBodyEl.scrollHeight;
+    const prevTop = sheetBodyEl.scrollTop;
     feedEl.replaceChildren();
     const items = feedItems.slice(-MAX_FEED_DOM).reverse();
     const fragment = document.createDocumentFragment();
@@ -17668,6 +17813,9 @@
       fragment.appendChild(div);
     }
     feedEl.appendChild(fragment);
+    if (prevTop > 0 && sheetTab === "log" && logView === "feed") {
+      sheetBodyEl.scrollTop = prevTop + (sheetBodyEl.scrollHeight - prevHeight);
+    }
   }
   function setLogView(view) {
     logView = view;
@@ -17830,7 +17978,7 @@
       trackCouncil(event);
       feedAlert(event);
       const feedGate = event.type !== "chatter" || event.data.notable === true || hash01(event.seq, 53) < 0.18;
-      const feedItem = feedGate ? feedItemFor(event, feedNames()) : null;
+      const feedItem = feedGate ? feedBuilder.push(event, feedNames()) : null;
       if (feedItem !== null) {
         feedItems.push(feedItem);
         if (feedItems.length > 400) feedItems.shift();
@@ -17903,6 +18051,7 @@
     chronicleEl.replaceChildren();
     feedItems.length = 0;
     feedDirty = false;
+    feedBuilder = new FeedBuilder();
     if (logView === "feed") renderFeed();
     shipNameEl.textContent = run.ship.name;
     seedInput.value = String(seed);

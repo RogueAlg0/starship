@@ -532,6 +532,12 @@
   .poll-names { font-size: 10px; color: #7e93b0; }
   .poll-outcome { font-size: 12px; color: #d7e2f0; margin-top: 4px; }
   .feed-empty { color: #7e93b0; font-size: 12px; padding: 8px 2px; }
+  .feed-head.tappable { cursor: pointer; }
+  .feed-reactions { display: flex; gap: 4px; align-items: center; margin-top: 6px; }
+  .feed-reactions .feed-avatar { width: 18px; height: 18px; }
+  .feed-reactions .heart { color: #e88ca0; font-size: 11px; margin-left: 2px; }
+  @keyframes feed-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+  .feed-card:first-child { animation: feed-in 0.3s ease-out; }
   .log-toggle button.active {
     border-color: var(--accent);
     color: var(--accent);

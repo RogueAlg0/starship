@@ -1844,3 +1844,25 @@ no system emptied the drain for that event; it now uses the
 viewer's find-based resolver. And a global [hidden] rule now
 backs the attribute, because display rules on the feed and the
 toggle groups were quietly overriding it.
+
+## Scuttlebutt grows a memory (Oct 28, 2026)
+
+The feed's second pass makes it social in the run's own terms.
+A stateful builder (FeedBuilder in viewer/src/feed.ts) tracks
+bonds, grudges, and broken trusts as their events arrive, and
+decorates posts only from relationships that already exist at
+that point in the run: warm face reactions from the author's
+bonded crew, and a friend of the target answering back when a
+grudge post goes cold. Deaths clear a name from every set, and
+a trial stays solemn: testimony and accusations carry no
+reactions.
+
+Trials now read as stories in the feed: the inquiry's convening
+post, each witness's testimony in their own composed words, the
+accused's denial, the sentence, and the poll as the finale.
+Faces are doors: a poster's head opens their crew card. The
+feed holds a scrolled reader's place when new posts land, and
+the newest card fades in. Verified in Node across six seeds
+(615 testimony posts, 171 sentences, reactions and defences in
+the hundreds) and in the browser at D32 (80 cards, 51 carrying
+reactions).

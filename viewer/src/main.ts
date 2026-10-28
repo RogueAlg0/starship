@@ -52,7 +52,9 @@ import {
 } from "./faces.ts";
 import {
   FeedBuilder,
+  laneForEvent,
   type FeedItem,
+  type FeedLane,
   type FeedNames,
   type MatchCardFace,
   type MatchStrip,
@@ -2417,17 +2419,53 @@ function buildFeedCard(item: FeedItem): HTMLDivElement {
   return card;
 }
 
+/** The reader's lane filter for Scuttlebutt: all, or one lane. */
+let feedLane: FeedLane | "all" = "all";
+const feedLanesEl = document.createElement("div");
+feedLanesEl.className = "feed-lanes";
+{
+  const laneDefs: Array<[FeedLane | "all", string]> = [
+    ["all", "All"],
+    ["crew", "Crew"],
+    ["cards", "Cards"],
+    ["sector", "Sector"],
+    ["ship", "Ship"],
+  ];
+  for (const [key, label] of laneDefs) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = label;
+    if (key === feedLane) btn.className = "active";
+    btn.addEventListener("click", () => {
+      feedLane = key;
+      for (const child of feedLanesEl.children) {
+        child.classList.toggle("active", child === btn);
+      }
+      renderFeed();
+    });
+    feedLanesEl.appendChild(btn);
+  }
+  feedEl.parentElement?.insertBefore(feedLanesEl, feedEl);
+}
+
 function renderFeed(): void {
   const prevHeight = sheetBodyEl.scrollHeight;
   const prevTop = sheetBodyEl.scrollTop;
   feedEl.replaceChildren();
-  const items = feedItems.slice(-MAX_FEED_DOM).reverse();
+  const visible =
+    feedLane === "all"
+      ? feedItems
+      : feedItems.filter((item) => (item.lane ?? "ship") === feedLane);
+  const items = visible.slice(-MAX_FEED_DOM).reverse();
   const fragment = document.createDocumentFragment();
   for (const item of items) fragment.appendChild(buildFeedCard(item));
   if (items.length === 0) {
     const div = document.createElement("div");
     div.className = "feed-empty";
-    div.textContent = "Quiet so far. The ship is still clearing its throat.";
+    div.textContent =
+      feedItems.length === 0
+        ? "Quiet so far. The ship is still clearing its throat."
+        : "Nothing in this lane yet.";
     fragment.appendChild(div);
   }
   feedEl.appendChild(fragment);
@@ -2442,6 +2480,7 @@ function renderFeed(): void {
 function setLogView(view: "feed" | "chronicle"): void {
   logView = view;
   feedEl.hidden = view !== "feed";
+  feedLanesEl.hidden = view !== "feed";
   chronicleEl.hidden = view !== "chronicle";
   logDetailToggle.hidden = view !== "chronicle";
   logViewFeedBtn.classList.toggle("active", view === "feed");
@@ -2657,6 +2696,7 @@ function drainEvents(): void {
       hash01(event.seq, 53) < 0.18;
     const feedItem = feedGate ? feedBuilder.push(event, feedNames()) : null;
     if (feedItem !== null) {
+      feedItem.lane = laneForEvent(event, feedItem);
       feedItems.push(feedItem);
       if (feedItems.length > 400) feedItems.shift();
       feedDirty = true;

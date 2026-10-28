@@ -42,12 +42,21 @@ export interface MatchStrip {
   runs: Array<{ a: MatchCardFace; b: MatchCardFace; point: "a" | "b" | null }>;
 }
 
+/**
+ * The feed's lanes: the reader's filter. Crew is the society
+ * talking, Cards is the PORTFALL table, Sector is the wider
+ * world's news, Ship is the vessel's own announcements.
+ */
+export type FeedLane = "crew" | "cards" | "sector" | "ship";
+
 export interface FeedPost {
   kind: "post";
   seq: number;
   tick: number;
   /** Crew id of the poster, or null for the ship itself. */
   author: string | null;
+  /** The lane this post files under; set by the builder's caller. */
+  lane?: FeedLane;
   text: string;
   replies?: Array<{ author: string; text: string }>;
   /** Crew ids whose faces react warmly, from bonds already formed. */
@@ -60,12 +69,34 @@ export interface FeedPoll {
   kind: "poll";
   seq: number;
   tick: number;
+  /** The lane this poll files under; set by the builder's caller. */
+  lane?: FeedLane;
   question: string;
   outcome: string;
   bars: Array<{ choice: string; voters: string[] }>;
 }
 
 export type FeedItem = FeedPost | FeedPoll;
+
+/**
+ * File an item into its lane from the event that made it.
+ * The table game and the sector have their own event families;
+ * everything else files by voice: a named crew member (or a
+ * council poll) is Crew, the ship speaking for itself is Ship.
+ */
+export function laneForEvent(event: SimEvent, item: FeedItem): FeedLane {
+  if (event.type === "leisure_game") return "cards";
+  if (
+    event.type.startsWith("sector_") ||
+    event.type === "faction_standing" ||
+    event.type === "harbour_news"
+  ) {
+    return "sector";
+  }
+  if (item.kind === "poll") return "crew";
+  if (item.author !== null) return "crew";
+  return "ship";
+}
 
 function str(event: SimEvent, key: string): string {
   const value = event.data[key];

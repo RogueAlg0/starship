@@ -1283,6 +1283,12 @@ const personBioEl = must<HTMLElement>("person-bio");
 const personDossierEl = must<HTMLElement>("person-dossier");
 const personRecentEl = must<HTMLElement>("person-recent");
 let cardCrewId: string | null = null;
+
+/** The crew card's lenses, RimWorld-style: one sheet, five reads. */
+type PersonTab = "overview" | "social" | "health" | "skills" | "portfall";
+
+/** The active lens; reset to Overview whenever a card opens. */
+let personTab: PersonTab = "overview";
 let lastCardRenderMs = 0;
 
 const ACTIVITY_WORDS: Record<string, string> = {
@@ -1315,6 +1321,7 @@ function personName(id: string): string {
 
 function openPersonCard(id: string): void {
   cardCrewId = id;
+  personTab = "overview";
   closePortCard();
   closeTrafficCard();
   personCard.hidden = false;
@@ -1408,6 +1415,43 @@ function signedPct(value: number): string {
 function buildDossier(member: CrewMember): void {
   personDossierEl.replaceChildren();
 
+  // Five lenses over one sheet. Every section below builds into
+  // its panel whether or not the panel is showing; the tab bar
+  // only decides which panel the eye lands on.
+  const tabDefs: Array<[PersonTab, string]> = [
+    ["overview", "Overview"],
+    ["social", "Social"],
+    ["health", "Health"],
+    ["skills", "Skills"],
+    ["portfall", "PORTFALL"],
+  ];
+  const tabBar = document.createElement("div");
+  tabBar.className = "person-tabs";
+  const panelMap = new Map<PersonTab, HTMLDivElement>();
+  for (const [key, label] of tabDefs) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = label;
+    if (key === personTab) btn.className = "active";
+    btn.addEventListener("click", () => {
+      personTab = key;
+      renderPersonCard();
+    });
+    tabBar.appendChild(btn);
+    const panel = document.createElement("div");
+    panel.className = "person-panel";
+    panel.hidden = key !== personTab;
+    panelMap.set(key, panel);
+  }
+  personDossierEl.appendChild(tabBar);
+  for (const panel of panelMap.values()) personDossierEl.appendChild(panel);
+  const overviewPanel = panelMap.get("overview") as HTMLDivElement;
+  const socialPanel = panelMap.get("social") as HTMLDivElement;
+  const healthPanel = panelMap.get("health") as HTMLDivElement;
+  const skillsPanel = panelMap.get("skills") as HTMLDivElement;
+  const portfallPanel = panelMap.get("portfall") as HTMLDivElement;
+  let sink: HTMLElement = overviewPanel;
+
   const needs = document.createElement("div");
   needs.className = "needs";
   for (const key of NEED_KEYS) {
@@ -1426,14 +1470,14 @@ function buildDossier(member: CrewMember): void {
     cell.append(label, bar);
     needs.appendChild(cell);
   }
-  personDossierEl.appendChild(needs);
+  sink.appendChild(needs);
 
   // PORTFALL sits at the root of the card, under the needs: the
   // record this voyage and the deck they carry, dealt face up.
-  personDossierEl.appendChild(dossierLabel("PORTFALL"));
+  sink.appendChild(dossierLabel("PORTFALL"));
   const record = portfallRecord.get(member.id);
   if (record !== undefined && record.w + record.l + record.d > 0) {
-    personDossierEl.appendChild(
+    sink.appendChild(
       dossierRow(
         "Record",
         record.d > 0
@@ -1447,18 +1491,60 @@ function buildDossier(member: CrewMember): void {
   for (const cardFace of starterDeck(currentSeed, member.id)) {
     deckStrip.appendChild(miniCardEl(cardFace, false, false));
   }
-  personDossierEl.appendChild(deckStrip);
+  sink.appendChild(deckStrip);
+
+  // The PORTFALL lens carries the fuller read of the same deck:
+  // the record again, the suit tally, and the strongest card.
+  {
+    const deck = starterDeck(currentSeed, member.id);
+    if (record !== undefined && record.w + record.l + record.d > 0) {
+      portfallPanel.appendChild(
+        dossierRow(
+          "Record",
+          record.d > 0
+            ? `${record.w} W · ${record.l} L · ${record.d} D`
+            : `${record.w} W · ${record.l} L`,
+        ),
+      );
+    }
+    const tally = new Map<string, number>();
+    for (const held of deck) {
+      tally.set(held.suit, (tally.get(held.suit) ?? 0) + 1);
+    }
+    const suitWord = (suit: string): string =>
+      `${suit[0]?.toUpperCase() ?? "?"}${suit.slice(1)}`;
+    portfallPanel.appendChild(
+      dossierRow(
+        "Suits",
+        [...tally.entries()]
+          .map(([suit, n]) => `${suitWord(suit)} ${n}`)
+          .join(" · "),
+      ),
+    );
+    const best = deck.reduce((a, b) => (b.power > a.power ? b : a), deck[0] as (typeof deck)[number]);
+    portfallPanel.appendChild(
+      dossierRow(
+        "Strongest card",
+        `${suitWord(best.suit)} ${best.power}` +
+          (best.effect !== undefined ? ` (${best.effect})` : ""),
+      ),
+    );
+    const fullStrip = document.createElement("div");
+    fullStrip.className = "deck-strip";
+    for (const held of deck) fullStrip.appendChild(miniCardEl(held, false, false));
+    portfallPanel.appendChild(fullStrip);
+  }
 
   // The body, as the consequences chapter keeps it: one health
   // figure, the open wounds by part, the sickness, and the marks
   // that stay. The dead keep their record; the roster says why
   // they are gone.
   if (member.dead) {
-    personDossierEl.appendChild(
+    sink.appendChild(
       dossierRow("Body", "Deceased. The ledger is closed."),
     );
   } else if (member.leftShip) {
-    personDossierEl.appendChild(
+    sink.appendChild(
       dossierRow("Body", "Put off the ship under the board's sentence."),
     );
   } else if (member.body !== undefined) {
@@ -1485,18 +1571,62 @@ function buildDossier(member: CrewMember): void {
     if (woundLines.length === 0 && body.sick < 0.15 && body.marks.length === 0) {
       bodyText += ". Unmarked.";
     }
-    personDossierEl.appendChild(dossierRow("Body", bodyText));
+    sink.appendChild(dossierRow("Body", bodyText));
   }
+
+  // The Health lens expands the one-line body read: health,
+  // each open wound on its own row, sickness, and the marks.
+  if (member.dead) {
+    healthPanel.appendChild(
+      dossierRow("Body", "Deceased. The ledger is closed."),
+    );
+  } else if (member.leftShip) {
+    healthPanel.appendChild(
+      dossierRow("Body", "Put off the ship under the board's sentence."),
+    );
+  } else if (member.body !== undefined) {
+    const body = member.body;
+    healthPanel.appendChild(dossierRow("Health", pct(body.health)));
+    const healthParts = [
+      ["head", "Head"],
+      ["torso", "Torso"],
+      ["arms", "Arms"],
+      ["legs", "Legs"],
+    ] as const;
+    let anyWound = false;
+    for (const [key, label] of healthParts) {
+      const wound = body.wounds[key];
+      if (wound.severity > 0) {
+        anyWound = true;
+        healthPanel.appendChild(
+          dossierRow(
+            label,
+            pct(wound.severity) + (wound.infected ? ", infected" : ""),
+          ),
+        );
+      }
+    }
+    if (body.sick >= 0.15) {
+      healthPanel.appendChild(dossierRow("Sickness", pct(body.sick)));
+    }
+    if (body.marks.length > 0) {
+      healthPanel.appendChild(dossierRow("Marks", body.marks.join(", ")));
+    }
+    if (!anyWound && body.sick < 0.15 && body.marks.length === 0) {
+      healthPanel.appendChild(dossierRow("Condition", "Unmarked."));
+    }
+  }
+  sink = skillsPanel;
 
   // The hands: seven disciplines, the true levels with progress
   // toward the next, the passion in prose, any cap a mark
   // imposes, and the captain's believed level where it differs —
   // the gap between the ledger and the appointment is the story.
   if (member.skills !== undefined) {
-    personDossierEl.appendChild(dossierLabel("Skills"));
+    sink.appendChild(dossierLabel("Skills"));
     const passionForms = ["a gift for", "a hunger for", "a love of"];
     const passion = member.skills.passion;
-    personDossierEl.appendChild(
+    sink.appendChild(
       dossierRow(
         "Passion",
         `${passionForms[DISCIPLINES.indexOf(passion) % passionForms.length]} ` +
@@ -1531,7 +1661,7 @@ function buildDossier(member: CrewMember): void {
           text += ` · the captain rates them ${believed}`;
         }
       }
-      personDossierEl.appendChild(
+      sink.appendChild(
         dossierRow(DISCIPLINE_LABEL[discipline], text),
       );
     }
@@ -1545,10 +1675,11 @@ function buildDossier(member: CrewMember): void {
         (member.beliefs.bond[b.id] ?? 0) - (member.beliefs.bond[a.id] ?? 0),
     )
     .slice(0, 5);
-  personDossierEl.appendChild(dossierLabel("Closest aboard"));
+  sink = socialPanel;
+  sink.appendChild(dossierLabel("Closest aboard"));
   for (const other of others) {
     const label = relationshipLabel(member, other, run.crew);
-    personDossierEl.appendChild(
+    sink.appendChild(
       dossierRow(
         other.name,
         `bond ${pct(member.beliefs.bond[other.id] ?? 0)}, ` +
@@ -1571,7 +1702,7 @@ function buildDossier(member: CrewMember): void {
     }
   }
   if (cooling !== undefined) {
-    personDossierEl.appendChild(
+    sink.appendChild(
       dossierRow(
         "Cooling",
         `${cooling.name} (${relationshipLabel(member, cooling, run.crew)})`,
@@ -1580,7 +1711,7 @@ function buildDossier(member: CrewMember): void {
   }
 
   if (member.beliefs.grudges.length > 0) {
-    personDossierEl.appendChild(
+    sink.appendChild(
       dossierRow(
         "Holds a grudge against",
         member.beliefs.grudges.map(personName).join(", "),
@@ -1599,7 +1730,7 @@ function buildDossier(member: CrewMember): void {
         (member.beliefs.suspicion[a.id] ?? 0),
     );
   if (suspects.length > 0) {
-    personDossierEl.appendChild(
+    sink.appendChild(
       dossierRow(
         "Suspects",
         suspects
@@ -1623,7 +1754,7 @@ function buildDossier(member: CrewMember): void {
         (a.beliefs.suspicion[member.id] ?? 0),
     );
   if (suspectedBy.length > 0) {
-    personDossierEl.appendChild(
+    sink.appendChild(
       dossierRow(
         "Suspected by",
         suspectedBy

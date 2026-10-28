@@ -536,6 +536,9 @@
   .feed-reactions { display: flex; gap: 4px; align-items: center; margin-top: 6px; }
   .feed-reactions .feed-avatar { width: 18px; height: 18px; }
   .feed-reactions .heart { color: #e88ca0; font-size: 11px; margin-left: 2px; }
+  .person-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin: 4px 0 8px; }
+  .person-tabs button { background: #101623; color: #a9bcd6; border: 1px solid #26314a; border-radius: 7px; padding: 4px 10px; font-size: 11px; cursor: pointer; }
+  .person-tabs button.active { border-color: var(--accent); color: var(--accent); font-weight: 700; }
   .match-strip { margin-top: 7px; background: #0d1421; border: 1px solid #22304a; border-radius: 8px; padding: 6px 8px; }
   .match-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 5px; }
   .match-cond { font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: capitalize; padding: 2px 6px; border-radius: 6px; background: #1a2438; color: #c3cfe0; }
@@ -19016,6 +19019,7 @@
   var personDossierEl = must("person-dossier");
   var personRecentEl = must("person-recent");
   var cardCrewId = null;
+  var personTab = "overview";
   var lastCardRenderMs = 0;
   var ACTIVITY_WORDS = {
     work: "working",
@@ -19042,6 +19046,7 @@
   }
   function openPersonCard(id) {
     cardCrewId = id;
+    personTab = "overview";
     closePortCard();
     closeTrafficCard();
     personCard.hidden = false;
@@ -19117,6 +19122,39 @@
   }
   function buildDossier(member) {
     personDossierEl.replaceChildren();
+    const tabDefs = [
+      ["overview", "Overview"],
+      ["social", "Social"],
+      ["health", "Health"],
+      ["skills", "Skills"],
+      ["portfall", "PORTFALL"]
+    ];
+    const tabBar = document.createElement("div");
+    tabBar.className = "person-tabs";
+    const panelMap = /* @__PURE__ */ new Map();
+    for (const [key2, label] of tabDefs) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = label;
+      if (key2 === personTab) btn.className = "active";
+      btn.addEventListener("click", () => {
+        personTab = key2;
+        renderPersonCard();
+      });
+      tabBar.appendChild(btn);
+      const panel = document.createElement("div");
+      panel.className = "person-panel";
+      panel.hidden = key2 !== personTab;
+      panelMap.set(key2, panel);
+    }
+    personDossierEl.appendChild(tabBar);
+    for (const panel of panelMap.values()) personDossierEl.appendChild(panel);
+    const overviewPanel = panelMap.get("overview");
+    const socialPanel = panelMap.get("social");
+    const healthPanel = panelMap.get("health");
+    const skillsPanel = panelMap.get("skills");
+    const portfallPanel = panelMap.get("portfall");
+    let sink = overviewPanel;
     const needs = document.createElement("div");
     needs.className = "needs";
     for (const key2 of NEED_KEYS) {
@@ -19135,11 +19173,11 @@
       cell.append(label, bar);
       needs.appendChild(cell);
     }
-    personDossierEl.appendChild(needs);
-    personDossierEl.appendChild(dossierLabel("PORTFALL"));
+    sink.appendChild(needs);
+    sink.appendChild(dossierLabel("PORTFALL"));
     const record = portfallRecord.get(member.id);
     if (record !== void 0 && record.w + record.l + record.d > 0) {
-      personDossierEl.appendChild(
+      sink.appendChild(
         dossierRow(
           "Record",
           record.d > 0 ? `${record.w} W \xB7 ${record.l} L \xB7 ${record.d} D` : `${record.w} W \xB7 ${record.l} L`
@@ -19151,13 +19189,46 @@
     for (const cardFace of starterDeck(currentSeed, member.id)) {
       deckStrip.appendChild(miniCardEl(cardFace, false, false));
     }
-    personDossierEl.appendChild(deckStrip);
+    sink.appendChild(deckStrip);
+    {
+      const deck2 = starterDeck(currentSeed, member.id);
+      if (record !== void 0 && record.w + record.l + record.d > 0) {
+        portfallPanel.appendChild(
+          dossierRow(
+            "Record",
+            record.d > 0 ? `${record.w} W \xB7 ${record.l} L \xB7 ${record.d} D` : `${record.w} W \xB7 ${record.l} L`
+          )
+        );
+      }
+      const tally = /* @__PURE__ */ new Map();
+      for (const held of deck2) {
+        tally.set(held.suit, (tally.get(held.suit) ?? 0) + 1);
+      }
+      const suitWord = (suit) => `${suit[0]?.toUpperCase() ?? "?"}${suit.slice(1)}`;
+      portfallPanel.appendChild(
+        dossierRow(
+          "Suits",
+          [...tally.entries()].map(([suit, n]) => `${suitWord(suit)} ${n}`).join(" \xB7 ")
+        )
+      );
+      const best = deck2.reduce((a, b) => b.power > a.power ? b : a, deck2[0]);
+      portfallPanel.appendChild(
+        dossierRow(
+          "Strongest card",
+          `${suitWord(best.suit)} ${best.power}` + (best.effect !== void 0 ? ` (${best.effect})` : "")
+        )
+      );
+      const fullStrip = document.createElement("div");
+      fullStrip.className = "deck-strip";
+      for (const held of deck2) fullStrip.appendChild(miniCardEl(held, false, false));
+      portfallPanel.appendChild(fullStrip);
+    }
     if (member.dead) {
-      personDossierEl.appendChild(
+      sink.appendChild(
         dossierRow("Body", "Deceased. The ledger is closed.")
       );
     } else if (member.leftShip) {
-      personDossierEl.appendChild(
+      sink.appendChild(
         dossierRow("Body", "Put off the ship under the board's sentence.")
       );
     } else if (member.body !== void 0) {
@@ -19179,13 +19250,54 @@
       if (woundLines.length === 0 && body.sick < 0.15 && body.marks.length === 0) {
         bodyText += ". Unmarked.";
       }
-      personDossierEl.appendChild(dossierRow("Body", bodyText));
+      sink.appendChild(dossierRow("Body", bodyText));
     }
+    if (member.dead) {
+      healthPanel.appendChild(
+        dossierRow("Body", "Deceased. The ledger is closed.")
+      );
+    } else if (member.leftShip) {
+      healthPanel.appendChild(
+        dossierRow("Body", "Put off the ship under the board's sentence.")
+      );
+    } else if (member.body !== void 0) {
+      const body = member.body;
+      healthPanel.appendChild(dossierRow("Health", pct(body.health)));
+      const healthParts = [
+        ["head", "Head"],
+        ["torso", "Torso"],
+        ["arms", "Arms"],
+        ["legs", "Legs"]
+      ];
+      let anyWound = false;
+      for (const [key2, label] of healthParts) {
+        const wound = body.wounds[key2];
+        if (wound.severity > 0) {
+          anyWound = true;
+          healthPanel.appendChild(
+            dossierRow(
+              label,
+              pct(wound.severity) + (wound.infected ? ", infected" : "")
+            )
+          );
+        }
+      }
+      if (body.sick >= 0.15) {
+        healthPanel.appendChild(dossierRow("Sickness", pct(body.sick)));
+      }
+      if (body.marks.length > 0) {
+        healthPanel.appendChild(dossierRow("Marks", body.marks.join(", ")));
+      }
+      if (!anyWound && body.sick < 0.15 && body.marks.length === 0) {
+        healthPanel.appendChild(dossierRow("Condition", "Unmarked."));
+      }
+    }
+    sink = skillsPanel;
     if (member.skills !== void 0) {
-      personDossierEl.appendChild(dossierLabel("Skills"));
+      sink.appendChild(dossierLabel("Skills"));
       const passionForms = ["a gift for", "a hunger for", "a love of"];
       const passion = member.skills.passion;
-      personDossierEl.appendChild(
+      sink.appendChild(
         dossierRow(
           "Passion",
           `${passionForms[DISCIPLINES.indexOf(passion) % passionForms.length]} ` + DISCIPLINE_LABEL[passion]
@@ -19215,7 +19327,7 @@
             text += ` \xB7 the captain rates them ${believed}`;
           }
         }
-        personDossierEl.appendChild(
+        sink.appendChild(
           dossierRow(DISCIPLINE_LABEL[discipline], text)
         );
       }
@@ -19223,10 +19335,11 @@
     const others = run.crew.filter((other) => other !== member).sort(
       (a, b) => (member.beliefs.bond[b.id] ?? 0) - (member.beliefs.bond[a.id] ?? 0)
     ).slice(0, 5);
-    personDossierEl.appendChild(dossierLabel("Closest aboard"));
+    sink = socialPanel;
+    sink.appendChild(dossierLabel("Closest aboard"));
     for (const other of others) {
       const label = relationshipLabel(member, other, run.crew);
-      personDossierEl.appendChild(
+      sink.appendChild(
         dossierRow(
           other.name,
           `bond ${pct(member.beliefs.bond[other.id] ?? 0)}, trust ${signedPct(member.beliefs.trust[other.id] ?? 0)}` + (label !== "acquaintance" ? ` \xB7 ${label}` : "")
@@ -19244,7 +19357,7 @@
       }
     }
     if (cooling !== void 0) {
-      personDossierEl.appendChild(
+      sink.appendChild(
         dossierRow(
           "Cooling",
           `${cooling.name} (${relationshipLabel(member, cooling, run.crew)})`
@@ -19252,7 +19365,7 @@
       );
     }
     if (member.beliefs.grudges.length > 0) {
-      personDossierEl.appendChild(
+      sink.appendChild(
         dossierRow(
           "Holds a grudge against",
           member.beliefs.grudges.map(personName).join(", ")
@@ -19265,7 +19378,7 @@
       (a, b) => (member.beliefs.suspicion[b.id] ?? 0) - (member.beliefs.suspicion[a.id] ?? 0)
     );
     if (suspects.length > 0) {
-      personDossierEl.appendChild(
+      sink.appendChild(
         dossierRow(
           "Suspects",
           suspects.map(
@@ -19280,7 +19393,7 @@
       (a, b) => (b.beliefs.suspicion[member.id] ?? 0) - (a.beliefs.suspicion[member.id] ?? 0)
     );
     if (suspectedBy.length > 0) {
-      personDossierEl.appendChild(
+      sink.appendChild(
         dossierRow(
           "Suspected by",
           suspectedBy.map(

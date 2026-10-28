@@ -12473,12 +12473,12 @@
       ctx.fillRect(this.sternX + 10, midY - 2, this.bowStartX - this.sternX - 16, 2);
       ctx.globalAlpha = 1;
       ctx.fillStyle = "#9db1cc";
-      ctx.font = "bold 7px monospace";
+      ctx.font = "bold 9px monospace";
       ctx.textAlign = "left";
       ctx.fillText(this.ship.name.toUpperCase(), this.sternX + 14, top + 12);
       ctx.fillStyle = "#5f7189";
-      ctx.font = "5px monospace";
-      ctx.fillText(`REG ${seedKey}`, this.sternX + 14, top + 19);
+      ctx.font = "7px monospace";
+      ctx.fillText(`REG ${seedKey}`, this.sternX + 14, top + 21);
       const airlock = this.rectOfKind(1, "airlock");
       if (airlock !== void 0) {
         const hx = (airlock.x + airlock.w / 2 + ox) * tile;
@@ -13755,14 +13755,14 @@
       ctx.fillStyle = "#8fa6c4";
       ctx.fillRect(doorPx + 1, doorPy + 3, TILE_PX - 2, 1);
       const label = rect.name.toUpperCase();
-      const plateW = label.length * 4 + 6;
+      ctx.font = "8px monospace";
+      const plateW = Math.ceil(ctx.measureText(label).width) + 8;
       const plateX = wx + Math.floor((ww - plateW) / 2);
       ctx.fillStyle = "#141a26";
-      ctx.fillRect(plateX, wy - 1, plateW, 7);
-      ctx.fillStyle = "#c8d4e4";
-      ctx.font = "5px monospace";
+      ctx.fillRect(plateX, wy - 2, plateW, 11);
+      ctx.fillStyle = "#d7e2f0";
       ctx.textAlign = "center";
-      ctx.fillText(label, wx + ww / 2, wy + 4.5);
+      ctx.fillText(label, wx + ww / 2, wy + 6);
       for (const pass of [true, false]) {
         for (const prop of room.props) {
           if (prop.under !== pass) continue;
@@ -14822,9 +14822,9 @@
         const pct2 = Math.round(worst.condition * 100);
         const extra = systems.length > 1 ? ` +${systems.length - 1}` : "";
         ctx.fillStyle = "#141a26";
-        ctx.fillRect(rx + 3, ry + rect.h * TILE_PX - 10, 30, 2);
+        ctx.fillRect(rx + 3, ry + rect.h * TILE_PX - 3, 34, 3);
         ctx.fillStyle = worst.condition < 0.3 ? "#ff7a5c" : worst.condition < 0.6 ? "#ffb35c" : "#7fd4a8";
-        ctx.fillRect(rx + 3, ry + rect.h * TILE_PX - 10, 30 * worst.condition, 2);
+        ctx.fillRect(rx + 3, ry + rect.h * TILE_PX - 3, 34 * worst.condition, 3);
         const band = worst.condition < 0.3 ? 2 : worst.condition < 0.6 ? 1 : 0;
         const labelKey = `${worst.id}|${pct2}|${band}`;
         let label = this.labelCache.get(rect.index);
@@ -14833,13 +14833,15 @@
           const canvas = document.createElement("canvas");
           const lctx = canvas.getContext("2d");
           if (lctx !== null) {
-            lctx.font = "6px monospace";
-            canvas.width = Math.max(1, Math.ceil(lctx.measureText(text).width));
-            canvas.height = 8;
-            lctx.font = "6px monospace";
+            lctx.font = "9px monospace";
+            canvas.width = Math.max(1, Math.ceil(lctx.measureText(text).width) + 6);
+            canvas.height = 13;
+            lctx.font = "9px monospace";
             lctx.textAlign = "left";
-            lctx.fillStyle = band === 2 ? "#ff8a6a" : band === 1 ? "#ffb35c" : "rgba(207,216,230,0.85)";
-            lctx.fillText(text, 0, 7);
+            lctx.fillStyle = "#141a26";
+            lctx.fillRect(0, 0, canvas.width, 13);
+            lctx.fillStyle = band === 2 ? "#ff8a6a" : band === 1 ? "#ffb35c" : "#cfd8e6";
+            lctx.fillText(text, 3, 10);
           }
           label = { key: labelKey, canvas };
           this.labelCache.set(rect.index, label);
@@ -14847,7 +14849,7 @@
         ctx.drawImage(
           label.canvas,
           rx + 3,
-          ry + rect.h * TILE_PX - 10
+          ry + rect.h * TILE_PX - 16
         );
       }
       for (const room of layout.rooms) {
@@ -15151,12 +15153,12 @@
           ctx.strokeRect(zone.x + 0.5, zone.y + 0.5, zone.w - 1, zone.h - 1);
         }
         ctx.fillStyle = "#8fa6c4";
-        ctx.font = "6px monospace";
+        ctx.font = "8px monospace";
         ctx.textAlign = "left";
         ctx.fillText(
           zone.deck === 0 ? "DECK 1" : "DECK 2",
           zone.x + 2,
-          zone.y + 7
+          zone.y + 9
         );
       }
       const byId2 = new Map(snapshot.map((s) => [s.id, s]));

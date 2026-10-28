@@ -575,12 +575,12 @@ export class ExteriorView {
 
     // Her name on the bow plating, and the registry under it.
     ctx.fillStyle = "#9db1cc";
-    ctx.font = "bold 7px monospace";
+    ctx.font = "bold 9px monospace";
     ctx.textAlign = "left";
     ctx.fillText(this.ship.name.toUpperCase(), this.sternX + 14, top + 12);
     ctx.fillStyle = "#5f7189";
-    ctx.font = "5px monospace";
-    ctx.fillText(`REG ${seedKey}`, this.sternX + 14, top + 19);
+    ctx.font = "7px monospace";
+    ctx.fillText(`REG ${seedKey}`, this.sternX + 14, top + 21);
 
     // The airlock hatch and its docking target, low on the hull.
     const airlock = this.rectOfKind(1, "airlock");

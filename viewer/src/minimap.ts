@@ -148,12 +148,12 @@ export class Minimap {
         ctx.strokeRect(zone.x + 0.5, zone.y + 0.5, zone.w - 1, zone.h - 1);
       }
       ctx.fillStyle = "#8fa6c4";
-      ctx.font = "6px monospace";
+      ctx.font = "8px monospace";
       ctx.textAlign = "left";
       ctx.fillText(
         zone.deck === 0 ? "DECK 1" : "DECK 2",
         zone.x + 2,
-        zone.y + 7,
+        zone.y + 9,
       );
     }
     // Crew dots: department colour, a hair larger than their room.

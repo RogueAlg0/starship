@@ -1102,16 +1102,19 @@ function renderStatic(layout: DeckLayout, ship: Ship): HTMLCanvasElement {
     ctx.fillRect(doorPx, doorPy, TILE_PX, TILE_PX);
     ctx.fillStyle = "#8fa6c4";
     ctx.fillRect(doorPx + 1, doorPy + 3, TILE_PX - 2, 1);
-    // Name plate on the top edge.
+    // Name plate on the top edge. The type is sized for the phone
+    // the game is watched on: at 5px the plates were illegible at
+    // deck scale (playtest note, Oct 27), so the plate is 11px tall
+    // with 8px type, its width measured rather than estimated.
     const label = rect.name.toUpperCase();
-    const plateW = label.length * 4 + 6;
+    ctx.font = "8px monospace";
+    const plateW = Math.ceil(ctx.measureText(label).width) + 8;
     const plateX = wx + Math.floor((ww - plateW) / 2);
     ctx.fillStyle = "#141a26";
-    ctx.fillRect(plateX, wy - 1, plateW, 7);
-    ctx.fillStyle = "#c8d4e4";
-    ctx.font = "5px monospace";
+    ctx.fillRect(plateX, wy - 2, plateW, 11);
+    ctx.fillStyle = "#d7e2f0";
     ctx.textAlign = "center";
-    ctx.fillText(label, wx + ww / 2, wy + 4.5);
+    ctx.fillText(label, wx + ww / 2, wy + 6);
     // Props: floor decals first, then furniture.
     for (const pass of [true, false]) {
       for (const prop of room.props) {
@@ -2570,14 +2573,14 @@ export class DeckView {
       const pct = Math.round(worst.condition * 100);
       const extra = systems.length > 1 ? ` +${systems.length - 1}` : "";
       ctx.fillStyle = "#141a26";
-      ctx.fillRect(rx + 3, ry + rect.h * TILE_PX - 10, 30, 2);
+      ctx.fillRect(rx + 3, ry + rect.h * TILE_PX - 3, 34, 3);
       ctx.fillStyle =
         worst.condition < 0.3
           ? "#ff7a5c"
           : worst.condition < 0.6
             ? "#ffb35c"
             : "#7fd4a8";
-      ctx.fillRect(rx + 3, ry + rect.h * TILE_PX - 10, 30 * worst.condition, 2);
+      ctx.fillRect(rx + 3, ry + rect.h * TILE_PX - 3, 34 * worst.condition, 3);
       const band =
         worst.condition < 0.3 ? 2 : worst.condition < 0.6 ? 1 : 0;
       const labelKey = `${worst.id}|${pct}|${band}`;
@@ -2587,18 +2590,20 @@ export class DeckView {
         const canvas = document.createElement("canvas");
         const lctx = canvas.getContext("2d");
         if (lctx !== null) {
-          lctx.font = "6px monospace";
-          canvas.width = Math.max(1, Math.ceil(lctx.measureText(text).width));
-          canvas.height = 8;
-          lctx.font = "6px monospace";
+          lctx.font = "9px monospace";
+          canvas.width = Math.max(1, Math.ceil(lctx.measureText(text).width) + 6);
+          canvas.height = 13;
+          lctx.font = "9px monospace";
           lctx.textAlign = "left";
+          lctx.fillStyle = "#141a26";
+          lctx.fillRect(0, 0, canvas.width, 13);
           lctx.fillStyle =
             band === 2
               ? "#ff8a6a"
               : band === 1
                 ? "#ffb35c"
-                : "rgba(207,216,230,0.85)";
-          lctx.fillText(text, 0, 7);
+                : "#cfd8e6";
+          lctx.fillText(text, 3, 10);
         }
         label = { key: labelKey, canvas };
         this.labelCache.set(rect.index, label);
@@ -2606,7 +2611,7 @@ export class DeckView {
       ctx.drawImage(
         label.canvas,
         rx + 3,
-        ry + rect.h * TILE_PX - 10,
+        ry + rect.h * TILE_PX - 16,
       );
     }
 

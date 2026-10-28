@@ -1197,12 +1197,25 @@
       threshold: 0.65,
       cooldownTicks: 720,
       /** After a public accusation, the matter is already public: other
-       *  accusers hold off about the same person for this many ticks. */
-      publicCooldownTicks: 36,
+       *  accusers hold off about the same person for this many ticks.
+       *  One ship day. A public claim occupies the ship until it has had
+       *  a day to be weighed, and the council, not repetition, is what
+       *  moves it. At six hours a scapegoat collected a fresh accusation
+       *  every few hours, each one restating the same claim, and the
+       *  chronicle filled with restatements instead of events (measured
+       *  on seed 42 with room-scoped hearing: accusations still settle
+       *  near 25 a day, driven by the per-target re-accusation rate). */
+      publicCooldownTicks: 144,
       /** Suspicion listeners gain toward the accused from a public claim. */
       spreadSuspicion: 0.02,
-      /** Suspicion fades a little every tick; memories are not ledgers. */
-      suspicionDecayPerTick: 1e-3,
+      /** Suspicion fades a little every tick; memories are not ledgers.
+       *  About 10% a day: slow enough that a repeat offender's pattern
+       *  accumulates across a fortnight of acts, fast enough that a
+       *  quiet month clears the air. (At 13% a day with the old
+       *  unbounded evidence the fade lost either way; paired with the
+       *  divided evidence weight this is the cooling half of the
+       *  balance.) */
+      suspicionDecayPerTick: 7e-4,
       listenerTrustHit: 0.015,
       /** The accuser's own suspicion vents a little once spoken. */
       ventRelief: 0.12,
@@ -1231,7 +1244,13 @@
       catharsisTrust: 0.1,
       /** Presence snapshots kept, one per tick: the witness evidence window. */
       witnessWindowTicks: 8,
-      suspicionBase: 0.34
+      /** The total suspicion one act casts per observer, divided among
+       *  the suspects seen in or next door to the room by squared
+       *  evidence weight and prior distrust. Sized so the culprit of a
+       *  quiet act takes the larger share and lands near the gossip
+       *  threshold: one act makes a named suspect, two or three acts
+       *  inside the fade make a case. */
+      suspicionBase: 0.55
     },
     chronicle: {
       /** True: the chronicle names culprits as log-truth. False: it prints
@@ -1303,6 +1322,17 @@
        */
       gossipThreshold: 0.48,
       gossipTransfer: 8e-3,
+      /** Rumour loses strength as it travels: a listener can catch at
+       *  most this fraction of the level the speaker holds. First-hand
+       *  suspicion (from evidence, or from hearing a claim spoken in
+       *  the room) is untouched; only the gossip path attenuates, so a
+       *  suspicion passed hand to hand sinks below the accusation line
+       *  within a few retellings unless evidence refreshes it. Without
+       *  the attenuation, gossip's cap was the speaker's full level and
+       *  the twice-daily meals re-topped the whole ship at that level
+       *  forever: measured on seed 42, accusations re-saturate near
+       *  10 a day by month six however the evidence inflow is bounded. */
+      gossipFidelity: 0.8,
       /** A tipping of one person's suspicion of one target is recorded at
        *  most once per this many ticks, however often rumour re-tops it. */
       gossipTipCooldownTicks: 144,
@@ -4181,7 +4211,7 @@
       const before = suspicionOf(listener.beliefs, id);
       if (before >= held) continue;
       const after = Math.min(
-        held,
+        held * CONFIG.routine.gossipFidelity,
         threshold,
         before + CONFIG.routine.gossipTransfer * receptivity
       );
@@ -4280,6 +4310,8 @@
         other.lastAccusationTick = w.tick;
         for (const listener of crew) {
           if (listener === accuser || listener === other) continue;
+          if (listener.dead || listener.leftShip || listener.ashore) continue;
+          if (listener.room !== accuser.room) continue;
           driftSuspicion(
             listener.beliefs,
             other.id,
@@ -4450,22 +4482,33 @@
         (sum, trait) => sum + (CONFIG.traitEffects[trait]?.suspicion ?? 0),
         0
       );
+      const near = [];
+      let totalWeight = 0;
       for (const suspect of crew) {
         if (suspect === observer) continue;
         if (suspect.ashore || suspect.dead || suspect.leftShip) continue;
         let evidence = 0;
+        let minDistance = Infinity;
         for (let i = 0; i < history.length; i++) {
           const snapshot = history[i];
           const seenRoom = snapshot[suspect.id];
           if (seenRoom === void 0) continue;
-          const proximity = 1 / (1 + ship.distance(seenRoom, system.room));
+          const distance = ship.distance(seenRoom, system.room);
+          if (distance < minDistance) minDistance = distance;
+          const proximity = 1 / (1 + distance);
           const age = history.length - 1 - i;
           const recency = 1 - 0.4 * (age / windowSize);
           if (proximity * recency > evidence) evidence = proximity * recency;
         }
-        if (evidence <= 0) continue;
+        if (evidence <= 0 || minDistance > 1) continue;
         const distrust = 0.75 + 0.5 * (0.5 - trustOf(observer.beliefs, suspect.id));
-        const gain = CONFIG.sabotage.suspicionBase * evidence * distrust * (1 + anxiousBonus);
+        const weight = evidence * evidence * distrust;
+        near.push({ suspect, weight });
+        totalWeight += weight;
+      }
+      if (totalWeight <= 0) continue;
+      for (const { suspect, weight } of near) {
+        const gain = CONFIG.sabotage.suspicionBase * (1 + anxiousBonus) * (weight / totalWeight);
         driftSuspicion(observer.beliefs, suspect.id, gain);
       }
     }

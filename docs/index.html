@@ -2362,6 +2362,21 @@
       commendationGlobalCooldownTicks: 1440,
       commendationMemberCooldownTicks: 4320,
       legitimacyStart: 0.7,
+      /** Elections: one seat (never the captain's) comes up per
+       *  cycle, on a stagger. A challenger from the seat's own
+       *  department declares, the campaign runs its days in the
+       *  open, and the whole crew votes: trust, bonds, department
+       *  loyalty, incumbency, and whatever sway the campaign won.
+       *  The winner takes the seat, not the job. */
+      electionCycleDays: 45,
+      firstElectionDay: 18,
+      campaignDays: 3,
+      campaignBeatTicks: 72,
+      electionSwayPerBeat: 0.02,
+      electionEndorseSway: 0.05,
+      electionIncumbency: 0.08,
+      electionDeptLoyalty: 0.18,
+      electionBondWeight: 0.6,
       /** A seat holder below this health retires hurt at the daily check. */
       retireHealth: 0.3,
       /** Stores counts drift when the quartermaster's seat stands empty:
@@ -3856,6 +3871,69 @@
           line(
             `${ts} \u2014 The council refuses to ratify ${person(str2(data, "member"))} as First Officer. The seat stands empty again.`,
             true
+          );
+          break;
+        }
+        case "election_called": {
+          const seatTitles = {
+            captain: "Captain's",
+            "first officer": "First Officer's",
+            "chief engineer": "Chief Engineer's",
+            "chief medical officer": "Chief Medical Officer's",
+            "security chief": "Security Chief's",
+            "science officer": "Science Officer's",
+            quartermaster: "Quartermaster's"
+          };
+          line(
+            `${ts} \u2014 An election is called for the ${seatTitles[str2(data, "seat")] ?? str2(data, "seat")} seat. ${person(str2(data, "incumbent"))} stands for it, and the campaign runs three days.`,
+            true
+          );
+          break;
+        }
+        case "election_result": {
+          const seatTitles = {
+            captain: "Captain's",
+            "first officer": "First Officer's",
+            "chief engineer": "Chief Engineer's",
+            "chief medical officer": "Chief Medical Officer's",
+            "security chief": "Security Chief's",
+            "science officer": "Science Officer's",
+            quartermaster: "Quartermaster's"
+          };
+          const winner = person(str2(data, "winner"));
+          line(
+            data.changed === true ? `${ts} \u2014 The crew votes, and the ${seatTitles[str2(data, "seat")] ?? str2(data, "seat")} seat changes hands: ${winner} takes it.` : `${ts} \u2014 The crew votes, and ${winner} holds the ${seatTitles[str2(data, "seat")] ?? str2(data, "seat")} seat.`,
+            true
+          );
+          break;
+        }
+        case "election_unopposed": {
+          const seatTitles = {
+            captain: "Captain's",
+            "first officer": "First Officer's",
+            "chief engineer": "Chief Engineer's",
+            "chief medical officer": "Chief Medical Officer's",
+            "security chief": "Security Chief's",
+            "science officer": "Science Officer's",
+            quartermaster: "Quartermaster's"
+          };
+          line(
+            `${ts} \u2014 No one stands against ${person(str2(data, "incumbent"))} for the ${seatTitles[str2(data, "seat")] ?? str2(data, "seat")} seat. Returned unopposed.`,
+            true
+          );
+          break;
+        }
+        case "election_endorsed": {
+          line(
+            `${ts} \u2014 The captain endorses ${person(str2(data, "candidate"))} for the council seat.`,
+            false
+          );
+          break;
+        }
+        case "election_void": {
+          line(
+            `${ts} \u2014 The election for a council seat falls through: ${str2(data, "reason")}.`,
+            false
           );
           break;
         }
@@ -8164,7 +8242,11 @@
       unrepairedFailures: /* @__PURE__ */ new Set(),
       sabotagedSystems: /* @__PURE__ */ new Set(),
       commendationAt: {},
-      lastCommendationTick: -1e6
+      lastCommendationTick: -1e6,
+      election: null,
+      nextElectionTick: CONFIG.council.firstElectionDay * CONFIG.time.ticksPerDay,
+      electionSeatCursor: 0,
+      electionsHeld: 0
     };
   }
   function byId(crew, id) {
@@ -9818,7 +9900,225 @@
         w.emit("put_off", [member.id], { member: member.id, port: portName });
       }
     }
+    stepElections(w, state, crew);
     syncPublic();
+  }
+  var ELECTABLE_SEATS = SEATS.filter(
+    (s) => s.key !== "captain"
+  ).map((s) => s.key);
+  function meanTrust(crew, id) {
+    let sum = 0;
+    let n = 0;
+    for (const m of crew) {
+      if (m.id === id || m.dead || m.leftShip) continue;
+      sum += trustOf(m.beliefs, id);
+      n++;
+    }
+    return n === 0 ? 0 : sum / n;
+  }
+  function startElection(w, state, crew, seatKey, incumbent) {
+    const cfg = CONFIG.council;
+    const def = SEATS.find((s) => s.key === seatKey);
+    if (def === void 0) return;
+    const dept = departmentOfRole(def.role);
+    const holders = new Set(
+      Object.values(state.seats).filter((v) => v !== null)
+    );
+    const baseEligible = (m) => alive(m) && w.tick >= m.confinedUntil && m.id !== incumbent.id && !holders.has(m.id);
+    let eligible = crew.filter(
+      (m) => baseEligible(m) && departmentOfRole(m.roleKey) === dept
+    );
+    const openSeat = eligible.length === 0;
+    if (openSeat) eligible = crew.filter(baseEligible);
+    const ranked = eligible.map((m) => ({ member: m, standing: meanTrust(crew, m.id) })).sort((a, b) => b.standing - a.standing);
+    const challengers = [];
+    const lead = ranked[0];
+    if (lead !== void 0) {
+      challengers.push(lead.member);
+      const second = ranked.find(
+        (r) => r.member !== lead.member && r.member.traits.includes("bold") && (lead.standing <= 0 || r.standing >= lead.standing * 0.5)
+      );
+      if (second !== void 0) challengers.push(second.member);
+    }
+    state.electionsHeld++;
+    if (challengers.length === 0) {
+      w.emit("election_unopposed", [incumbent.id], {
+        seat: seatKey,
+        incumbent: incumbent.id
+      });
+      return;
+    }
+    const tpd = CONFIG.time.ticksPerDay;
+    state.election = {
+      seatKey,
+      incumbentId: incumbent.id,
+      challengerIds: challengers.map((c) => c.id),
+      startedTick: w.tick,
+      endsTick: w.tick + cfg.campaignDays * tpd,
+      beatsDone: 0,
+      endorsed: false,
+      sway: {}
+    };
+    w.emit("election_called", [incumbent.id, ...state.election.challengerIds], {
+      seat: seatKey,
+      incumbent: incumbent.id,
+      challengers: state.election.challengerIds,
+      open: openSeat
+    });
+    for (const c of challengers) {
+      w.emit("election_declared", [c.id], {
+        seat: seatKey,
+        candidate: c.id,
+        incumbent: incumbent.id
+      });
+    }
+  }
+  function runElectionVote(w, state, crew) {
+    const cfg = CONFIG.council;
+    const election = state.election;
+    if (election === null) return;
+    const candidateIds = [election.incumbentId, ...election.challengerIds];
+    const counts = {};
+    for (const id of candidateIds) counts[id] = 0;
+    const ballots = [];
+    for (const voter of crew) {
+      if (voter.dead || voter.leftShip) continue;
+      let best = null;
+      let bestScore = -Infinity;
+      for (const candId of candidateIds) {
+        const cand = byId(crew, candId);
+        if (cand === void 0) continue;
+        let score;
+        if (voter.id === candId) {
+          score = Infinity;
+        } else {
+          score = trustOf(voter.beliefs, candId) + cfg.electionBondWeight * bondOf(voter.beliefs, candId) + (departmentOfRole(cand.roleKey) === departmentOfRole(voter.roleKey) ? cfg.electionDeptLoyalty : 0) + (candId === election.incumbentId ? cfg.electionIncumbency : 0) + (election.sway[candId] ?? 0);
+        }
+        if (score > bestScore) {
+          bestScore = score;
+          best = candId;
+        }
+      }
+      if (best !== null) {
+        counts[best] = (counts[best] ?? 0) + 1;
+        ballots.push({ member: voter.id, choice: best });
+      }
+    }
+    let winner = election.incumbentId;
+    for (const id of candidateIds) {
+      if ((counts[id] ?? 0) > (counts[winner] ?? 0)) winner = id;
+    }
+    const total = ballots.length;
+    const share = total === 0 ? 0 : (counts[winner] ?? 0) / total;
+    const changed = winner !== election.incumbentId;
+    if (changed) state.seats[election.seatKey] = winner;
+    if (changed && share >= 0.5) {
+      state.legitimacy = Math.min(1, state.legitimacy + 0.02);
+    } else if (share < 0.45) {
+      state.legitimacy = Math.max(0, state.legitimacy - 0.01);
+    }
+    w.emit("election_result", [winner], {
+      seat: election.seatKey,
+      winner,
+      incumbent: election.incumbentId,
+      changed,
+      votes: counts,
+      ballots,
+      share: r3(share)
+    });
+    state.election = null;
+  }
+  function stepElections(w, state, crew) {
+    const cfg = CONFIG.council;
+    const tpd = CONFIG.time.ticksPerDay;
+    if (state.election === null && w.tick >= state.nextElectionTick) {
+      state.nextElectionTick = w.tick + cfg.electionCycleDays * tpd;
+      for (let tries = 0; tries < ELECTABLE_SEATS.length; tries++) {
+        const idx = (state.electionSeatCursor + tries) % ELECTABLE_SEATS.length;
+        const seatKey = ELECTABLE_SEATS[idx];
+        const holder = byId(crew, state.seats[seatKey] ?? null);
+        if (holder !== void 0 && alive(holder)) {
+          state.electionSeatCursor = idx + 1;
+          startElection(w, state, crew, seatKey, holder);
+          break;
+        }
+      }
+    }
+    const election = state.election;
+    if (election === null) return;
+    if (state.seats[election.seatKey] !== election.incumbentId) {
+      w.emit("election_void", [], {
+        seat: election.seatKey,
+        reason: "the seat changed hands"
+      });
+      state.election = null;
+      return;
+    }
+    const incumbent = byId(crew, election.incumbentId);
+    if (incumbent === void 0 || !alive(incumbent)) {
+      w.emit("election_void", [], {
+        seat: election.seatKey,
+        reason: "the incumbent is gone"
+      });
+      state.election = null;
+      return;
+    }
+    for (const id of [...election.challengerIds]) {
+      const c = byId(crew, id);
+      if (c === void 0 || !alive(c)) {
+        election.challengerIds = election.challengerIds.filter((x) => x !== id);
+        w.emit("election_withdrawn", [id], {
+          seat: election.seatKey,
+          candidate: id
+        });
+      }
+    }
+    if (election.challengerIds.length === 0) {
+      state.electionsHeld++;
+      w.emit("election_unopposed", [election.incumbentId], {
+        seat: election.seatKey,
+        incumbent: election.incumbentId
+      });
+      state.election = null;
+      return;
+    }
+    if (!election.endorsed && w.tick >= election.startedTick + tpd && w.tick < election.endsTick) {
+      election.endorsed = true;
+      const captain = byId(crew, captainId(state));
+      if (captain !== void 0 && alive(captain) && captain.id !== election.incumbentId && !election.challengerIds.includes(captain.id)) {
+        const scored = [election.incumbentId, ...election.challengerIds].map((id) => ({ id, trust: trustOf(captain.beliefs, id) })).sort((a, b) => b.trust - a.trust);
+        const top = scored[0];
+        const next = scored[1];
+        if (top !== void 0 && next !== void 0 && top.trust - next.trust > 0.25) {
+          election.sway[top.id] = (election.sway[top.id] ?? 0) + cfg.electionEndorseSway;
+          w.emit("election_endorsed", [captain.id, top.id], {
+            seat: election.seatKey,
+            candidate: top.id,
+            by: captain.id
+          });
+        }
+      }
+    }
+    const beatDue = election.startedTick + (election.beatsDone + 1) * cfg.campaignBeatTicks;
+    if (w.tick >= beatDue && w.tick < election.endsTick) {
+      const order = [...election.challengerIds, election.incumbentId];
+      const candId = order[election.beatsDone % order.length];
+      const kinds = ["promise", "record", "attack"];
+      const kind = kinds[election.beatsDone % kinds.length];
+      election.sway[candId] = (election.sway[candId] ?? 0) + cfg.electionSwayPerBeat;
+      const rivals = order.filter((id) => id !== candId);
+      w.emit("election_campaign", [candId], {
+        seat: election.seatKey,
+        candidate: candId,
+        kind,
+        rival: kind === "attack" ? rivals[0] ?? null : null,
+        beat: election.beatsDone
+      });
+      election.beatsDone++;
+    }
+    if (w.tick >= election.endsTick) {
+      runElectionVote(w, state, crew);
+    }
   }
   function checkCouncilState(state, crew) {
     if (state.legitimacy < 0 || state.legitimacy > 1) {
@@ -9830,6 +10130,29 @@
       if (holder !== null && holder !== void 0 && !ids.has(holder)) {
         throw new Error(`seat ${def.key} names unknown member ${holder}`);
       }
+    }
+    const election = state.election;
+    if (election !== null) {
+      if (!ELECTABLE_SEATS.includes(election.seatKey)) {
+        throw new Error(`election for non-electable seat ${election.seatKey}`);
+      }
+      if (!ids.has(election.incumbentId)) {
+        throw new Error(`election incumbent ${election.incumbentId} unknown`);
+      }
+      for (const id of election.challengerIds) {
+        if (!ids.has(id)) {
+          throw new Error(`election challenger ${id} unknown`);
+        }
+        if (id === election.incumbentId) {
+          throw new Error(`election challenger ${id} is the incumbent`);
+        }
+      }
+      if (election.endsTick <= election.startedTick) {
+        throw new Error(`election for ${election.seatKey} ends before it starts`);
+      }
+    }
+    if (state.electionsHeld < 0 || state.nextElectionTick < 0) {
+      throw new Error(`election bookkeeping out of range`);
     }
   }
 
@@ -10795,6 +11118,113 @@
           text: `Sentence: ${names.person(member)} is ${words[kind] ?? kind}.`
         };
       }
+      case "election_called": {
+        const seat = seatTitle(str3(event, "seat"));
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: null,
+          text: `An election is called for the ${seat} seat. Three days of campaigning, then the whole crew votes. Mind the posters.`
+        };
+      }
+      case "election_declared": {
+        const candidate = str3(event, "candidate");
+        if (candidate === "") return null;
+        const seat = seatTitle(str3(event, "seat"));
+        const lines = [
+          `I am standing for the ${seat} seat. You know my work. Judge it, and judge me beside it.`,
+          `Standing for the ${seat} seat. No promises I cannot keep: you will see me at the table, and you will hear the truth from it.`,
+          `I have put my name in for the ${seat} seat. Ask me anything, anywhere. That is the whole platform.`
+        ];
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: candidate,
+          text: lines[Math.floor(hash01(seq, 7) * lines.length)]
+        };
+      }
+      case "election_campaign": {
+        const candidate = str3(event, "candidate");
+        if (candidate === "") return null;
+        const seat = seatTitle(str3(event, "seat"));
+        const kind = str3(event, "kind");
+        let text;
+        if (kind === "record") {
+          const lines = [
+            `My record is the campaign. Check the work, check the watches I stood, then vote how you like.`,
+            `Everything I have done aboard is written down somewhere. Read it before you read my posters.`
+          ];
+          text = lines[Math.floor(hash01(seq, 8) * lines.length)];
+        } else if (kind === "attack") {
+          const rival = str3(event, "rival");
+          const rivalName = rival !== "" ? names.firstName(rival) : "my opponent";
+          const lines = [
+            `Ask ${rivalName} where they were the last time this ship needed hands. Then ask me.`,
+            `${rivalName} talks a fine table. The ${seat} seat is sat in, not talked in.`
+          ];
+          text = lines[Math.floor(hash01(seq, 9) * lines.length)];
+        } else {
+          const lines = [
+            `If I hold the ${seat} seat, sittings start on time and end with reasons given. That is the promise.`,
+            `Vote for me and the ${seat} seat answers questions in the mess, not just at the table.`,
+            `My promise is small and keepable: the ${seat} seat, present at every sitting, awake at every vote.`
+          ];
+          text = lines[Math.floor(hash01(seq, 10) * lines.length)];
+        }
+        return { kind: "post", seq, tick, author: candidate, text };
+      }
+      case "election_endorsed": {
+        const by = str3(event, "by");
+        const candidate = str3(event, "candidate");
+        if (by === "" || candidate === "") return null;
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: by,
+          text: `For the seat: I have watched ${names.firstName(candidate)} work, and I am putting my name behind theirs. Vote as you judge, but judge knowing that.`
+        };
+      }
+      case "election_unopposed": {
+        const incumbent = str3(event, "incumbent");
+        if (incumbent === "") return null;
+        const seat = seatTitle(str3(event, "seat"));
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: null,
+          text: `No challenger stood for the ${seat} seat. ${names.person(incumbent)} is returned unopposed.`
+        };
+      }
+      case "election_result": {
+        const ballots = Array.isArray(event.data.ballots) ? event.data.ballots : [];
+        if (ballots.length === 0) return null;
+        const byChoice = /* @__PURE__ */ new Map();
+        for (const entry of ballots) {
+          if (typeof entry !== "object" || entry === null) continue;
+          const record = entry;
+          const member = typeof record.member === "string" ? record.member : "";
+          const choice = typeof record.choice === "string" ? record.choice : "";
+          if (member === "" || choice === "") continue;
+          const list = byChoice.get(choice) ?? [];
+          list.push(member);
+          byChoice.set(choice, list);
+        }
+        if (byChoice.size === 0) return null;
+        const seat = seatTitle(str3(event, "seat"));
+        const winner = str3(event, "winner");
+        const winnerName = winner !== "" ? names.person(winner) : "the winner";
+        const question = `Who holds the ${seat} seat?`;
+        const outcome = event.data.changed === true ? `${winnerName} takes the ${seat} seat.` : `${winnerName} holds the ${seat} seat.`;
+        const bars = [...byChoice.entries()].map(([candId, voters]) => ({
+          choice: names.person(candId),
+          voters
+        }));
+        return { kind: "poll", seq, tick, question, outcome, bars };
+      }
       case "council_finding": {
         const votes = Array.isArray(event.data.votes) ? event.data.votes : [];
         if (votes.length === 0) return null;
@@ -10855,6 +11285,18 @@
       default:
         return null;
     }
+  }
+  var SEAT_TITLES = {
+    captain: "Captain's",
+    "first officer": "First Officer's",
+    "chief engineer": "Chief Engineer's",
+    "chief medical officer": "Chief Medical Officer's",
+    "security chief": "Security Chief's",
+    "science officer": "Science Officer's",
+    quartermaster: "Quartermaster's"
+  };
+  function seatTitle(key2) {
+    return SEAT_TITLES[key2] ?? key2;
   }
   var DEFENCE = [
     "Leave them alone.",
@@ -17421,7 +17863,7 @@
     appointment: "Appointment",
     course: "Course"
   };
-  var SEAT_TITLES = {
+  var SEAT_TITLES2 = {
     captain: "Captain",
     "first officer": "First Officer",
     "chief engineer": "Chief Engineer",
@@ -17533,16 +17975,28 @@
   function renderCouncilSeats() {
     const seats = run.council.seats;
     const legitimacy = Math.round(run.council.legitimacy * 100);
-    const sig = CONFIG.council.seats.map((def) => seats[def.key] ?? "-").join("|") + `#${legitimacy}`;
+    const election = run.council.election;
+    const electionSig = election === null ? "" : `${election.seatKey}:${election.incumbentId}:${election.challengerIds.join(",")}:${Math.floor(election.endsTick / CONFIG.time.ticksPerDay)}`;
+    const sig = CONFIG.council.seats.map((def) => seats[def.key] ?? "-").join("|") + `#${legitimacy}#${electionSig}`;
     if (sig === seatsSig) return;
     seatsSig = sig;
     councilSeatsEl.replaceChildren();
+    if (election !== null) {
+      const banner = document.createElement("div");
+      banner.className = "legitimacy-row";
+      const label = document.createElement("span");
+      const seatName = SEAT_TITLES2[election.seatKey] ?? election.seatKey;
+      const challengers = election.challengerIds.map((id) => personName(id)).join(" and ");
+      label.textContent = `Election for the ${seatName} seat: ${personName(election.incumbentId)} stands against ${challengers}. The crew votes on day ${Math.floor(election.endsTick / CONFIG.time.ticksPerDay) + 1}.`;
+      banner.appendChild(label);
+      councilSeatsEl.appendChild(banner);
+    }
     for (const def of CONFIG.council.seats) {
       const row = document.createElement("div");
       row.className = "seat-row";
       const name = document.createElement("span");
       name.className = "seat-name";
-      name.textContent = SEAT_TITLES[def.key] ?? def.key;
+      name.textContent = SEAT_TITLES2[def.key] ?? def.key;
       const holder = document.createElement("span");
       const holderId = seats[def.key];
       holder.className = "seat-holder" + (holderId === null || holderId === void 0 ? " vacant" : "");

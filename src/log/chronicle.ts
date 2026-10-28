@@ -793,6 +793,72 @@ class Renderer implements ChronicleRenderer {
         );
         break;
       }
+      case "election_called": {
+        const seatTitles: Record<string, string> = {
+          captain: "Captain's",
+          "first officer": "First Officer's",
+          "chief engineer": "Chief Engineer's",
+          "chief medical officer": "Chief Medical Officer's",
+          "security chief": "Security Chief's",
+          "science officer": "Science Officer's",
+          quartermaster: "Quartermaster's",
+        };
+        line(
+          `${ts} — An election is called for the ${seatTitles[str(data, "seat")] ?? str(data, "seat")} seat. ` +
+            `${person(str(data, "incumbent"))} stands for it, and the campaign runs three days.`,
+          true,
+        );
+        break;
+      }
+      case "election_result": {
+        const seatTitles: Record<string, string> = {
+          captain: "Captain's",
+          "first officer": "First Officer's",
+          "chief engineer": "Chief Engineer's",
+          "chief medical officer": "Chief Medical Officer's",
+          "security chief": "Security Chief's",
+          "science officer": "Science Officer's",
+          quartermaster: "Quartermaster's",
+        };
+        const winner = person(str(data, "winner"));
+        line(
+          data.changed === true
+            ? `${ts} — The crew votes, and the ${seatTitles[str(data, "seat")] ?? str(data, "seat")} seat changes hands: ${winner} takes it.`
+            : `${ts} — The crew votes, and ${winner} holds the ${seatTitles[str(data, "seat")] ?? str(data, "seat")} seat.`,
+          true,
+        );
+        break;
+      }
+      case "election_unopposed": {
+        const seatTitles: Record<string, string> = {
+          captain: "Captain's",
+          "first officer": "First Officer's",
+          "chief engineer": "Chief Engineer's",
+          "chief medical officer": "Chief Medical Officer's",
+          "security chief": "Security Chief's",
+          "science officer": "Science Officer's",
+          quartermaster: "Quartermaster's",
+        };
+        line(
+          `${ts} — No one stands against ${person(str(data, "incumbent"))} for the ${seatTitles[str(data, "seat")] ?? str(data, "seat")} seat. Returned unopposed.`,
+          true,
+        );
+        break;
+      }
+      case "election_endorsed": {
+        line(
+          `${ts} — The captain endorses ${person(str(data, "candidate"))} for the council seat.`,
+          false,
+        );
+        break;
+      }
+      case "election_void": {
+        line(
+          `${ts} — The election for a council seat falls through: ${str(data, "reason")}.`,
+          false,
+        );
+        break;
+      }
       case "commendation": {
         line(
           `${ts} — ${person(str(data, "member"))} is commended for restoring the ${system(str(data, "system"))}.`,

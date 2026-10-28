@@ -1965,3 +1965,59 @@ spending its weight (prices, welcomes, bounties), and the
 liaison/imposed-officer arrivals, which belong to the crew
 arrivals build. Council elections and campaigning follow as
 their own build on the council machinery.
+
+## 2026-10-28 (morning): council elections and campaigning
+
+The maintainer asked for elections tied into the existing
+council, and they are built as a rhythm of the council rather
+than a second institution. One seat per 45-day cycle stands
+(first election day 18, staggered by rotation; the captain's
+seat never stands, relief motions own that question). The
+incumbent is challenged from the seat's own department: the
+eligible member the crew trusts most declares, and a second
+may declare if they are bold and hold at least half the
+leader's standing. No eligible challenger: the incumbent is
+returned unopposed, which on a twelve-person ship is common
+and honest (several departments sail with one plausible
+holder).
+
+One structural correction came out of the first dig: Command
+sails with two people, so the First Officer's seat could never
+be contested from its own department. The rule now: a
+department that fields no eligible challenger opens its seat
+to the whole unseated crew (the event carries open: true).
+Seed 42's first election is the proof: the First Officer
+stood against a challenger from the deck, took the captain's
+endorsement on day two, and held.
+
+The campaign runs three days in the open. Beats alternate
+between challengers and incumbent (promise, record, attack,
+rotating), each worth a little sway (0.02); on the second day
+the captain may endorse, only on a clear personal preference
+(a trust gap over 0.25), worth 0.05. The count is crew-wide
+and priced from beliefs alone: trust, bonds at 0.6, department
+loyalty 0.18, incumbency 0.08, plus campaign sway; candidates
+vote for themselves; ties hold for the incumbent. The winner
+is written into the council's own seat map, so sittings,
+recusals, and succession downstream see the new holder with
+no parallel structure. A changed seat on a clear mandate
+lifts legitimacy a touch; a fractured count lowers it.
+
+Mid-campaign ground shifts are handled plainly: if the seat
+changes hands another way, or the incumbent is gone, the
+election is void; a challenger who dies or leaves withdraws,
+and an empty field returns the incumbent unopposed.
+
+Surfacing, per the standing law: declarations, campaign
+posts, and the captain's endorsement all post to Scuttlebutt
+in the candidates' own voices; the result is a poll card with
+every voter's name under their choice; the Council tab shows
+a banner while a campaign runs; the chronicle records calls,
+results, and unopposed returns.
+
+Measured over two years (dig, seeds 42/11/7): 9-11 elections
+called per seed, 16 concluded counting unopposed returns,
+campaign beats 43-55, endorsements 4-6, seats changing hands
+0-2 per seed. Incumbents hold more often than not, which a
+small crew that knows its officers would; the door is real
+where trust has actually moved.

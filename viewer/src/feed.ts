@@ -446,6 +446,120 @@ export function feedItemFor(event: SimEvent, names: FeedNames): FeedItem | null 
         text: `Sentence: ${names.person(member)} is ${words[kind] ?? kind}.`,
       };
     }
+    case "election_called": {
+      const seat = seatTitle(str(event, "seat"));
+      return {
+        kind: "post",
+        seq,
+        tick,
+        author: null,
+        text: `An election is called for the ${seat} seat. Three days of campaigning, then the whole crew votes. Mind the posters.`,
+      };
+    }
+    case "election_declared": {
+      const candidate = str(event, "candidate");
+      if (candidate === "") return null;
+      const seat = seatTitle(str(event, "seat"));
+      const lines = [
+        `I am standing for the ${seat} seat. You know my work. Judge it, and judge me beside it.`,
+        `Standing for the ${seat} seat. No promises I cannot keep: you will see me at the table, and you will hear the truth from it.`,
+        `I have put my name in for the ${seat} seat. Ask me anything, anywhere. That is the whole platform.`,
+      ];
+      return {
+        kind: "post",
+        seq,
+        tick,
+        author: candidate,
+        text: lines[Math.floor(hash01(seq, 7) * lines.length)] as string,
+      };
+    }
+    case "election_campaign": {
+      const candidate = str(event, "candidate");
+      if (candidate === "") return null;
+      const seat = seatTitle(str(event, "seat"));
+      const kind = str(event, "kind");
+      let text: string;
+      if (kind === "record") {
+        const lines = [
+          `My record is the campaign. Check the work, check the watches I stood, then vote how you like.`,
+          `Everything I have done aboard is written down somewhere. Read it before you read my posters.`,
+        ];
+        text = lines[Math.floor(hash01(seq, 8) * lines.length)] as string;
+      } else if (kind === "attack") {
+        const rival = str(event, "rival");
+        const rivalName = rival !== "" ? names.firstName(rival) : "my opponent";
+        const lines = [
+          `Ask ${rivalName} where they were the last time this ship needed hands. Then ask me.`,
+          `${rivalName} talks a fine table. The ${seat} seat is sat in, not talked in.`,
+        ];
+        text = lines[Math.floor(hash01(seq, 9) * lines.length)] as string;
+      } else {
+        const lines = [
+          `If I hold the ${seat} seat, sittings start on time and end with reasons given. That is the promise.`,
+          `Vote for me and the ${seat} seat answers questions in the mess, not just at the table.`,
+          `My promise is small and keepable: the ${seat} seat, present at every sitting, awake at every vote.`,
+        ];
+        text = lines[Math.floor(hash01(seq, 10) * lines.length)] as string;
+      }
+      return { kind: "post", seq, tick, author: candidate, text };
+    }
+    case "election_endorsed": {
+      const by = str(event, "by");
+      const candidate = str(event, "candidate");
+      if (by === "" || candidate === "") return null;
+      return {
+        kind: "post",
+        seq,
+        tick,
+        author: by,
+        text: `For the seat: I have watched ${names.firstName(candidate)} work, and I am putting my name behind theirs. Vote as you judge, but judge knowing that.`,
+      };
+    }
+    case "election_unopposed": {
+      const incumbent = str(event, "incumbent");
+      if (incumbent === "") return null;
+      const seat = seatTitle(str(event, "seat"));
+      return {
+        kind: "post",
+        seq,
+        tick,
+        author: null,
+        text: `No challenger stood for the ${seat} seat. ${names.person(incumbent)} is returned unopposed.`,
+      };
+    }
+    case "election_result": {
+      const ballots = Array.isArray(event.data.ballots)
+        ? event.data.ballots
+        : [];
+      if (ballots.length === 0) return null;
+      const byChoice = new Map<string, string[]>();
+      for (const entry of ballots) {
+        if (typeof entry !== "object" || entry === null) continue;
+        const record = entry as Record<string, unknown>;
+        const member =
+          typeof record.member === "string" ? record.member : "";
+        const choice =
+          typeof record.choice === "string" ? record.choice : "";
+        if (member === "" || choice === "") continue;
+        const list = byChoice.get(choice) ?? [];
+        list.push(member);
+        byChoice.set(choice, list);
+      }
+      if (byChoice.size === 0) return null;
+      const seat = seatTitle(str(event, "seat"));
+      const winner = str(event, "winner");
+      const winnerName = winner !== "" ? names.person(winner) : "the winner";
+      const question = `Who holds the ${seat} seat?`;
+      const outcome =
+        event.data.changed === true
+          ? `${winnerName} takes the ${seat} seat.`
+          : `${winnerName} holds the ${seat} seat.`;
+      const bars = [...byChoice.entries()].map(([candId, voters]) => ({
+        choice: names.person(candId),
+        voters,
+      }));
+      return { kind: "poll", seq, tick, question, outcome, bars };
+    }
     case "council_finding": {
       const votes = Array.isArray(event.data.votes)
         ? event.data.votes
@@ -523,6 +637,20 @@ export function feedItemFor(event: SimEvent, names: FeedNames): FeedItem | null 
     default:
       return null;
   }
+}
+
+const SEAT_TITLES: Record<string, string> = {
+  captain: "Captain's",
+  "first officer": "First Officer's",
+  "chief engineer": "Chief Engineer's",
+  "chief medical officer": "Chief Medical Officer's",
+  "security chief": "Security Chief's",
+  "science officer": "Science Officer's",
+  quartermaster: "Quartermaster's",
+};
+
+function seatTitle(key: string): string {
+  return SEAT_TITLES[key] ?? key;
 }
 
 const DEFENCE = [

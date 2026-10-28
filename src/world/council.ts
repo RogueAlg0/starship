@@ -375,6 +375,27 @@ export interface CouncilState {
   /** Tick of each member's last commendation sitting. */
   commendationAt: Record<string, number>;
   lastCommendationTick: number;
+  /** The live election, when a campaign is running. */
+  election: ElectionState | null;
+  /** Tick the next seat comes up for election. */
+  nextElectionTick: number;
+  /** Rotation cursor into the electable seats. */
+  electionSeatCursor: number;
+  /** Elections concluded, contested or not. */
+  electionsHeld: number;
+}
+
+/** One seat's election, from the call to the count. */
+export interface ElectionState {
+  seatKey: string;
+  incumbentId: string;
+  challengerIds: string[];
+  startedTick: number;
+  endsTick: number;
+  beatsDone: number;
+  endorsed: boolean;
+  /** Campaign sway per candidate id, won beat by beat. */
+  sway: Record<string, number>;
 }
 
 /** Seat the council from the roster's roles, as the ship sails. */
@@ -409,6 +430,10 @@ export function createCouncil(crew: readonly CrewMember[]): CouncilState {
     sabotagedSystems: new Set(),
     commendationAt: {},
     lastCommendationTick: -1000000,
+    election: null,
+    nextElectionTick: CONFIG.council.firstElectionDay * CONFIG.time.ticksPerDay,
+    electionSeatCursor: 0,
+    electionsHeld: 0,
   };
 }
 
@@ -2734,10 +2759,307 @@ export function stepCouncil(
     }
   }
 
+  stepElections(w, state, crew);
+
   syncPublic();
 }
 
 /** Invariant check: seats name living-or-no members, legitimacy in range. */
+
+/** Seats that stand for election: every chair but the captain's. */
+const ELECTABLE_SEATS: readonly string[] = SEATS.filter(
+  (s) => s.key !== "captain",
+).map((s) => s.key);
+
+/** How much the crew, on average, trusts a member: the standing
+ *  a challenger declares on, and an endorser's weight. */
+function meanTrust(crew: readonly CrewMember[], id: string): number {
+  let sum = 0;
+  let n = 0;
+  for (const m of crew) {
+    if (m.id === id || m.dead || m.leftShip) continue;
+    sum += trustOf(m.beliefs, id);
+    n++;
+  }
+  return n === 0 ? 0 : sum / n;
+}
+
+function startElection(
+  w: World,
+  state: CouncilState,
+  crew: readonly CrewMember[],
+  seatKey: string,
+  incumbent: CrewMember,
+): void {
+  const cfg = CONFIG.council;
+  const def = SEATS.find((s) => s.key === seatKey);
+  if (def === undefined) return;
+  const dept = departmentOfRole(def.role);
+  const holders = new Set(
+    Object.values(state.seats).filter((v) => v !== null),
+  );
+  const baseEligible = (m: CrewMember): boolean =>
+    alive(m) &&
+    w.tick >= m.confinedUntil &&
+    m.id !== incumbent.id &&
+    !holders.has(m.id);
+  let eligible = crew.filter(
+    (m) => baseEligible(m) && departmentOfRole(m.roleKey) === dept,
+  );
+  // An open seat: a department too small to field a challenger
+  // (Command sails with two) opens its seat to the whole
+  // unseated crew rather than returning its holder by default
+  // forever.
+  const openSeat = eligible.length === 0;
+  if (openSeat) eligible = crew.filter(baseEligible);
+  const ranked = eligible
+    .map((m) => ({ member: m, standing: meanTrust(crew, m.id) }))
+    .sort((a, b) => b.standing - a.standing);
+  const challengers: CrewMember[] = [];
+  const lead = ranked[0];
+  if (lead !== undefined) {
+    challengers.push(lead.member);
+    const second = ranked.find(
+      (r) =>
+        r.member !== lead.member &&
+        r.member.traits.includes("bold") &&
+        (lead.standing <= 0 || r.standing >= lead.standing * 0.5),
+    );
+    if (second !== undefined) challengers.push(second.member);
+  }
+  state.electionsHeld++;
+  if (challengers.length === 0) {
+    w.emit("election_unopposed", [incumbent.id], {
+      seat: seatKey,
+      incumbent: incumbent.id,
+    });
+    return;
+  }
+  const tpd = CONFIG.time.ticksPerDay;
+  state.election = {
+    seatKey,
+    incumbentId: incumbent.id,
+    challengerIds: challengers.map((c) => c.id),
+    startedTick: w.tick,
+    endsTick: w.tick + cfg.campaignDays * tpd,
+    beatsDone: 0,
+    endorsed: false,
+    sway: {},
+  };
+  w.emit("election_called", [incumbent.id, ...state.election.challengerIds], {
+    seat: seatKey,
+    incumbent: incumbent.id,
+    challengers: state.election.challengerIds,
+    open: openSeat,
+  });
+  for (const c of challengers) {
+    w.emit("election_declared", [c.id], {
+      seat: seatKey,
+      candidate: c.id,
+      incumbent: incumbent.id,
+    });
+  }
+}
+
+function runElectionVote(
+  w: World,
+  state: CouncilState,
+  crew: readonly CrewMember[],
+): void {
+  const cfg = CONFIG.council;
+  const election = state.election;
+  if (election === null) return;
+  const candidateIds = [election.incumbentId, ...election.challengerIds];
+  const counts: Record<string, number> = {};
+  for (const id of candidateIds) counts[id] = 0;
+  const ballots: { member: string; choice: string }[] = [];
+  for (const voter of crew) {
+    if (voter.dead || voter.leftShip) continue;
+    let best: string | null = null;
+    let bestScore = -Infinity;
+    for (const candId of candidateIds) {
+      const cand = byId(crew, candId);
+      if (cand === undefined) continue;
+      let score: number;
+      if (voter.id === candId) {
+        score = Infinity;
+      } else {
+        score =
+          trustOf(voter.beliefs, candId) +
+          cfg.electionBondWeight * bondOf(voter.beliefs, candId) +
+          (departmentOfRole(cand.roleKey) === departmentOfRole(voter.roleKey)
+            ? cfg.electionDeptLoyalty
+            : 0) +
+          (candId === election.incumbentId ? cfg.electionIncumbency : 0) +
+          (election.sway[candId] ?? 0);
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        best = candId;
+      }
+    }
+    if (best !== null) {
+      counts[best] = (counts[best] ?? 0) + 1;
+      ballots.push({ member: voter.id, choice: best });
+    }
+  }
+  // Most votes wins; ties hold for the incumbent, then for the
+  // earliest declared.
+  let winner = election.incumbentId;
+  for (const id of candidateIds) {
+    if ((counts[id] ?? 0) > (counts[winner] ?? 0)) winner = id;
+  }
+  const total = ballots.length;
+  const share = total === 0 ? 0 : (counts[winner] ?? 0) / total;
+  const changed = winner !== election.incumbentId;
+  if (changed) state.seats[election.seatKey] = winner;
+  if (changed && share >= 0.5) {
+    state.legitimacy = Math.min(1, state.legitimacy + 0.02);
+  } else if (share < 0.45) {
+    state.legitimacy = Math.max(0, state.legitimacy - 0.01);
+  }
+  w.emit("election_result", [winner], {
+    seat: election.seatKey,
+    winner,
+    incumbent: election.incumbentId,
+    changed,
+    votes: counts,
+    ballots,
+    share: r3(share),
+  });
+  state.election = null;
+}
+
+/** Elections and campaigning: the council's seats are held, in
+ *  the end, by the crew's consent. One seat per cycle stands;
+ *  the campaign plays out in the open over its days; the count
+ *  is priced from beliefs alone, so a campaign is won in the
+ *  mess and the corridors before it is won at the table. */
+function stepElections(
+  w: World,
+  state: CouncilState,
+  crew: readonly CrewMember[],
+): void {
+  const cfg = CONFIG.council;
+  const tpd = CONFIG.time.ticksPerDay;
+
+  if (state.election === null && w.tick >= state.nextElectionTick) {
+    state.nextElectionTick = w.tick + cfg.electionCycleDays * tpd;
+    for (let tries = 0; tries < ELECTABLE_SEATS.length; tries++) {
+      const idx = (state.electionSeatCursor + tries) % ELECTABLE_SEATS.length;
+      const seatKey = ELECTABLE_SEATS[idx] as string;
+      const holder = byId(crew, state.seats[seatKey] ?? null);
+      if (holder !== undefined && alive(holder)) {
+        state.electionSeatCursor = idx + 1;
+        startElection(w, state, crew, seatKey, holder);
+        break;
+      }
+    }
+  }
+
+  const election = state.election;
+  if (election === null) return;
+
+  // The ground can move mid-campaign: an incumbent who loses
+  // the seat another way ends the election with it.
+  if (state.seats[election.seatKey] !== election.incumbentId) {
+    w.emit("election_void", [], {
+      seat: election.seatKey,
+      reason: "the seat changed hands",
+    });
+    state.election = null;
+    return;
+  }
+  const incumbent = byId(crew, election.incumbentId);
+  if (incumbent === undefined || !alive(incumbent)) {
+    w.emit("election_void", [], {
+      seat: election.seatKey,
+      reason: "the incumbent is gone",
+    });
+    state.election = null;
+    return;
+  }
+  // Challengers who die or leave withdraw; an empty field
+  // returns the incumbent without a count.
+  for (const id of [...election.challengerIds]) {
+    const c = byId(crew, id);
+    if (c === undefined || !alive(c)) {
+      election.challengerIds = election.challengerIds.filter((x) => x !== id);
+      w.emit("election_withdrawn", [id], {
+        seat: election.seatKey,
+        candidate: id,
+      });
+    }
+  }
+  if (election.challengerIds.length === 0) {
+    state.electionsHeld++;
+    w.emit("election_unopposed", [election.incumbentId], {
+      seat: election.seatKey,
+      incumbent: election.incumbentId,
+    });
+    state.election = null;
+    return;
+  }
+
+  // The captain's endorsement, once, on the second day: given
+  // only on a clear personal preference, and worth real sway.
+  if (
+    !election.endorsed &&
+    w.tick >= election.startedTick + tpd &&
+    w.tick < election.endsTick
+  ) {
+    election.endorsed = true;
+    const captain = byId(crew, captainId(state));
+    if (
+      captain !== undefined &&
+      alive(captain) &&
+      captain.id !== election.incumbentId &&
+      !election.challengerIds.includes(captain.id)
+    ) {
+      const scored = [election.incumbentId, ...election.challengerIds]
+        .map((id) => ({ id, trust: trustOf(captain.beliefs, id) }))
+        .sort((a, b) => b.trust - a.trust);
+      const top = scored[0];
+      const next = scored[1];
+      if (top !== undefined && next !== undefined && top.trust - next.trust > 0.25) {
+        election.sway[top.id] =
+          (election.sway[top.id] ?? 0) + cfg.electionEndorseSway;
+        w.emit("election_endorsed", [captain.id, top.id], {
+          seat: election.seatKey,
+          candidate: top.id,
+          by: captain.id,
+        });
+      }
+    }
+  }
+
+  // Campaign beats until the count: candidates take turns in
+  // the open, and every turn is worth a little sway.
+  const beatDue =
+    election.startedTick + (election.beatsDone + 1) * cfg.campaignBeatTicks;
+  if (w.tick >= beatDue && w.tick < election.endsTick) {
+    const order = [...election.challengerIds, election.incumbentId];
+    const candId = order[election.beatsDone % order.length] as string;
+    const kinds = ["promise", "record", "attack"] as const;
+    const kind = kinds[election.beatsDone % kinds.length] as string;
+    election.sway[candId] =
+      (election.sway[candId] ?? 0) + cfg.electionSwayPerBeat;
+    const rivals = order.filter((id) => id !== candId);
+    w.emit("election_campaign", [candId], {
+      seat: election.seatKey,
+      candidate: candId,
+      kind,
+      rival: kind === "attack" ? (rivals[0] ?? null) : null,
+      beat: election.beatsDone,
+    });
+    election.beatsDone++;
+  }
+
+  if (w.tick >= election.endsTick) {
+    runElectionVote(w, state, crew);
+  }
+}
+
 export function checkCouncilState(
   state: CouncilState,
   crew: readonly CrewMember[],
@@ -2751,5 +3073,28 @@ export function checkCouncilState(
     if (holder !== null && holder !== undefined && !ids.has(holder)) {
       throw new Error(`seat ${def.key} names unknown member ${holder}`);
     }
+  }
+  const election = state.election;
+  if (election !== null) {
+    if (!ELECTABLE_SEATS.includes(election.seatKey)) {
+      throw new Error(`election for non-electable seat ${election.seatKey}`);
+    }
+    if (!ids.has(election.incumbentId)) {
+      throw new Error(`election incumbent ${election.incumbentId} unknown`);
+    }
+    for (const id of election.challengerIds) {
+      if (!ids.has(id)) {
+        throw new Error(`election challenger ${id} unknown`);
+      }
+      if (id === election.incumbentId) {
+        throw new Error(`election challenger ${id} is the incumbent`);
+      }
+    }
+    if (election.endsTick <= election.startedTick) {
+      throw new Error(`election for ${election.seatKey} ends before it starts`);
+    }
+  }
+  if (state.electionsHeld < 0 || state.nextElectionTick < 0) {
+    throw new Error(`election bookkeeping out of range`);
   }
 }

@@ -996,12 +996,31 @@ function trackCouncil(event: SimEvent): void {
 function renderCouncilSeats(): void {
   const seats = run.council.seats;
   const legitimacy = Math.round(run.council.legitimacy * 100);
+  const election = run.council.election;
+  const electionSig =
+    election === null
+      ? ""
+      : `${election.seatKey}:${election.incumbentId}:${election.challengerIds.join(",")}:${Math.floor(election.endsTick / CONFIG.time.ticksPerDay)}`;
   const sig =
     CONFIG.council.seats.map((def) => seats[def.key] ?? "-").join("|") +
-    `#${legitimacy}`;
+    `#${legitimacy}#${electionSig}`;
   if (sig === seatsSig) return;
   seatsSig = sig;
   councilSeatsEl.replaceChildren();
+  if (election !== null) {
+    const banner = document.createElement("div");
+    banner.className = "legitimacy-row";
+    const label = document.createElement("span");
+    const seatName = SEAT_TITLES[election.seatKey] ?? election.seatKey;
+    const challengers = election.challengerIds
+      .map((id) => personName(id))
+      .join(" and ");
+    label.textContent =
+      `Election for the ${seatName} seat: ${personName(election.incumbentId)} ` +
+      `stands against ${challengers}. The crew votes on day ${Math.floor(election.endsTick / CONFIG.time.ticksPerDay) + 1}.`;
+    banner.appendChild(label);
+    councilSeatsEl.appendChild(banner);
+  }
   for (const def of CONFIG.council.seats) {
     const row = document.createElement("div");
     row.className = "seat-row";

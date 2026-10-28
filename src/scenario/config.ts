@@ -1455,6 +1455,21 @@ export const CONFIG = {
     commendationGlobalCooldownTicks: 1440,
     commendationMemberCooldownTicks: 4320,
     legitimacyStart: 0.7,
+    /** Elections: one seat (never the captain's) comes up per
+     *  cycle, on a stagger. A challenger from the seat's own
+     *  department declares, the campaign runs its days in the
+     *  open, and the whole crew votes: trust, bonds, department
+     *  loyalty, incumbency, and whatever sway the campaign won.
+     *  The winner takes the seat, not the job. */
+    electionCycleDays: 45,
+    firstElectionDay: 18,
+    campaignDays: 3,
+    campaignBeatTicks: 72,
+    electionSwayPerBeat: 0.02,
+    electionEndorseSway: 0.05,
+    electionIncumbency: 0.08,
+    electionDeptLoyalty: 0.18,
+    electionBondWeight: 0.6,
     /** A seat holder below this health retires hurt at the daily check. */
     retireHealth: 0.3,
     /** Stores counts drift when the quartermaster's seat stands empty:

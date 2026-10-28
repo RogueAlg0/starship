@@ -1807,3 +1807,40 @@ kind's colour, and small prop redraws (bunk blanket stripe,
 crate braces, a mess table centrepiece). Verified by night and
 day screenshots before shipping; the crew animation and staging
 systems are untouched.
+
+## Scuttlebutt: the Log tab grows a social feed (Oct 28, 2026)
+
+The Log tab opens on Scuttlebutt, the ship's social feed, with
+the chronicle one tap behind it (the Highlights and Full detail
+toggle now belongs to the chronicle view only). The feed is a
+presentation layer over the same event stream: viewer/src/feed.ts
+turns events into posts, and no engine stream is drawn, so runs,
+hashes, and replay are untouched.
+
+Three voices. The crew post in their own words: a chatter event
+becomes a post carrying the exact words the speech layer composed
+for it, a gossip event becomes the suspecting party's pointed
+post (with the suspected party sometimes answering back), bonds,
+grudges, table games, meals with a notable pairing, accusations,
+and repairs all post from the person they happened to. The ship
+posts the announcements: departures, port calls, weather turns,
+failures, rationing, and deaths, in a flatter register. The
+council's findings render as polls: the question the sitting
+actually decided, one bar per choice with the voters named under
+it, and the outcome as the footer.
+
+Discipline: the feed asserts nothing the event did not carry;
+every name, system, room, and count in a post comes out of its
+event. Chatter is sampled the way the chronicle samples its
+highlights (notable chatter always posts, the rest on a hash
+sample), so small talk is wallpaper, not news. Template choice
+is a hash of the event's sequence number: deterministic, and
+free of charge to the engine.
+
+Two small repairs rode along, both found by the feed's own
+verification: the deck's speech-bubble layer resolved system
+names through the throwing ship lookup, so a chatter line with
+no system emptied the drain for that event; it now uses the
+viewer's find-based resolver. And a global [hidden] rule now
+backs the attribute, because display rules on the feed and the
+toggle groups were quietly overriding it.

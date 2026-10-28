@@ -44,8 +44,10 @@ import {
   departmentOf,
   faceStateOf,
   getPortraitCanvas,
+  hash01,
   stateSignature,
 } from "./faces.ts";
+import { feedItemFor, type FeedItem, type FeedNames } from "./feed.ts";
 import {
   ALERT_KIND_DEFS,
   AlertStack,
@@ -129,6 +131,10 @@ let selectedCrew: string | null = null;
  * touching the sim.
  */
 let logMode: "highlights" | "full" = "highlights";
+/** The Log tab's face: the Scuttlebutt feed first, the chronicle behind it. */
+let logView: "feed" | "chronicle" = "feed";
+const feedItems: FeedItem[] = [];
+let feedDirty = false;
 let weatherName = "calm";
 let stickToBottom = true;
 /** Which sheet the bottom sheet shows, or null while it is closed. */
@@ -168,6 +174,10 @@ const crewPanel = must<HTMLElement>("crew-panel");
 const chronicleEl = must<HTMLElement>("chronicle");
 const logHighlightsBtn = must<HTMLButtonElement>("log-highlights-btn");
 const logFullBtn = must<HTMLButtonElement>("log-full-btn");
+const feedEl = must<HTMLElement>("feed");
+const logViewFeedBtn = must<HTMLButtonElement>("log-view-feed-btn");
+const logViewChronicleBtn = must<HTMLButtonElement>("log-view-chronicle-btn");
+const logDetailToggle = must<HTMLElement>("log-detail-toggle");
 const sheetEl = must<HTMLElement>("sheet");
 const sheetBodyEl = must<HTMLElement>("sheet-body");
 const sheetTitleEl = must<HTMLElement>("sheet-title");
@@ -458,7 +468,7 @@ if (typeof ResizeObserver !== "undefined") {
 const TAB_TITLES: Record<string, string> = {
   crew: "Crew",
   council: "Council",
-  log: "Log",
+  log: "Scuttlebutt",
   ship: "Ship",
   map: "Map",
 };
@@ -489,7 +499,7 @@ function openSheet(tab: string): void {
   }
   // Each panel opens at its top; the log opens at its foot when
   // it is riding the bottom, as it did in its own scroller.
-  if (tab === "log" && stickToBottom) {
+  if (tab === "log" && stickToBottom && logView === "chronicle") {
     sheetBodyEl.scrollTop = sheetBodyEl.scrollHeight;
   } else {
     sheetBodyEl.scrollTop = 0;
@@ -1916,6 +1926,9 @@ function setLogMode(mode: "highlights" | "full", rebuild = true): void {
   if (rebuild) rebuildChronicleDom();
 }
 
+logViewFeedBtn.addEventListener("click", () => setLogView("feed"));
+logViewChronicleBtn.addEventListener("click", () => setLogView("chronicle"));
+
 /** The boot-time mode: the URL first, then the stored choice. */
 function initialLogMode(params: URLSearchParams): "highlights" | "full" {
   const fromUrl = params.get("log");
@@ -1927,6 +1940,153 @@ function initialLogMode(params: URLSearchParams): "highlights" | "full" {
     // No storage: the default stands.
   }
   return "highlights";
+}
+
+// ------------------------------------------------------------ scuttlebutt
+
+function feedNames(): FeedNames {
+  return {
+    person: (id) => personName(id),
+    firstName: (id) => personName(id).split(" ")[0] ?? personName(id),
+    system: (id) => systemName(id),
+    room: (index) => roomName(index),
+    ship: run.ship.name,
+  };
+}
+
+function feedTime(tick: number): string {
+  const tpd = CONFIG.time.ticksPerDay;
+  const day = Math.floor(tick / tpd) + 1;
+  const minutes = (tick % tpd) * 10;
+  const hh = String(Math.floor(minutes / 60)).padStart(2, "0");
+  const mm = String(minutes % 60).padStart(2, "0");
+  return `D${day} · ${hh}:${mm}`;
+}
+
+const MAX_FEED_DOM = 80;
+
+function feedAvatar(author: string | null): HTMLElement {
+  if (author === null) {
+    const div = document.createElement("div");
+    div.className = "feed-avatar ship";
+    div.textContent = "🚀";
+    return div;
+  }
+  const canvas = document.createElement("canvas");
+  canvas.className = "feed-avatar";
+  canvas.width = 28;
+  canvas.height = 28;
+  const member = crewById(author);
+  const ctx = canvas.getContext("2d");
+  if (ctx !== null && member !== undefined) {
+    ctx.drawImage(getPortraitCanvas(member, faceStateOf(member)), 0, 0, 28, 28);
+  }
+  return canvas;
+}
+
+function buildFeedCard(item: FeedItem): HTMLDivElement {
+  const card = document.createElement("div");
+  card.className = "feed-card";
+  const head = document.createElement("div");
+  head.className = "feed-head";
+  const time = document.createElement("span");
+  time.className = "feed-time";
+  time.textContent = feedTime(item.tick);
+  if (item.kind === "poll") {
+    head.append(feedAvatar(null));
+    const who = document.createElement("div");
+    who.className = "feed-who";
+    who.textContent = `${run.ship.name} · Council vote`;
+    head.append(who, time);
+    card.appendChild(head);
+    const q = document.createElement("div");
+    q.className = "poll-q";
+    q.textContent = item.question;
+    card.appendChild(q);
+    const total = item.bars.reduce((n, b) => n + b.voters.length, 0);
+    for (const bar of item.bars) {
+      const row = document.createElement("div");
+      row.className = "poll-row";
+      const label = document.createElement("div");
+      label.className = "poll-label";
+      label.textContent = `${bar.choice} · ${bar.voters.length}`;
+      const track = document.createElement("div");
+      track.className = "poll-track";
+      const fill = document.createElement("div");
+      fill.className = `poll-fill ${bar.choice}`;
+      fill.style.width = `${total > 0 ? Math.round((bar.voters.length / total) * 100) : 0}%`;
+      track.appendChild(fill);
+      const names = document.createElement("div");
+      names.className = "poll-names";
+      names.textContent = bar.voters.map((id) => personName(id)).join(", ");
+      row.append(label, track, names);
+      card.appendChild(row);
+    }
+    const outcome = document.createElement("div");
+    outcome.className = "poll-outcome";
+    outcome.textContent = item.outcome;
+    card.appendChild(outcome);
+    return card;
+  }
+  head.append(feedAvatar(item.author));
+  const who = document.createElement("div");
+  who.className = "feed-who";
+  if (item.author === null) {
+    who.textContent = run.ship.name;
+  } else {
+    const member = crewById(item.author);
+    who.textContent =
+      member !== undefined
+        ? `${member.name} · ${member.title}`
+        : personName(item.author);
+  }
+  head.append(who, time);
+  card.appendChild(head);
+  const text = document.createElement("div");
+  text.className = "feed-text";
+  text.textContent = item.text;
+  card.appendChild(text);
+  if (item.reply !== undefined) {
+    const reply = document.createElement("div");
+    reply.className = "feed-reply";
+    reply.append(feedAvatar(item.reply.author));
+    const rtext = document.createElement("div");
+    rtext.className = "feed-reply-text";
+    const rname = document.createElement("span");
+    rname.className = "feed-reply-name";
+    rname.textContent = personName(item.reply.author);
+    rtext.append(rname, document.createTextNode(` ${item.reply.text}`));
+    reply.appendChild(rtext);
+    card.appendChild(reply);
+  }
+  return card;
+}
+
+function renderFeed(): void {
+  feedEl.replaceChildren();
+  const items = feedItems.slice(-MAX_FEED_DOM).reverse();
+  const fragment = document.createDocumentFragment();
+  for (const item of items) fragment.appendChild(buildFeedCard(item));
+  if (items.length === 0) {
+    const div = document.createElement("div");
+    div.className = "feed-empty";
+    div.textContent = "Quiet so far. The ship is still clearing its throat.";
+    fragment.appendChild(div);
+  }
+  feedEl.appendChild(fragment);
+}
+
+function setLogView(view: "feed" | "chronicle"): void {
+  logView = view;
+  feedEl.hidden = view !== "feed";
+  chronicleEl.hidden = view !== "chronicle";
+  logDetailToggle.hidden = view !== "chronicle";
+  logViewFeedBtn.classList.toggle("active", view === "feed");
+  logViewChronicleBtn.classList.toggle("active", view === "chronicle");
+  logViewFeedBtn.setAttribute("aria-pressed", String(view === "feed"));
+  logViewChronicleBtn.setAttribute("aria-pressed", String(view === "chronicle"));
+  if (view === "feed") renderFeed();
+  else rebuildChronicleDom();
 }
 
 function buildLineDiv(line: ChronicleLine): HTMLDivElement {
@@ -2026,7 +2186,7 @@ function drainEvents(): void {
       if (speaker !== "") {
         const text = chatterText(event.data, {
           person: (id) => personName(id),
-          system: (id) => run.ship.systemById(id)?.name ?? id,
+          system: (id) => systemName(id),
           room: (index) => roomName(index),
         });
         if (text !== "") deck?.speechLine(speaker, text);
@@ -2125,6 +2285,19 @@ function drainEvents(): void {
     }
     trackCouncil(event);
     feedAlert(event);
+    // Small talk is the feed's wallpaper, not its news: notable
+    // chatter always posts, the rest posts on a hash sample, the
+    // same discipline the chronicle gives its chatter highlights.
+    const feedGate =
+      event.type !== "chatter" ||
+      event.data.notable === true ||
+      hash01(event.seq, 53) < 0.18;
+    const feedItem = feedGate ? feedItemFor(event, feedNames()) : null;
+    if (feedItem !== null) {
+      feedItems.push(feedItem);
+      if (feedItems.length > 400) feedItems.shift();
+      feedDirty = true;
+    }
     for (const line of renderer.push(event)) {
       const entry: LogLine = { line, type: event.type };
       allLines.push(entry);
@@ -2132,6 +2305,10 @@ function drainEvents(): void {
     }
   }
   appendLinesToDom(batch);
+  if (feedDirty) {
+    feedDirty = false;
+    if (logView === "feed") renderFeed();
+  }
 }
 
 // ---------------------------------------------------------------- voyage
@@ -2200,6 +2377,9 @@ function startVoyage(seed: number, opts?: { daily?: boolean }): void {
   lastStormToastTick = Number.NEGATIVE_INFINITY;
   alertStack.reset();
   chronicleEl.replaceChildren();
+  feedItems.length = 0;
+  feedDirty = false;
+  if (logView === "feed") renderFeed();
   shipNameEl.textContent = run.ship.name;
   seedInput.value = String(seed);
   buildDeck();

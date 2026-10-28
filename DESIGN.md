@@ -6,30 +6,31 @@ upstream, until there is something real and a fresh decision is made.
 ## The idea
 
 A deterministic simulation of a procedural starship and the crew who live
-aboard it, in the depth of dunya's civilization and squad simulations
-(see `~/workspace/research/dunya-engine-notes.md`).
+aboard it, in the depth of the reference civilization and squad
+simulations (internal research notes).
 
-The player does not play. Like dunya's civ and squad sims, there are no
+The player does not play. Like the reference civ and squad sims,
+there are no
 controls. The player picks a seed and witnesses. The seed chooses the ship,
 the crew, and the fate. The product is the chronicle: the ship's log, which
 records what truly happened while the crew acted on what they believed.
 
 ## Ingredients, and what each one contributes
 
-- Space Haven: a buildable, procedural ship; crew needs; life aboard as the
-  core loop of attention.
-- Star Trek: one ship, one named crew, a voyage made of episodes; the ship
-  as home.
-- Vanguard Galaxy: a procedural galaxy to wander; the ship as a small life
-  moving through a large indifference.
-- dunya's village sim: agents who decide from beliefs that can be false, so
+- A buildable-ship colony sim: a procedural ship; crew needs; life
+  aboard as the core loop of attention.
+- Ship-and-crew television: one ship, one named crew, a voyage made
+  of episodes; the ship as home.
+- A procedural spacefaring sim: a galaxy to wander; the ship as a
+  small life moving through a large indifference.
+- A village simulation: agents who decide from beliefs that can be false, so
   thefts, grudges, accusations and loyalties generate themselves; culture,
   needs, weather, and a world that pushes on people.
-- dunya's squad sim: detail at the level of body parts and single seconds;
+- A squad simulation: detail at the level of body parts and single seconds;
   proof the pattern forks to a new domain without breaking.
 
-The gap this fills: Space Haven's crew are mood machines with no false
-beliefs. Vanguard's crew are stat cards. Nobody has put beliefs-driven
+The gap this fills: the colony sim's crew are mood machines with
+no false beliefs. The spacefaring sim's crew are stat cards. Nobody has put beliefs-driven
 drama aboard a procedural starship with a truthful chronicle over it.
 
 ## Design pillars
@@ -53,8 +54,9 @@ drama aboard a procedural starship with a truthful chronicle over it.
 
 ## Kernel blueprint (pattern, clean-room implementation)
 
-Learned from dunya's design; implemented in our own code, never copied.
-Dunya is unlicensed, so its code is not ours to reuse. Its ideas are.
+Learned from a reference design; implemented in our own code,
+never copied. The reference is unlicensed, so its code is not
+ours to reuse. Its ideas are.
 
 - Fixed-order tick loop. The engine is the only writer of world state.
 - Agents never touch state and never see truth. The engine offers each
@@ -69,8 +71,9 @@ Dunya is unlicensed, so its code is not ours to reuse. Its ideas are.
   no platform imports inside the engine. A static scan proves it.
 - One engine, every home: because the kernel imports nothing
   platform-specific, the identical engine runs offline in a headless CLI
-  and in a browser viewer, exactly like the reference sims (in dunya,
-  only the two CLI files import node modules; everything else is pure).
+  and in a browser viewer, exactly like the reference sims (in the
+  reference project, only its two CLI files import node modules;
+  everything else is pure).
   The viewer is a separate layer added later; it never touches engine
   code paths.
 - Per-tick invariants: conservation ledgers, occupancy, value ranges.
@@ -92,7 +95,7 @@ Dunya is unlicensed, so its code is not ours to reuse. Its ideas are.
 - Sickbay uses a body and wound model in the squad sim's spirit:
   injuries per body part, treatment, healing over time, lasting marks.
 - The world pushes on the crew (from the civ-systems research,
-  `~/workspace/research/dunya-civ-systems.md`):
+  internal notes):
   - Shipboard weather: a small state machine on its own RNG stream
     (calm, solar wind, radiation storm, debris field), rolled on a fixed
     cadence and corrected by physical constraints. It does nothing
@@ -124,19 +127,18 @@ Dunya is unlicensed, so its code is not ours to reuse. Its ideas are.
 
 ## The galaxy around the ship
 
-From the Vanguard Galaxy and Starsector research
-(`~/workspace/research/galaxy-systems-vanguard-starsector.md`). The ship
+From the galaxy-systems research (internal notes). The ship
 is one crew among many simulated actors. Nobody controls any of them.
 
 - Procedural factions: generated per seed (names, temperaments, territory,
   relations), simulated on the same kernel as the crew. Factions hold
   beliefs, keep grudges, and act on both.
-- The Conquest rule, adapted from Vanguard Galaxy: every system has a
+- The Conquest rule: every system has a
   fleet strength, a reinforcement rate, and a controlling faction. On a
   fixed cadence, control can flip by strength and gate adjacency. Factions
   expand, shrink, and can be eliminated with no witness present. Every
   flip is logged with its reasons. The galaxy's wars write themselves.
-- Patrols run on suspicion, adapted from Starsector: a patrol acts on what
+- Patrols run on suspicion: a patrol acts on what
   it believes (transponder identity, cargo suspicion from behaviour), and
   a perception once logged cannot be un-seen. Law enforcement becomes a
   friction and incident engine that needs no scripting.
@@ -353,8 +355,8 @@ with the bounty design, whose posters are beliefs all the way down.
 at the user's direction. This is the big one: a ground layer on the
 same kernel, not a viewer trick and not a minigame bolted on.
 
-The structure is Star Trek's: ship life is the series, away missions
-are the episodes. Inside a voyage, the ship puts a landing party on
+The structure is the classic one: ship life is the series, away
+missions are the episodes. Inside a voyage, the ship puts a landing party on
 a procedural ground map (a planet surface, ruins, a wreck, a
 colony), rendered top-down like the deck, and the witness watches
 the squad sim's pleasures in our clothes: a map worth reading, slow
@@ -541,9 +543,9 @@ silent, as it should.
 
 Today every seed produces the same kind of ship in different
 clothes: the rooms, name, and crew vary, but nothing a ship IS
-changes what it needs. Vanguard Galaxy (researched Oct 18, 2026;
-~/workspace/research/vanguard-ship-crew-systems.md) shows the
-discipline that fixes this: typed randomness. Its ships are a
+changes what it needs. Researched ship-and-crew systems
+(Oct 18, 2026; internal notes) show the discipline that fixes
+this: typed randomness. Its ships are a
 matrix, 4 roles by 6 sizes making 24 classes and about 150 named
 hulls, and everything downstream of the class (cargo, hardpoints,
 crew capacity, even the size of the brig) is rolled inside the
@@ -614,8 +616,8 @@ before it is a stat:
   cross the ship, which the comms-and-runners design will feel.
   Brig: 4 cells.
 
-Brig capacity is borrowed directly from Vanguard, where it is a
-hull stat (3 cells on a Cutter, 78 on a Battlecruiser): when the
+Brig capacity is a hull stat, borrowed from the same research
+(a few cells on a cutter, dozens on a battlecruiser): when the
 council sentences more people than the brig holds, the sentence
 itself has to change, and the chronicle will say why.
 
@@ -660,7 +662,7 @@ itself has to change, and the chronicle will say why.
   different to a salvage rig), and bounties and convoys will be
   drawn as archetyped ships with captains, per the galaxy
   chapter.
-- **Capabilities, by construction.** Vanguard gates activities
+- **Capabilities, by construction.** The reference gates activities
   by equipment (any hull can mine if it fits a mining laser);
   we have no player to do the fitting, so the archetype is the
   fit: only a barge refines ore into parts (a production path
@@ -672,9 +674,9 @@ itself has to change, and the chronicle will say why.
 
 ### Manufacturers and factions (deferred to the galaxy chapter)
 
-Vanguard binds factions to hulls through 13 manufacturers
-(Mindus builds the best mining ships and sells them only to
-Mindus; the police yard's patrol hulls can only be taken by
+The reference binds factions to hulls through its
+manufacturers (the best mining ships sold only inside the
+faction; the police yard's patrol hulls obtainable only by
 boarding one). When the galaxy layer is built, archetype
 availability, hull naming flavour, and refit access should
 follow faction and manufacturer the same way, so a region of
@@ -705,11 +707,195 @@ its grammar from this chapter.
   witness at admissions and rationing sittings, which the
   council can ignore at the usual price.
 
+## Scale: cruisers, capitals, and thousands aboard (designed Oct 28, 2026, not built)
+
+The archetype chapter tops out at Large: about 18 crew. The
+maintainer's direction of Oct 28, 2026 goes further. Ships should
+reach destroyer and cruiser scale, with decks too large for one
+screen. Liners, combat craft, mining and trading hulls should run
+whole-ship operations as long processes, with the whole ship
+involved. Crews on the largest hulls should run into the
+thousands. This chapter is the design for that scale. It extends
+the archetype chapter; it does not replace it.
+
+### The law
+
+The ship has thousands aboard; the story has dozens.
+
+And underneath it, the standing discipline the reference squad
+sim teaches and the maintainer restated the same night: **simple
+systems, honestly interacting, beat elaborate ones.** The
+reference's worlds feel alive on a handful of rules. So this
+chapter is under a budget: cohorts are a few counters and no
+more, promotion has a short list of touches, arcs are the
+existing event machinery wearing a name rather than a new
+subsystem, and any mechanism that needs a second mechanism to
+explain it gets cut. Scale must come from the simple systems
+running at size, never from machinery added to manage the size.
+
+No witness can follow a thousand inner lives, and no engine at
+our tick rates can simulate a thousand full ones. The known
+failure mode is well known: a few hundred fully simulated
+people, and the simulation melts strong hardware. Full fidelity
+at capital scale is rejected. Tiered fidelity is the design.
+
+### Tiered crew
+
+Two tiers of person exist aboard a large ship.
+
+- **The named cast.** Fully simulated, exactly as crew are today:
+  beliefs, trust, suspicion, grudges, skills, body, quarters,
+  council eligibility. Officers, department seniors, and whoever
+  the voyage makes notable. Target size is a design variable per
+  ship size, in the range of 48 to 64. The cast is the story.
+- **The population.** Everyone else. The population lives as
+  department cohorts with aggregate state: headcount, morale,
+  fatigue, a skill pool, grievance pressure, a sickness count.
+  Cohorts work, rest, eat, and sicken as bodies of people. They
+  fill decks as ambient life in the viewer. They vote in polls as
+  blocs. They staff the long operations below.
+
+**Promotion joins the tiers.** A cohort member enters the cast
+when the story touches them: they witness a sabotage, stand
+accused, win a council seat, bond with a cast member, or lead an
+operation stage. Promotion generates a full person whose past is
+consistent with their cohort (department, watch, rough skill,
+grievances the cohort already held). **Demotion returns them:** a
+cast member with no event, bond, office, or grievance for a full
+season fades back into their cohort, and the chronicle keeps
+their story after they go. The cast therefore stays the size a
+witness can hold, while the ship stays the size a cruiser is.
+
+### The rotating cast
+
+The cast is not a roster. It breathes, and stories do the
+breathing. The maintainer's refinement of Oct 28, 2026: more
+rotation, a cast that grows and shrinks, driven by emergent
+stories rather than by bookkeeping.
+
+- **A spine and an ensemble.** Officers and office-holders are
+  standing cast: the spine the witness orients by. Around them a
+  rotating ensemble enters, matters, and leaves. The spine is
+  small (the council seats and their seconds); the ensemble is
+  where the churn lives.
+- **Arcs hold slots.** An emergent story (a feud, a courtship, an
+  investigation, an illness and its nursing, a mentorship, a
+  rivalry over a promotion) promotes its principals into the cast
+  for the arc's duration. While an arc runs, its people cannot
+  fade. When it resolves, it releases them, unless the arc made
+  them structural: an office won, a bond to the spine, a grievance
+  still open.
+- **The size is a band, not a number.** Story pressure sets the
+  cast's size inside a per-size band (a cruiser might breathe
+  between 36 and 60). A crisis swells the cast: more witnesses,
+  more accused, more hands the story needs. A quiet season thins
+  it back toward the floor. The band is the witness's contract:
+  never more faces than can be held, never fewer than the ship's
+  life needs.
+- **Stories bubble up.** Cohorts carry story seeds of their own:
+  a department grievance gathering weight, a watch's run of luck,
+  a mess-table faction. When a cohort seed crests, it becomes an
+  arc and promotes its principals. Emergence therefore runs both
+  ways: the cast's stories reach into the population for people,
+  and the population's stories push people into the cast.
+- **Exits shrink the story honestly.** Death, leaving at a port,
+  transfer to another ship: the cast shrinks, the ensemble
+  refills from the population when the next arc needs people, and
+  the chronicle marks both the leaving and the arriving. A
+  shrinking cast is not a failure state; it is a quiet ship,
+  until it is not.
+
+### Why the current engine carries this
+
+The society built for 12 crew already obeys the laws scale
+needs. Gossip is room-scoped. Beliefs move on witnessed events,
+not on sweeps. Acquaintance is sparse: most pairs of people
+aboard a large ship never meet, and the engine never pays for
+pairs that never meet. Cohorts are aggregate functions of state,
+so a thousand aboard costs less per tick than sixty full people.
+Promotion and demotion are state transitions like any other:
+pure functions of the world and the seeded streams, so
+determinism, replay, and the purity hash survive them unchanged.
+
+### The ladder
+
+Sizes extend the archetype chapter's three:
+
+- **Small**: about 8 crew. All cast.
+- **Standard**: about 12 crew, the v0 shape. All cast.
+- **Large**: about 16 to 18 crew. All cast.
+- **Cruiser**: about 60 to 120 aboard. Cast of about 48, the
+  rest population. Departments become polities, not just places.
+  Decks outgrow the screen; the viewer gains a camera.
+- **Capital**: about 300 to over 1,000 aboard. Cast of about 64,
+  the rest population. Liners and fleet carriers live here. News
+  takes days to cross the ship; the council governs departments;
+  the ship's feed becomes its newspaper in earnest.
+
+Size stays a drama variable before it is a stat. A cruiser's
+defining experience is the stranger aboard: crew who share a ship
+and not a life. A capital's is scale of consequence: a ration
+vote moves a thousand dinners.
+
+### Whole-ship operations
+
+At cruiser scale and above, the drama surface widens from
+incidents to **operations**: multi-day, multi-stage processes
+the whole ship works at. A mining cycle (survey, extract,
+refine, stow). A refit. An epidemic response. A passenger
+embarkation. A combat drill that is not a drill. The council
+commissions an operation; departments staff its stages from
+their cohorts; cast members lead stages and carry its failures
+personally. Operations produce chronicle, feed posts, grievances,
+and promotions. They are how a big ship's size becomes story
+rather than scenery, and they are the archetype chapter's
+capabilities (only a barge refines, only a cutter holds
+prisoners) expressed at the scale those hulls imply.
+
+### The viewer at scale
+
+The cutaway generalises: N decks, drawn per deck as now, under a
+camera instead of a stage fit. At Cruiser and above the camera
+pans and zooms, follows a selected person, and jumps by the
+minimap, which becomes the navigator rather than a glance. Cast
+members render fully, as today. Population renders as ambient
+life: simple bodies on department loops, honest about being a
+crowd. No screen pretends to show a thousand individuals.
+
+### The measuring spike, before any build
+
+One spike gates this chapter, and it also settles the engine
+question the maintainer raised the same night (whether the
+TypeScript core remains the right tool at this scale):
+
+1. Build the smallest tiered prototype: 64 cast plus cohorts
+   totalling 1,000 aboard, no new viewer work.
+2. Run 90 days. Measure tick cost in Node and in the browser.
+3. If the core holds its budget, TypeScript stays, and the
+   programme proceeds as data and viewer work. If it does not,
+   the engine core alone is the migration candidate (a
+   WebAssembly core behind the same snapshot boundary the viewer
+   already reads), and the measurement, not fashion, is the
+   reason on record.
+
+### Open questions for the build
+
+- Cast size per tier: is 48 right for a cruiser, 64 for a
+  capital, or should the cast grow with hull size to a cap?
+- Does the chronicle mark a demotion? Leaning: one quiet line.
+  A person leaving the story is a story.
+- Are a liner's passengers a third tier, or cohorts with a
+  passenger flag? Leaning: cohorts with a flag; passengers
+  promote by the same touches as crew.
+- Cohort granularity: by department, or by department and watch?
+  Leaning: department and watch, because fatigue and grievance
+  keep watch hours.
+
 ## The Ship's Council (built Oct 18, 2026)
 
-Stellaris gives a state a council: a ruler and a row of portfolio
-holders whose traits bend the whole empire, meeting over an
-agenda. The village sim gives the other half of the truth: its
+A grand-strategy council is the first pattern: a ruler and a row
+of portfolio holders whose traits bend the whole state, meeting
+over an agenda. The village sim gives the other half of the truth: its
 "council" is a court only (elder plus household heads, no
 elections, no laws passed), and its verdict machinery is the
 finest politics engine in either sim: judges who deduce guilt
@@ -724,8 +910,8 @@ can be wrong in ways that outlive the meeting.
 ### Composition: seven seats, worn over roles
 
 The council is not a separate cast. It is seven of the twelve
-roles, sitting with portfolio authority (Stellaris's move: the
-office matters, not just the person).
+roles, sitting with portfolio authority (the grand-strategy
+move: the office matters, not just the person).
 
 - **Captain** (the captain): agenda, tie-break, command between
   sittings.
@@ -1045,10 +1231,10 @@ flavour pool disconnected from the ship.
 
 ## Crew skills: the hands learn (built Oct 18, 2026)
 
-RuneScape gives a character a level per skill and raises it by
-doing the skill. RimWorld gives a colonist a row of skills, a
-passion for some of them, and lets the work of the colony do the
-teaching. Starship has neither today: a crew member carries one
+One classic pattern gives a character a level per skill and
+raises it by doing the skill. Another gives a colonist a row of
+skills, a passion for some of them, and lets the work of the
+colony do the teaching. Starship has neither today: a crew member carries one
 competence number, rolled at generation from their role's base,
 and it never moves. The chief engineer on day 90 is exactly as
 good as the chief engineer on day 1. Only harm moves a person,
@@ -1267,8 +1453,8 @@ fictional engineer.
 
 ## Open questions
 
-- Tick scale aboard ship: dunya's village ticks at 10 minutes, the squad
-  at 1 second. Ship life probably wants minutes, with incidents that can
+- Tick scale aboard ship: the reference village ticks at 10
+  minutes, its squad at 1 second. Ship life probably wants minutes, with incidents that can
   slow the chronicle down to the second when it matters.
 - Crew size for the full vision: a dozen feels personal; fifty feels like
   the village. Decide after the slice.

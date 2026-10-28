@@ -5,8 +5,8 @@ get an entry here when they are made.
 
 ## Clean-room implementation
 
-The design pattern is learned from a public reference project
-(shaykashif/dunya), but every line of code here is original. The
+The design pattern is learned from a public reference project,
+but every line of code here is original. The
 reference has no license file, so its code is not ours to reuse.
 Nothing is copied, nothing is published, and nothing is sent upstream
 without a fresh decision at that time.
@@ -484,8 +484,8 @@ demoted chronicle.
 
 ## The Ship's Council adopted into the design (Oct 18, 2026)
 
-At the user's direction ("Ship should have a council or a doctor
-etc, think Stellaris"), DESIGN.md gained a Ship's Council
+At the user's direction (a council of portfolio holders aboard,
+on the grand-strategy pattern), DESIGN.md gained a Ship's Council
 chapter: seven seats worn over roles (Captain, First Officer,
 Chief Engineer, Chief Medical Officer, Security Chief, Science
 Officer, Quartermaster), captain-appointed succession, recusal by
@@ -501,14 +501,14 @@ and verdicts manufacture grievances against the bench. Adoption
 revises the Stores chapter: rationing is now proposed by the
 Quartermaster and disposed of by the council, with the captain's
 solo imposition an emergency act that expires unratified. Full
-research: ~/workspace/research/dunya-council-ships-council.md.
+research: internal notes.
 Design only; no code.
 
 ## Ship archetypes adopted into the design (Oct 18, 2026)
 
 At the user's direction, following a sourced research pass on
-Vanguard Galaxy's ship and crew systems
-(~/workspace/research/vanguard-ship-crew-systems.md), DESIGN.md
+researched ship and crew systems (internal notes),
+DESIGN.md
 gained a Ship archetypes chapter: an archetype (one of six roles
 - hauler, surveyor, patrol cutter, salvage rig, mining barge,
 passenger transport - plus a shapeless Independent, crossed with
@@ -517,8 +517,9 @@ drawn from the ship's signature before rooms or crew, and
 compartments, systems, roster (with officer specialisations),
 stores appetites, and the voyage's meaning are generated inside
 its grammar. Brig capacity is a size stat (1/2/4 cells),
-borrowed from Vanguard's hull tables. Capabilities gate by
-archetype, our adaptation of Vanguard's equipment gating (we
+borrowed from the researched hull tables. Capabilities gate by
+archetype, our adaptation of the reference's equipment gating
+(we
 have no player to fit modules): only a barge refines ore into
 parts; only a surveyor reads space weather a day early; only a
 cutter lawfully holds prisoners for other ships. Manufacturers
@@ -596,7 +597,7 @@ watch read as a watch.
 
 The user reported the live ship view "a lil laggy". A research
 pass (~/workspace/research/starship-viewer-performance.md) read
-both dunya viewers for their frame discipline and ranked our
+both reference viewers for their frame discipline and ranked our
 costs against it; this build implements its top five fixes plus
 two small ones, all behaviour-preserving (the seed-42 hash is
 unchanged: b4f952711cb7ec7e; 40/40 tests green).
@@ -1740,3 +1741,40 @@ suspicion knob.
 
 The seed 11 carve-out above is settled by the maintainer's
 ruling of Oct 27, 2026: kept.
+
+## One frame, both decks (Oct 28, 2026)
+
+The deck presentation changed on the maintainer's direction: the
+Upper/Lower switch is gone. The Decks view is a cutaway: both deck
+plans on one canvas, stacked with a 12px structural gap, each
+plate-labelled DECK 1 and DECK 2 in its top margin. The view
+buttons are camera modes now: Decks, Hull, Chart.
+
+Why: switching decks to follow the crew was the viewer's standing
+friction, and the interesting thing about a two-deck ship is the
+life moving between the decks, which a switch always hid. A
+crewmate riding the lift now reads as travel inside one frame.
+
+How it is built, and what it must not cost: the frame's movement
+and staging update is one shared system, untouched. The painting
+passes moved into a per-deck method the frame runs once per deck
+under a translate; bodies, bubbles, sparks (now tagged with their
+deck), staged events and the alert flash are each drawn only in
+their own deck's pass, in that deck's coordinates. The crew's
+animation is therefore the same code on the same numbers, drawn
+twice over two plans instead of once over one: the maintainer's
+standing rule for this pass was that crew animation and the crew
+cards are good as they are and must not regress.
+
+The canvas also scales to its stage now, in whole multiples only:
+the art is pixels, and an integer scale keeps every pixel the same
+size on a large screen instead of the ship sitting small in black
+space. Below 1x the stylesheet's shrink-to-fit still applies. The
+hull exterior keeps its one-plan-tall canvas; the chart reads the
+taller canvas and centres itself.
+
+The focus deck survives as a concept (keys 7 and 8, the minimap's
+frame and tap, which deck's shake the scene takes, telegraph
+priority), but it switches nothing visible by itself anymore.
+Single-deck presentation is retired from the renderer, not parked
+behind a flag.

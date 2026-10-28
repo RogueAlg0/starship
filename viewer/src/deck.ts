@@ -59,6 +59,8 @@ import {
 } from "./props.ts";
 
 export const TILE_PX = 8;
+/** Structural gap between the two deck plans in the cutaway, px. */
+export const CUTAWAY_GAP_PX = 12;
 
 const BAND_H = 9; // room band height, tiles
 export const CORR_Y = 9; // corridor top row
@@ -1256,6 +1258,9 @@ interface PersonState {
 }
 
 interface Particle {
+  /** The deck whose coordinates x and y are in: in the cutaway a
+   *  spark belongs to one deck's pass, never both. */
+  deck: number;
   x: number;
   y: number;
   vx: number;
@@ -1334,13 +1339,17 @@ export class DeckView {
       ? window.matchMedia("(prefers-reduced-motion: reduce)")
       : null;
   private viewDeck = 0;
+  /** Canvas y of the lower deck's origin in the cutaway: the upper
+   *  deck's height plus the structural gap between the two plans. */
+  private cutawayGapY = 0;
 
   constructor(ship: Ship, canvas: HTMLCanvasElement) {
     this.ship = ship;
     this.canvas = canvas;
     this.shipLayout = buildShipLayout(ship);
-    canvas.width = this.shipLayout.widthPx;
-    canvas.height = this.shipLayout.heightPx;
+    this.cutawayGapY =
+      (this.shipLayout.decks[0] as DeckLayout).heightPx + CUTAWAY_GAP_PX;
+    this.applySize();
     this.statics = [
       renderStatic(this.shipLayout.decks[0], ship),
       renderStatic(this.shipLayout.decks[1], ship),
@@ -1348,7 +1357,7 @@ export class DeckView {
     this.backdrop = new SpaceBackdrop(
       this.shipLayout.seedKey,
       this.shipLayout.widthPx,
-      this.shipLayout.heightPx,
+      this.shipLayout.heightPx + this.cutawayGapY,
     );
     // Hull exterior geometry for the wear layer, in the same pixels
     // renderStatic paints: the engine block at the stern, its three
@@ -1455,6 +1464,21 @@ export class DeckView {
    */
   setExterior(on: boolean): void {
     this.viewExterior = on;
+    this.applySize();
+  }
+
+  /**
+   * Size the canvas for the current presentation: the hull
+   * exterior is one plan tall; the cutaway is both plans and the
+   * gap between them. (The chart reads the canvas as it finds it
+   * and centres itself, so it takes the cutaway's taller canvas
+   * as given.)
+   */
+  private applySize(): void {
+    this.canvas.width = this.shipLayout.widthPx;
+    this.canvas.height = this.viewExterior
+      ? this.shipLayout.heightPx
+      : this.shipLayout.heightPx + this.cutawayGapY;
   }
 
   /**
@@ -2057,6 +2081,525 @@ export class DeckView {
     return out;
   }
 
+  /**
+   * One deck's painting passes, in the deck's own coordinates: the
+   * caller has translated the context to the deck's place in the
+   * cutaway. Bodies, bubbles, sparks and staged events are this
+   * deck's only; the movement that placed them is the frame's,
+   * shared across decks, so nothing about how the crew moves is
+   * redrawn or re-timed by there being two decks on the canvas.
+   */
+  private drawDeck(
+    ctx: CanvasRenderingContext2D,
+    deckIndex: number,
+    crew: readonly CrewMember[],
+    opts: DeckFrameOpts,
+    now: number,
+    dt: number,
+    light: { dark: number; warm: number },
+  ): void {
+    const ship = this.ship;
+    const layout = this.shipLayout.decks[deckIndex] as DeckLayout;
+    ctx.drawImage(
+      (opts.showWear === false
+        ? this.statics[deckIndex]
+        : this.composites[deckIndex]) as HTMLCanvasElement,
+      0,
+      0,
+    );
+    // The deck's name, on a plate in the top margin: with both
+    // plans on one canvas, the plans say which is which themselves.
+    const tag = deckIndex === 0 ? "DECK 1" : "DECK 2";
+    ctx.font = "8px monospace";
+    const tagW = Math.ceil(ctx.measureText(tag).width) + 8;
+    ctx.fillStyle = "#141a26";
+    ctx.fillRect(3, 3, tagW, 11);
+    ctx.fillStyle = "#8fa6c4";
+    ctx.textAlign = "left";
+    ctx.fillText(tag, 7, 11);
+    // ---- the ship's light for the hour: a tint over the deck, and
+    // everything that emits light drawn after it, so the night watch
+    // reads as a lit ship in dark space, not a dark smear. The tint
+    // is a translucent fill toward the phase colour (cool blue at
+    // night, warm amber through the evening), so full night lands at
+    // about 40% of the day's brightness.
+    if (light.dark > 0.004) {
+      const cr = Math.round(8 + (43 - 8) * light.warm);
+      const cg = Math.round(14 + (26 - 14) * light.warm);
+      const cb = Math.round(36 + (9 - 36) * light.warm);
+      ctx.fillStyle = `rgba(${cr},${cg},${cb},${light.dark.toFixed(3)})`;
+      ctx.fillRect(0, 0, layout.widthPx, layout.heightPx);
+    }
+    // Near stars stay crisp above the tint: they are outside the ship.
+    this.backdrop.drawNear(ctx, now);
+
+    // ---- hydroponics light sweep
+    // The sweep gradient is built once in a canonical span and the
+    // fill is translated to the sweep's position each frame: the
+    // geometry moves, the gradient object does not get rebuilt.
+    if (this.hydroGrad === null) {
+      const grad = ctx.createLinearGradient(-12, 0, 12, 0);
+      grad.addColorStop(0, "rgba(190,255,190,0)");
+      grad.addColorStop(0.5, "rgba(190,255,190,0.10)");
+      grad.addColorStop(1, "rgba(190,255,190,0)");
+      this.hydroGrad = grad;
+    }
+    for (const room of layout.rooms) {
+      if (room === undefined || room.rect.kind !== "hydroponics") continue;
+      const rx = (room.rect.x + 1 + OX) * TILE_PX;
+      const ry = (room.rect.y + 1 + OY) * TILE_PX;
+      const rw = (room.rect.w - 2) * TILE_PX;
+      const rh = (room.rect.h - 2) * TILE_PX;
+      const sweepX = rx + ((now / 55) % (rw + 28)) - 14;
+      ctx.save();
+      ctx.translate(sweepX, 0);
+      ctx.fillStyle = this.hydroGrad;
+      ctx.fillRect(rx - sweepX, ry, rw, rh);
+      ctx.restore();
+    }
+
+    // ---- reactor and engine glow, scaled by system condition
+    // The glow gradients are built once per deck at their fixed
+    // geometry, with the peak stop at full strength; the per-frame
+    // pulse and condition ride on globalAlpha instead of the stops.
+    const reactor = ship.systems.find((s) => s.kind === "reactor");
+    if (reactor !== undefined && layout.reactorCore !== null) {
+      const core = layout.reactorCore;
+      const pulse = 0.8 + 0.2 * Math.sin(now / 800);
+      const a = (0.3 + 0.6 * reactor.condition) * pulse;
+      ctx.fillStyle = `rgba(255,170,60,${a.toFixed(3)})`;
+      ctx.fillRect(core.x, core.y, core.w, core.h);
+      const gx = core.x + core.w / 2;
+      const gy = core.y + core.h / 2;
+      let grad = this.reactorGrads[deckIndex];
+      if (grad === null) {
+        grad = ctx.createRadialGradient(gx, gy, 1, gx, gy, 17);
+        grad.addColorStop(0, "rgba(255,150,50,0.22)");
+        grad.addColorStop(1, "rgba(255,150,50,0)");
+        this.reactorGrads[deckIndex] = grad;
+      }
+      ctx.globalAlpha = reactor.condition * pulse;
+      ctx.fillStyle = grad;
+      ctx.fillRect(gx - 17, gy - 17, 34, 34);
+      ctx.globalAlpha = 1;
+    }
+    const engines = ship.systems.find((s) => s.kind === "engines");
+    if (engines !== undefined) {
+      const g = layout.engineGlow;
+      const pulse = 0.75 + 0.25 * Math.sin(now / 1000 + 1);
+      let grad = this.engineGrads[deckIndex];
+      if (grad === null) {
+        grad = ctx.createRadialGradient(g.x, g.y, 1, g.x, g.y, 20);
+        grad.addColorStop(0, "rgba(140,200,255,0.30)");
+        grad.addColorStop(1, "rgba(140,200,255,0)");
+        this.engineGrads[deckIndex] = grad;
+      }
+      ctx.globalAlpha = engines.condition * pulse;
+      ctx.fillStyle = grad;
+      ctx.fillRect(g.x - 20, g.y - 20, 40, 40);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = `rgba(190,225,255,${(0.25 + 0.6 * engines.condition).toFixed(3)})`;
+      for (const dy of [-13, -4, 5]) {
+        ctx.fillRect((OX - 4) * TILE_PX, g.y + dy - 4, 3, 6);
+      }
+    }
+
+    // ---- navigation lights (a storm's arrival strobes them: the
+    // staging layer holds the strobe envelope from the storm event)
+    const strobe = this.staging.navStrobe(now);
+    for (const light of layout.navLights) {
+      const blink = 0.5 + 0.5 * Math.sin(now / 1300 + light.phase);
+      ctx.globalAlpha = Math.min(1, 0.2 + 0.5 * blink + strobe);
+      ctx.fillStyle = light.colour;
+      ctx.fillRect(light.x - 1, light.y - 1, 3, 3);
+      ctx.globalAlpha = blink > 0.55 || strobe > 0.3 ? 1 : 0.35;
+      ctx.fillRect(light.x, light.y, 1, 1);
+      if (strobe > 0.3) {
+        ctx.globalAlpha = strobe * 0.5;
+        ctx.fillRect(light.x - 2, light.y - 2, 5, 5);
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    // ---- bridge main screen: a slow radar sweep
+    if (layout.bridgeScreen !== null) {
+      const s = layout.bridgeScreen;
+      ctx.fillStyle = "#06281f";
+      ctx.fillRect(s.x, s.y, s.w, s.h);
+      const cx = s.x + s.w / 2;
+      const cy = s.y + s.h / 2;
+      const ang = ((now / 2400) % (Math.PI * 2));
+      ctx.fillStyle = "#2ec4b6";
+      ctx.fillRect(
+        Math.round(cx + Math.cos(ang) * (s.w / 2 - 2)),
+        Math.round(cy + Math.sin(ang) * 1.2),
+        1,
+        1,
+      );
+      ctx.fillStyle = "#1d7a6d";
+      ctx.fillRect(s.x + 4, s.y + 1, 1, 1);
+      ctx.fillRect(s.x + s.w - 6, s.y + 2, 1, 1);
+    }
+
+    // ---- damage overlays, labels, spark spawning
+    for (const room of layout.rooms) {
+      if (room === undefined) continue;
+      const systems = this.roomSystems.get(room.rect.index);
+      if (systems === undefined || systems.length === 0) continue;
+      let worst = systems[0] as ShipSystem;
+      for (const s of systems) if (s.condition < worst.condition) worst = s;
+      const { rect } = room;
+      const rx = (rect.x + OX) * TILE_PX;
+      const ry = (rect.y + OY) * TILE_PX;
+      if (worst.condition < 0.6) {
+        const flicker = hash01(layout.seedKey, rect.index * 97 + Math.floor(now / 110));
+        const base = worst.condition < 0.3 ? 0.11 : 0.06;
+        ctx.fillStyle = `rgba(255,110,50,${(base * (flicker > 0.4 ? 1 : 0.3)).toFixed(3)})`;
+        ctx.fillRect(rx + TILE_PX, ry + TILE_PX, (rect.w - 2) * TILE_PX, (rect.h - 2) * TILE_PX);
+        // Spawn damage sparks from the hurting system's equipment.
+        const rate = worst.condition < 0.3 ? 26 : 9;
+        let acc = (this.damageAcc.get(rect.index) ?? 0) + rate * dt;
+        const anchor = layout.systemAnchor.get(worst.id);
+        while (acc >= 1) {
+          acc -= 1;
+          if (this.particles.length >= MAX_PARTICLES) break;
+          const h1 = hash01(layout.seedKey, rect.index * 131 + this.particles.length * 7 + Math.floor(now));
+          const h2 = hash01(layout.seedKey, rect.index * 137 + this.particles.length * 11 + Math.floor(now / 37));
+          this.particles.push({
+            deck: deckIndex,
+            x: (anchor?.px ?? rx + rect.w * 4) + (h1 - 0.5) * 6,
+            y: (anchor?.py ?? ry + rect.h * 4) + (h2 - 0.5) * 4,
+            vx: (h1 - 0.5) * 16,
+            vy: -(5 + h2 * 15),
+            life: 0.35 + h1 * 0.45,
+            max: 0.8,
+            colour: DAMAGE_COLOURS[Math.floor(h2 * 3)] ?? "#ffb35c",
+          });
+        }
+        this.damageAcc.set(rect.index, acc);
+      }
+      if (worst.condition < 0.3) {
+        // A red warning lamp over the room: a system in its worst
+        // band strobes it fast (the staging layer owns the tempo).
+        if (this.staging.lampOn(worst.id, now)) {
+          const lx = rx + rect.w * 4;
+          ctx.fillStyle = "#ff4a3c";
+          ctx.fillRect(lx - 1, ry + 2, 3, 3);
+          ctx.globalAlpha = 0.35;
+          ctx.fillRect(lx - 2, ry + 1, 5, 5);
+          ctx.globalAlpha = 1;
+        }
+      }
+      // System label and condition bar, live from the ship. The bar
+      // is two small fills per frame; the text is a painted sprite,
+      // repainted only when what it says changes (the worst system,
+      // its rounded percent, or its colour band): names and numbers
+      // are never re-typeset per frame.
+      const pct = Math.round(worst.condition * 100);
+      const extra = systems.length > 1 ? ` +${systems.length - 1}` : "";
+      ctx.fillStyle = "#141a26";
+      ctx.fillRect(rx + 3, ry + rect.h * TILE_PX - 3, 34, 3);
+      ctx.fillStyle =
+        worst.condition < 0.3
+          ? "#ff7a5c"
+          : worst.condition < 0.6
+            ? "#ffb35c"
+            : "#7fd4a8";
+      ctx.fillRect(rx + 3, ry + rect.h * TILE_PX - 3, 34 * worst.condition, 3);
+      const band =
+        worst.condition < 0.3 ? 2 : worst.condition < 0.6 ? 1 : 0;
+      const labelKey = `${worst.id}|${pct}|${band}`;
+      let label = this.labelCache.get(rect.index);
+      if (label === undefined || label.key !== labelKey) {
+        const text = `${worst.name} ${pct}%${extra}`;
+        const canvas = document.createElement("canvas");
+        const lctx = canvas.getContext("2d");
+        if (lctx !== null) {
+          lctx.font = "9px monospace";
+          canvas.width = Math.max(1, Math.ceil(lctx.measureText(text).width) + 6);
+          canvas.height = 13;
+          lctx.font = "9px monospace";
+          lctx.textAlign = "left";
+          lctx.fillStyle = "#141a26";
+          lctx.fillRect(0, 0, canvas.width, 13);
+          lctx.fillStyle =
+            band === 2
+              ? "#ff8a6a"
+              : band === 1
+                ? "#ffb35c"
+                : "#cfd8e6";
+          lctx.fillText(text, 3, 10);
+        }
+        label = { key: labelKey, canvas };
+        this.labelCache.set(rect.index, label);
+      }
+      ctx.drawImage(
+        label.canvas,
+        rx + 3,
+        ry + rect.h * TILE_PX - 16,
+      );
+    }
+
+    // ---- equipment lights
+    for (const room of layout.rooms) {
+      if (room === undefined) continue;
+      for (const light of room.lights) {
+        let alpha = 0.85;
+        if (light.style === "pulse") {
+          alpha = 0.35 + 0.6 * (0.5 + 0.5 * Math.sin(now / 650 + light.phase));
+        } else if (light.style === "blink") {
+          alpha = Math.sin(now / 420 + light.phase) > 0.3 ? 0.95 : 0.12;
+        }
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = light.colour;
+        ctx.fillRect(light.px, light.py, 1, 1);
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    // ---- welding sparks at the hands of anyone repairing
+    for (const member of crew) {
+      if (member.activity !== "repair") continue;
+      const st = this.people.get(member.id);
+      if (st === undefined || !st.atStation) continue;
+      if (st.deck !== deckIndex) continue;
+      let acc = (this.weldAcc.get(member.id) ?? 0) + 36 * dt;
+      while (acc >= 1) {
+        acc -= 1;
+        if (this.particles.length >= MAX_PARTICLES) break;
+        const h1 = hash01(layout.seedKey, this.particles.length * 13 + Math.floor(now / 17));
+        const h2 = hash01(layout.seedKey, this.particles.length * 19 + Math.floor(now / 23));
+        this.particles.push({
+          deck: deckIndex,
+          x: (st.x + OX) * TILE_PX + st.facing * 4,
+          y: (st.y + OY) * TILE_PX - 7,
+          vx: st.facing * (8 + h1 * 20),
+          vy: -(3 + h2 * 13),
+          life: 0.2 + h1 * 0.25,
+          max: 0.45,
+          colour: WELD_COLOURS[Math.floor(h2 * 3)] ?? "#bfe0ff",
+        });
+      }
+      this.weldAcc.set(member.id, acc);
+    }
+
+    // ---- particles
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const p = this.particles[i] as Particle;
+      if (p.deck !== deckIndex) continue;
+      p.life -= dt;
+      if (p.life <= 0) {
+        this.particles.splice(i, 1);
+        continue;
+      }
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vx *= 1 - 1.6 * dt;
+      p.vy *= 1 - 1.6 * dt;
+      ctx.globalAlpha = Math.max(0, (p.life / p.max) * 0.95);
+      ctx.fillStyle = p.colour;
+      ctx.fillRect(p.x, p.y, 1, 1);
+    }
+    ctx.globalAlpha = 1;
+
+    // ---- staged events (./staging.ts): the act, the blow, and the
+    // mend, drawn over the deck's own sparks and under the crew: a
+    // body can stand in front of the thing it just did.
+    this.staging.draw(ctx, now, deckIndex);
+
+    // ---- crew bodies
+    // Bodies dim less than the deck at night (0.82 of full at the
+    // darkest): crew carry their own small light in-fiction, and a
+    // watch-stander must stay findable in a dark room. The dim is a
+    // pre-tinted sprite variant from the bodies cache, bucketed so
+    // a night costs the same drawImage as the day: no canvas filter
+    // ever wraps this pass.
+    const bodyDim = 1 - 0.18 * (light.dark / NIGHT_DARK);
+    const dimBucket = Math.round(bodyDim / 0.05) * 0.05;
+    const positions = this.positionsScratch;
+    positions.clear();
+    const ordered = this.orderedScratch;
+    ordered.length = 0;
+    for (const member of crew) ordered.push(member);
+    ordered.sort(
+      (a, b) =>
+        (this.people.get(a.id)?.y ?? 0) - (this.people.get(b.id)?.y ?? 0),
+    );
+    for (const member of ordered) {
+      const st = this.people.get(member.id);
+      if (st === undefined) continue;
+      // One deck at a time: the other deck's crew are the minimap's
+      // dots, not ghosts on this plan. A body mid-fade in a lift is
+      // drawn by the deck it is leaving, then by the deck it joins.
+      if (st.deck !== deckIndex || st.alpha <= 0.01) continue;
+      const sprites = getBodySprites(member, dimBucket);
+      const working =
+        (member.activity === "work" || member.activity === "repair") &&
+        st.atStation;
+      const seated = st.seated && !st.moving;
+      const exercising =
+        member.activity === "exercise" && !st.moving && !seated;
+      // The wounded stand hunched: any open wound severity, or a
+      // sickness past the point of hiding it, swaps the standing
+      // frame for the hurt one. Seated, working, and walking keep
+      // their own frames; a body in a bunk is the lying pass below.
+      const hurt =
+        !st.moving &&
+        !seated &&
+        member.body !== undefined &&
+        (Object.values(member.body.wounds).some((w) => w.severity > 0) ||
+          member.body.sick >= 0.4);
+      let sprite = sprites.idle;
+      if (st.moving) {
+        sprite = Math.floor(st.walkPhase * 1.6) % 2 === 0 ? sprites.walk : sprites.idle;
+      } else if (seated) {
+        sprite = sprites.seated;
+      } else if (hurt) {
+        sprite = sprites.hurt;
+      } else if (working) {
+        sprite = Math.floor(now / 170) % 2 === 0 ? sprites.work : sprites.idle;
+      } else if (exercising) {
+        // On the machine: the two walk frames at the working tempo
+        // are the machine's motion; no new clock is invented for it.
+        sprite = Math.floor(now / 170) % 2 === 0 ? sprites.walk : sprites.idle;
+      }
+      const lying = st.lying && !st.moving;
+      if (lying) sprite = sprites.idle;
+      let bob = 0;
+      let swayX = 0;
+      if (st.moving) bob = -Math.abs(Math.sin(st.walkPhase * 2.2)) * 1;
+      else if (working) bob = Math.sin(now / 95 + st.phase) * 0.4;
+      else if (exercising) bob = Math.sin(now / 95 + st.phase) * 0.5;
+      else if (seated) bob = Math.sin(now / 1700 + st.phase) * 0.15;
+      else {
+        bob = Math.sin(now / 1700 + st.phase) * 0.3;
+        swayX = Math.sin(now / 2100 + st.phase) * 0.3;
+      }
+      const px = (st.x + OX) * TILE_PX + swayX;
+      const py = (st.y + OY) * TILE_PX;
+      positions.set(member.id, { x: px, y: py });
+      // Shadow, then the selection ring, then the body.
+      ctx.fillStyle = "rgba(0,0,0,0.35)";
+      ctx.beginPath();
+      if (lying) ctx.ellipse(px, py - 2, 5.5, 1.6, 0, 0, Math.PI * 2);
+      else ctx.ellipse(px, py - 1, 3.5, 1.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      if (opts.selectedId === member.id) {
+        ctx.strokeStyle = `rgba(255,215,106,${(0.7 + 0.3 * Math.sin(now / 300)).toFixed(3)})`;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.ellipse(px, py - 1, 5, 2, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.save();
+      if (st.alpha < 1) {
+        // In the lift: fade and shrink into the car.
+        ctx.globalAlpha = st.alpha;
+        ctx.translate(px, py - 6);
+        ctx.scale(Math.max(st.alpha, 0.05), Math.max(st.alpha, 0.05));
+        ctx.translate(-px, -(py - 6));
+      }
+      if (lying) {
+        // Horizontal on the bunk, head toward the bow, breathing slow.
+        const breathe = Math.sin(now / 2600 + st.phase) * 0.3;
+        ctx.translate(px, py - 4 + breathe);
+        ctx.rotate(Math.PI / 2);
+        ctx.drawImage(sprite, -4, -6);
+      } else if (st.facing < 0) {
+        ctx.translate(px, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(sprite, -4, py - 12 + bob);
+      } else {
+        ctx.drawImage(sprite, px - 4, py - 12 + bob);
+      }
+      ctx.restore();
+      // Full hands, drawn over the body: a traveller on an errand
+      // carries the thing (main.ts derives whose hands are full and
+      // with what; empty hands draw nothing).
+      if (st.moving) {
+        const carry = opts.carry.get(member.id);
+        if (carry !== undefined) {
+          const prop = propCanvas(carry === "tool" ? "toolcase" : "crate");
+          ctx.drawImage(
+            prop,
+            Math.round(px + st.facing * 4 - prop.width / 2),
+            Math.round(py - 9),
+          );
+        }
+      }
+      // A seated reader's book, open in front of the torso.
+      if (seated && member.activity === "read") {
+        const book = propCanvas("book");
+        ctx.drawImage(
+          book,
+          Math.round(px + st.facing * 2 - book.width / 2),
+          Math.round(py - 7),
+        );
+      }
+    }
+
+    // ---- game boards: on each table where a game is seated, for
+    // as long as the game lasts. The pair across the table is in
+    // the bodies above; the board is what they are looking at.
+    const boards = this.boardScratch;
+    boards.clear();
+    for (const [id, seatInfo] of opts.gameSeat) {
+      const st = this.people.get(id);
+      if (st === undefined || st.deck !== deckIndex) continue;
+      boards.add(seatInfo.room * 100 + Math.floor(seatInfo.seat / 2));
+    }
+    if (boards.size > 0) {
+      const board = propCanvas("board");
+      for (const boardKey of boards) {
+        const room = layout.rooms[Math.floor(boardKey / 100)];
+        if (room === undefined) continue;
+        const table = boardKey % 100;
+        const above = room.seats[table * 2];
+        const below = room.seats[table * 2 + 1];
+        if (above === undefined || below === undefined) continue;
+        const cx = (above.x + OX) * TILE_PX;
+        const cy = ((above.y + below.y) / 2 + OY) * TILE_PX;
+        ctx.drawImage(
+          board,
+          Math.round(cx - board.width / 2),
+          Math.round(cy - board.height / 2),
+        );
+      }
+    }
+
+    // ---- bubbles, above everything
+    if (opts.showBubbles !== false) {
+      this.bubbles.draw(ctx, now, positions, layout.widthPx);
+    }
+
+    // ---- alert flash: a pulsing outline on the room an alert named
+    if (
+      this.flash !== null &&
+      (this.shipLayout.deckOfRoom[this.flash.room] ?? 0) === deckIndex
+    ) {
+      if (this.flash.startMs < 0) this.flash.startMs = now;
+      const age = now - this.flash.startMs;
+      const roomLayout = layout.rooms[this.flash.room];
+      if (age > 2000 || roomLayout === undefined) {
+        this.flash = null;
+      } else {
+        const rect = roomLayout.rect;
+        const rx = (rect.x + OX) * TILE_PX;
+        const ry = (rect.y + OY) * TILE_PX;
+        const rw = rect.w * TILE_PX;
+        const rh = rect.h * TILE_PX;
+        const pulse = 0.5 + 0.5 * Math.sin(now / 130);
+        const fade = age > 1600 ? 1 - (age - 1600) / 400 : 1;
+        ctx.strokeStyle = `rgba(255, 215, 106, ${((0.45 + 0.55 * pulse) * fade).toFixed(3)})`;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(rx + 1, ry + 1, rw - 2, rh - 2);
+        ctx.fillStyle = `rgba(255, 215, 106, ${(0.07 * pulse * fade).toFixed(3)})`;
+        ctx.fillRect(rx + 1, ry + 1, rw - 2, rh - 2);
+      }
+    }
+  }
+
+
   frame(crew: readonly CrewMember[], opts: DeckFrameOpts): void {
     const ctx = this.ctx;
     if (ctx === null) return;
@@ -2103,6 +2646,15 @@ export class DeckView {
       this.exterior.noteEvent("failure", id, now);
     }
     this.staging.updateTelegraphs(now, dt * 1000, this.viewDeck, this.anchorFor);
+    // The cutaway shows both decks, so the other deck's telegraphs
+    // advance too; the shake stays the focus deck's, being the
+    // whole scene's offset.
+    this.staging.updateTelegraphs(
+      now,
+      dt * 1000,
+      this.viewDeck === 0 ? 1 : 0,
+      this.anchorFor,
+    );
     const shake = this.staging.shakeOffset(now, this.viewDeck);
     ctx.save();
     if (shake.x !== 0 || shake.y !== 0) ctx.translate(shake.x, shake.y);
@@ -2116,13 +2668,6 @@ export class DeckView {
     // deck's composite; the frame then blits the one composite.
     if (this.wears[0].update(ship, opts.tick)) this.refreshComposite(0);
     if (this.wears[1].update(ship, opts.tick)) this.refreshComposite(1);
-    ctx.drawImage(
-      (opts.showWear === false
-        ? this.statics[this.viewDeck]
-        : this.composites[this.viewDeck]) as HTMLCanvasElement,
-      0,
-      0,
-    );
 
     // Occupant slots, for spreading stand positions inside a room.
     // Scratch maps, cleared and reused: no allocation per frame.
@@ -2392,482 +2937,19 @@ export class DeckView {
       return;
     }
 
-    // ---- the ship's light for the hour: a tint over the deck, and
-    // everything that emits light drawn after it, so the night watch
-    // reads as a lit ship in dark space, not a dark smear. The tint
-    // is a translucent fill toward the phase colour (cool blue at
-    // night, warm amber through the evening), so full night lands at
-    // about 40% of the day's brightness.
+    // ---- the cutaway: both decks, one frame, no switching. The
+    // passes live in drawDeck; the frame runs them once per deck
+    // under a translate, so a crewmate riding the lift is simply
+    // in the other deck's pass. The light is the ship's, shared.
     const light = lightAt(opts.dayMinutes);
-    if (light.dark > 0.004) {
-      const cr = Math.round(8 + (43 - 8) * light.warm);
-      const cg = Math.round(14 + (26 - 14) * light.warm);
-      const cb = Math.round(36 + (9 - 36) * light.warm);
-      ctx.fillStyle = `rgba(${cr},${cg},${cb},${light.dark.toFixed(3)})`;
-      ctx.fillRect(0, 0, layout.widthPx, layout.heightPx);
-    }
-    // Near stars stay crisp above the tint: they are outside the ship.
-    this.backdrop.drawNear(ctx, now);
-
-    // ---- hydroponics light sweep
-    // The sweep gradient is built once in a canonical span and the
-    // fill is translated to the sweep's position each frame: the
-    // geometry moves, the gradient object does not get rebuilt.
-    if (this.hydroGrad === null) {
-      const grad = ctx.createLinearGradient(-12, 0, 12, 0);
-      grad.addColorStop(0, "rgba(190,255,190,0)");
-      grad.addColorStop(0.5, "rgba(190,255,190,0.10)");
-      grad.addColorStop(1, "rgba(190,255,190,0)");
-      this.hydroGrad = grad;
-    }
-    for (const room of layout.rooms) {
-      if (room === undefined || room.rect.kind !== "hydroponics") continue;
-      const rx = (room.rect.x + 1 + OX) * TILE_PX;
-      const ry = (room.rect.y + 1 + OY) * TILE_PX;
-      const rw = (room.rect.w - 2) * TILE_PX;
-      const rh = (room.rect.h - 2) * TILE_PX;
-      const sweepX = rx + ((now / 55) % (rw + 28)) - 14;
+    if (opts.showBubbles !== false) this.bubbles.update(now, crew);
+    for (let d = 0; d < 2; d++) {
       ctx.save();
-      ctx.translate(sweepX, 0);
-      ctx.fillStyle = this.hydroGrad;
-      ctx.fillRect(rx - sweepX, ry, rw, rh);
+      if (d === 1) ctx.translate(0, this.cutawayGapY);
+      this.drawDeck(ctx, d, crew, opts, now, dt, light);
       ctx.restore();
     }
 
-    // ---- reactor and engine glow, scaled by system condition
-    // The glow gradients are built once per deck at their fixed
-    // geometry, with the peak stop at full strength; the per-frame
-    // pulse and condition ride on globalAlpha instead of the stops.
-    const reactor = ship.systems.find((s) => s.kind === "reactor");
-    if (reactor !== undefined && layout.reactorCore !== null) {
-      const core = layout.reactorCore;
-      const pulse = 0.8 + 0.2 * Math.sin(now / 800);
-      const a = (0.3 + 0.6 * reactor.condition) * pulse;
-      ctx.fillStyle = `rgba(255,170,60,${a.toFixed(3)})`;
-      ctx.fillRect(core.x, core.y, core.w, core.h);
-      const gx = core.x + core.w / 2;
-      const gy = core.y + core.h / 2;
-      let grad = this.reactorGrads[this.viewDeck];
-      if (grad === null) {
-        grad = ctx.createRadialGradient(gx, gy, 1, gx, gy, 17);
-        grad.addColorStop(0, "rgba(255,150,50,0.22)");
-        grad.addColorStop(1, "rgba(255,150,50,0)");
-        this.reactorGrads[this.viewDeck] = grad;
-      }
-      ctx.globalAlpha = reactor.condition * pulse;
-      ctx.fillStyle = grad;
-      ctx.fillRect(gx - 17, gy - 17, 34, 34);
-      ctx.globalAlpha = 1;
-    }
-    const engines = ship.systems.find((s) => s.kind === "engines");
-    if (engines !== undefined) {
-      const g = layout.engineGlow;
-      const pulse = 0.75 + 0.25 * Math.sin(now / 1000 + 1);
-      let grad = this.engineGrads[this.viewDeck];
-      if (grad === null) {
-        grad = ctx.createRadialGradient(g.x, g.y, 1, g.x, g.y, 20);
-        grad.addColorStop(0, "rgba(140,200,255,0.30)");
-        grad.addColorStop(1, "rgba(140,200,255,0)");
-        this.engineGrads[this.viewDeck] = grad;
-      }
-      ctx.globalAlpha = engines.condition * pulse;
-      ctx.fillStyle = grad;
-      ctx.fillRect(g.x - 20, g.y - 20, 40, 40);
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = `rgba(190,225,255,${(0.25 + 0.6 * engines.condition).toFixed(3)})`;
-      for (const dy of [-13, -4, 5]) {
-        ctx.fillRect((OX - 4) * TILE_PX, g.y + dy - 4, 3, 6);
-      }
-    }
-
-    // ---- navigation lights (a storm's arrival strobes them: the
-    // staging layer holds the strobe envelope from the storm event)
-    const strobe = this.staging.navStrobe(now);
-    for (const light of layout.navLights) {
-      const blink = 0.5 + 0.5 * Math.sin(now / 1300 + light.phase);
-      ctx.globalAlpha = Math.min(1, 0.2 + 0.5 * blink + strobe);
-      ctx.fillStyle = light.colour;
-      ctx.fillRect(light.x - 1, light.y - 1, 3, 3);
-      ctx.globalAlpha = blink > 0.55 || strobe > 0.3 ? 1 : 0.35;
-      ctx.fillRect(light.x, light.y, 1, 1);
-      if (strobe > 0.3) {
-        ctx.globalAlpha = strobe * 0.5;
-        ctx.fillRect(light.x - 2, light.y - 2, 5, 5);
-      }
-    }
-    ctx.globalAlpha = 1;
-
-    // ---- bridge main screen: a slow radar sweep
-    if (layout.bridgeScreen !== null) {
-      const s = layout.bridgeScreen;
-      ctx.fillStyle = "#06281f";
-      ctx.fillRect(s.x, s.y, s.w, s.h);
-      const cx = s.x + s.w / 2;
-      const cy = s.y + s.h / 2;
-      const ang = ((now / 2400) % (Math.PI * 2));
-      ctx.fillStyle = "#2ec4b6";
-      ctx.fillRect(
-        Math.round(cx + Math.cos(ang) * (s.w / 2 - 2)),
-        Math.round(cy + Math.sin(ang) * 1.2),
-        1,
-        1,
-      );
-      ctx.fillStyle = "#1d7a6d";
-      ctx.fillRect(s.x + 4, s.y + 1, 1, 1);
-      ctx.fillRect(s.x + s.w - 6, s.y + 2, 1, 1);
-    }
-
-    // ---- damage overlays, labels, spark spawning
-    for (const room of layout.rooms) {
-      if (room === undefined) continue;
-      const systems = this.roomSystems.get(room.rect.index);
-      if (systems === undefined || systems.length === 0) continue;
-      let worst = systems[0] as ShipSystem;
-      for (const s of systems) if (s.condition < worst.condition) worst = s;
-      const { rect } = room;
-      const rx = (rect.x + OX) * TILE_PX;
-      const ry = (rect.y + OY) * TILE_PX;
-      if (worst.condition < 0.6) {
-        const flicker = hash01(layout.seedKey, rect.index * 97 + Math.floor(now / 110));
-        const base = worst.condition < 0.3 ? 0.11 : 0.06;
-        ctx.fillStyle = `rgba(255,110,50,${(base * (flicker > 0.4 ? 1 : 0.3)).toFixed(3)})`;
-        ctx.fillRect(rx + TILE_PX, ry + TILE_PX, (rect.w - 2) * TILE_PX, (rect.h - 2) * TILE_PX);
-        // Spawn damage sparks from the hurting system's equipment.
-        const rate = worst.condition < 0.3 ? 26 : 9;
-        let acc = (this.damageAcc.get(rect.index) ?? 0) + rate * dt;
-        const anchor = layout.systemAnchor.get(worst.id);
-        while (acc >= 1) {
-          acc -= 1;
-          if (this.particles.length >= MAX_PARTICLES) break;
-          const h1 = hash01(layout.seedKey, rect.index * 131 + this.particles.length * 7 + Math.floor(now));
-          const h2 = hash01(layout.seedKey, rect.index * 137 + this.particles.length * 11 + Math.floor(now / 37));
-          this.particles.push({
-            x: (anchor?.px ?? rx + rect.w * 4) + (h1 - 0.5) * 6,
-            y: (anchor?.py ?? ry + rect.h * 4) + (h2 - 0.5) * 4,
-            vx: (h1 - 0.5) * 16,
-            vy: -(5 + h2 * 15),
-            life: 0.35 + h1 * 0.45,
-            max: 0.8,
-            colour: DAMAGE_COLOURS[Math.floor(h2 * 3)] ?? "#ffb35c",
-          });
-        }
-        this.damageAcc.set(rect.index, acc);
-      }
-      if (worst.condition < 0.3) {
-        // A red warning lamp over the room: a system in its worst
-        // band strobes it fast (the staging layer owns the tempo).
-        if (this.staging.lampOn(worst.id, now)) {
-          const lx = rx + rect.w * 4;
-          ctx.fillStyle = "#ff4a3c";
-          ctx.fillRect(lx - 1, ry + 2, 3, 3);
-          ctx.globalAlpha = 0.35;
-          ctx.fillRect(lx - 2, ry + 1, 5, 5);
-          ctx.globalAlpha = 1;
-        }
-      }
-      // System label and condition bar, live from the ship. The bar
-      // is two small fills per frame; the text is a painted sprite,
-      // repainted only when what it says changes (the worst system,
-      // its rounded percent, or its colour band): names and numbers
-      // are never re-typeset per frame.
-      const pct = Math.round(worst.condition * 100);
-      const extra = systems.length > 1 ? ` +${systems.length - 1}` : "";
-      ctx.fillStyle = "#141a26";
-      ctx.fillRect(rx + 3, ry + rect.h * TILE_PX - 3, 34, 3);
-      ctx.fillStyle =
-        worst.condition < 0.3
-          ? "#ff7a5c"
-          : worst.condition < 0.6
-            ? "#ffb35c"
-            : "#7fd4a8";
-      ctx.fillRect(rx + 3, ry + rect.h * TILE_PX - 3, 34 * worst.condition, 3);
-      const band =
-        worst.condition < 0.3 ? 2 : worst.condition < 0.6 ? 1 : 0;
-      const labelKey = `${worst.id}|${pct}|${band}`;
-      let label = this.labelCache.get(rect.index);
-      if (label === undefined || label.key !== labelKey) {
-        const text = `${worst.name} ${pct}%${extra}`;
-        const canvas = document.createElement("canvas");
-        const lctx = canvas.getContext("2d");
-        if (lctx !== null) {
-          lctx.font = "9px monospace";
-          canvas.width = Math.max(1, Math.ceil(lctx.measureText(text).width) + 6);
-          canvas.height = 13;
-          lctx.font = "9px monospace";
-          lctx.textAlign = "left";
-          lctx.fillStyle = "#141a26";
-          lctx.fillRect(0, 0, canvas.width, 13);
-          lctx.fillStyle =
-            band === 2
-              ? "#ff8a6a"
-              : band === 1
-                ? "#ffb35c"
-                : "#cfd8e6";
-          lctx.fillText(text, 3, 10);
-        }
-        label = { key: labelKey, canvas };
-        this.labelCache.set(rect.index, label);
-      }
-      ctx.drawImage(
-        label.canvas,
-        rx + 3,
-        ry + rect.h * TILE_PX - 16,
-      );
-    }
-
-    // ---- equipment lights
-    for (const room of layout.rooms) {
-      if (room === undefined) continue;
-      for (const light of room.lights) {
-        let alpha = 0.85;
-        if (light.style === "pulse") {
-          alpha = 0.35 + 0.6 * (0.5 + 0.5 * Math.sin(now / 650 + light.phase));
-        } else if (light.style === "blink") {
-          alpha = Math.sin(now / 420 + light.phase) > 0.3 ? 0.95 : 0.12;
-        }
-        ctx.globalAlpha = alpha;
-        ctx.fillStyle = light.colour;
-        ctx.fillRect(light.px, light.py, 1, 1);
-      }
-    }
-    ctx.globalAlpha = 1;
-
-    // ---- welding sparks at the hands of anyone repairing
-    for (const member of crew) {
-      if (member.activity !== "repair") continue;
-      const st = this.people.get(member.id);
-      if (st === undefined || !st.atStation) continue;
-      if (st.deck !== this.viewDeck) continue;
-      let acc = (this.weldAcc.get(member.id) ?? 0) + 36 * dt;
-      while (acc >= 1) {
-        acc -= 1;
-        if (this.particles.length >= MAX_PARTICLES) break;
-        const h1 = hash01(layout.seedKey, this.particles.length * 13 + Math.floor(now / 17));
-        const h2 = hash01(layout.seedKey, this.particles.length * 19 + Math.floor(now / 23));
-        this.particles.push({
-          x: (st.x + OX) * TILE_PX + st.facing * 4,
-          y: (st.y + OY) * TILE_PX - 7,
-          vx: st.facing * (8 + h1 * 20),
-          vy: -(3 + h2 * 13),
-          life: 0.2 + h1 * 0.25,
-          max: 0.45,
-          colour: WELD_COLOURS[Math.floor(h2 * 3)] ?? "#bfe0ff",
-        });
-      }
-      this.weldAcc.set(member.id, acc);
-    }
-
-    // ---- particles
-    for (let i = this.particles.length - 1; i >= 0; i--) {
-      const p = this.particles[i] as Particle;
-      p.life -= dt;
-      if (p.life <= 0) {
-        this.particles.splice(i, 1);
-        continue;
-      }
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
-      p.vx *= 1 - 1.6 * dt;
-      p.vy *= 1 - 1.6 * dt;
-      ctx.globalAlpha = Math.max(0, (p.life / p.max) * 0.95);
-      ctx.fillStyle = p.colour;
-      ctx.fillRect(p.x, p.y, 1, 1);
-    }
-    ctx.globalAlpha = 1;
-
-    // ---- staged events (./staging.ts): the act, the blow, and the
-    // mend, drawn over the deck's own sparks and under the crew: a
-    // body can stand in front of the thing it just did.
-    this.staging.draw(ctx, now, this.viewDeck);
-
-    // ---- crew bodies
-    // Bodies dim less than the deck at night (0.82 of full at the
-    // darkest): crew carry their own small light in-fiction, and a
-    // watch-stander must stay findable in a dark room. The dim is a
-    // pre-tinted sprite variant from the bodies cache, bucketed so
-    // a night costs the same drawImage as the day: no canvas filter
-    // ever wraps this pass.
-    const bodyDim = 1 - 0.18 * (light.dark / NIGHT_DARK);
-    const dimBucket = Math.round(bodyDim / 0.05) * 0.05;
-    const positions = this.positionsScratch;
-    positions.clear();
-    const ordered = this.orderedScratch;
-    ordered.length = 0;
-    for (const member of crew) ordered.push(member);
-    ordered.sort(
-      (a, b) =>
-        (this.people.get(a.id)?.y ?? 0) - (this.people.get(b.id)?.y ?? 0),
-    );
-    for (const member of ordered) {
-      const st = this.people.get(member.id);
-      if (st === undefined) continue;
-      // One deck at a time: the other deck's crew are the minimap's
-      // dots, not ghosts on this plan. A body mid-fade in a lift is
-      // drawn by the deck it is leaving, then by the deck it joins.
-      if (st.deck !== this.viewDeck || st.alpha <= 0.01) continue;
-      const sprites = getBodySprites(member, dimBucket);
-      const working =
-        (member.activity === "work" || member.activity === "repair") &&
-        st.atStation;
-      const seated = st.seated && !st.moving;
-      const exercising =
-        member.activity === "exercise" && !st.moving && !seated;
-      // The wounded stand hunched: any open wound severity, or a
-      // sickness past the point of hiding it, swaps the standing
-      // frame for the hurt one. Seated, working, and walking keep
-      // their own frames; a body in a bunk is the lying pass below.
-      const hurt =
-        !st.moving &&
-        !seated &&
-        member.body !== undefined &&
-        (Object.values(member.body.wounds).some((w) => w.severity > 0) ||
-          member.body.sick >= 0.4);
-      let sprite = sprites.idle;
-      if (st.moving) {
-        sprite = Math.floor(st.walkPhase * 1.6) % 2 === 0 ? sprites.walk : sprites.idle;
-      } else if (seated) {
-        sprite = sprites.seated;
-      } else if (hurt) {
-        sprite = sprites.hurt;
-      } else if (working) {
-        sprite = Math.floor(now / 170) % 2 === 0 ? sprites.work : sprites.idle;
-      } else if (exercising) {
-        // On the machine: the two walk frames at the working tempo
-        // are the machine's motion; no new clock is invented for it.
-        sprite = Math.floor(now / 170) % 2 === 0 ? sprites.walk : sprites.idle;
-      }
-      const lying = st.lying && !st.moving;
-      if (lying) sprite = sprites.idle;
-      let bob = 0;
-      let swayX = 0;
-      if (st.moving) bob = -Math.abs(Math.sin(st.walkPhase * 2.2)) * 1;
-      else if (working) bob = Math.sin(now / 95 + st.phase) * 0.4;
-      else if (exercising) bob = Math.sin(now / 95 + st.phase) * 0.5;
-      else if (seated) bob = Math.sin(now / 1700 + st.phase) * 0.15;
-      else {
-        bob = Math.sin(now / 1700 + st.phase) * 0.3;
-        swayX = Math.sin(now / 2100 + st.phase) * 0.3;
-      }
-      const px = (st.x + OX) * TILE_PX + swayX;
-      const py = (st.y + OY) * TILE_PX;
-      positions.set(member.id, { x: px, y: py });
-      // Shadow, then the selection ring, then the body.
-      ctx.fillStyle = "rgba(0,0,0,0.35)";
-      ctx.beginPath();
-      if (lying) ctx.ellipse(px, py - 2, 5.5, 1.6, 0, 0, Math.PI * 2);
-      else ctx.ellipse(px, py - 1, 3.5, 1.2, 0, 0, Math.PI * 2);
-      ctx.fill();
-      if (opts.selectedId === member.id) {
-        ctx.strokeStyle = `rgba(255,215,106,${(0.7 + 0.3 * Math.sin(now / 300)).toFixed(3)})`;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.ellipse(px, py - 1, 5, 2, 0, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-      ctx.save();
-      if (st.alpha < 1) {
-        // In the lift: fade and shrink into the car.
-        ctx.globalAlpha = st.alpha;
-        ctx.translate(px, py - 6);
-        ctx.scale(Math.max(st.alpha, 0.05), Math.max(st.alpha, 0.05));
-        ctx.translate(-px, -(py - 6));
-      }
-      if (lying) {
-        // Horizontal on the bunk, head toward the bow, breathing slow.
-        const breathe = Math.sin(now / 2600 + st.phase) * 0.3;
-        ctx.translate(px, py - 4 + breathe);
-        ctx.rotate(Math.PI / 2);
-        ctx.drawImage(sprite, -4, -6);
-      } else if (st.facing < 0) {
-        ctx.translate(px, 0);
-        ctx.scale(-1, 1);
-        ctx.drawImage(sprite, -4, py - 12 + bob);
-      } else {
-        ctx.drawImage(sprite, px - 4, py - 12 + bob);
-      }
-      ctx.restore();
-      // Full hands, drawn over the body: a traveller on an errand
-      // carries the thing (main.ts derives whose hands are full and
-      // with what; empty hands draw nothing).
-      if (st.moving) {
-        const carry = opts.carry.get(member.id);
-        if (carry !== undefined) {
-          const prop = propCanvas(carry === "tool" ? "toolcase" : "crate");
-          ctx.drawImage(
-            prop,
-            Math.round(px + st.facing * 4 - prop.width / 2),
-            Math.round(py - 9),
-          );
-        }
-      }
-      // A seated reader's book, open in front of the torso.
-      if (seated && member.activity === "read") {
-        const book = propCanvas("book");
-        ctx.drawImage(
-          book,
-          Math.round(px + st.facing * 2 - book.width / 2),
-          Math.round(py - 7),
-        );
-      }
-    }
-
-    // ---- game boards: on each table where a game is seated, for
-    // as long as the game lasts. The pair across the table is in
-    // the bodies above; the board is what they are looking at.
-    const boards = this.boardScratch;
-    boards.clear();
-    for (const [id, seatInfo] of opts.gameSeat) {
-      const st = this.people.get(id);
-      if (st === undefined || st.deck !== this.viewDeck) continue;
-      boards.add(seatInfo.room * 100 + Math.floor(seatInfo.seat / 2));
-    }
-    if (boards.size > 0) {
-      const board = propCanvas("board");
-      for (const boardKey of boards) {
-        const room = layout.rooms[Math.floor(boardKey / 100)];
-        if (room === undefined) continue;
-        const table = boardKey % 100;
-        const above = room.seats[table * 2];
-        const below = room.seats[table * 2 + 1];
-        if (above === undefined || below === undefined) continue;
-        const cx = (above.x + OX) * TILE_PX;
-        const cy = ((above.y + below.y) / 2 + OY) * TILE_PX;
-        ctx.drawImage(
-          board,
-          Math.round(cx - board.width / 2),
-          Math.round(cy - board.height / 2),
-        );
-      }
-    }
-
-    // ---- bubbles, above everything
-    if (opts.showBubbles !== false) {
-      this.bubbles.update(now, crew);
-      this.bubbles.draw(ctx, now, positions, layout.widthPx);
-    }
-
-    // ---- alert flash: a pulsing outline on the room an alert named
-    if (this.flash !== null) {
-      if (this.flash.startMs < 0) this.flash.startMs = now;
-      const age = now - this.flash.startMs;
-      const roomLayout = layout.rooms[this.flash.room];
-      if (age > 2000 || roomLayout === undefined) {
-        this.flash = null;
-      } else {
-        const rect = roomLayout.rect;
-        const rx = (rect.x + OX) * TILE_PX;
-        const ry = (rect.y + OY) * TILE_PX;
-        const rw = rect.w * TILE_PX;
-        const rh = rect.h * TILE_PX;
-        const pulse = 0.5 + 0.5 * Math.sin(now / 130);
-        const fade = age > 1600 ? 1 - (age - 1600) / 400 : 1;
-        ctx.strokeStyle = `rgba(255, 215, 106, ${((0.45 + 0.55 * pulse) * fade).toFixed(3)})`;
-        ctx.lineWidth = 2;
-        ctx.strokeRect(rx + 1, ry + 1, rw - 2, rh - 2);
-        ctx.fillStyle = `rgba(255, 215, 106, ${(0.07 * pulse * fade).toFixed(3)})`;
-        ctx.fillRect(rx + 1, ry + 1, rw - 2, rh - 2);
-      }
-    }
 
     // Balance the shake transform opened at the top of the frame.
     ctx.restore();

@@ -158,8 +158,7 @@ const toastEl = must<HTMLElement>("toast");
 const seedInput = must<HTMLInputElement>("seed-input");
 const alertStackEl = must<HTMLElement>("alert-stack");
 const deckCanvas = must<HTMLCanvasElement>("ship-canvas");
-const deck1Btn = must<HTMLButtonElement>("deck1-btn");
-const deck2Btn = must<HTMLButtonElement>("deck2-btn");
+const decksBtn = must<HTMLButtonElement>("decks-btn");
 const exteriorBtn = must<HTMLButtonElement>("exterior-btn");
 const mapBtn = must<HTMLButtonElement>("map-btn");
 const sceneChipEl = must<HTMLElement>("scene-chip");
@@ -416,6 +415,37 @@ function setViewMap(): void {
   refreshTabStates();
 }
 
+/**
+ * Scale the ship canvas up to fill the stage, in whole multiples:
+ * the art is pixels, and an integer scale keeps every pixel the
+ * same size on a big screen instead of the ship sitting small in
+ * a sea of black. Below 1x the stylesheet's max-width/max-height
+ * shrink-to-fit takes over, as it always has on small screens.
+ */
+function fitShipCanvas(): void {
+  const stage = deckCanvas.parentElement;
+  if (stage === null || deckCanvas.width === 0) return;
+  const scale = Math.min(
+    stage.clientWidth / deckCanvas.width,
+    stage.clientHeight / deckCanvas.height,
+  );
+  if (scale >= 1) {
+    const s = Math.floor(scale);
+    deckCanvas.style.width = `${deckCanvas.width * s}px`;
+    deckCanvas.style.height = `${deckCanvas.height * s}px`;
+  } else {
+    deckCanvas.style.width = "";
+    deckCanvas.style.height = "";
+  }
+}
+
+if (typeof ResizeObserver !== "undefined") {
+  const stageEl = deckCanvas.parentElement;
+  if (stageEl !== null) {
+    new ResizeObserver(() => fitShipCanvas()).observe(stageEl);
+  }
+}
+
 // ------------------------------------------------------------------ sheet
 
 /**
@@ -482,11 +512,10 @@ function toggleSheet(tab: string): void {
 
 function refreshDeckButtons(): void {
   const outside = (deck?.exteriorActive ?? false) && !mapActive;
-  const active = deck?.visibleDeck ?? 0;
-  deck1Btn.classList.toggle("active", !outside && !mapActive && active === 0);
-  deck2Btn.classList.toggle("active", !outside && !mapActive && active === 1);
+  decksBtn.classList.toggle("active", !outside && !mapActive);
   exteriorBtn.classList.toggle("active", outside);
   mapBtn.classList.toggle("active", mapActive);
+  fitShipCanvas();
   deckCanvas.setAttribute(
     "aria-label",
     mapActive
@@ -2836,8 +2865,9 @@ function buildAlertPrefs(): void {
   }
 }
 dailyBtn.addEventListener("click", () => startDailyVoyage());
-deck1Btn.addEventListener("click", () => setViewDeck(0));
-deck2Btn.addEventListener("click", () => setViewDeck(1));
+decksBtn.addEventListener("click", () =>
+  setViewDeck(deck?.visibleDeck ?? 0),
+);
 exteriorBtn.addEventListener("click", () => setViewExterior());
 mapBtn.addEventListener("click", () => setViewMap());
 minimapCanvas.addEventListener("click", (event) => {

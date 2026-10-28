@@ -213,7 +213,10 @@ describe("gossip, the rumour engine", () => {
   });
 
   it("in a live run, gossip only flows between people who were together", () => {
-    const run = runSimulation({ seed: 39 }, 4320);
+    // 90 days: under the cooled accusation economy (Oct 27, 2026)
+    // seed 39's first gossip lands on day 52; the 30-day probe
+    // predates that pacing and finds an honestly quiet month.
+    const run = runSimulation({ seed: 39 }, 12960);
     const events = run.world.events.events;
     const gossip = events.filter((e) => e.type === "gossip");
     expect(gossip.length).toBeGreaterThan(0);
@@ -255,5 +258,5 @@ describe("gossip, the rumour engine", () => {
         `gossip at tick ${tip.tick} (${from} -> ${to}) has no shared occasion`,
       ).toBe(true);
     }
-  });
+  }, 60_000);
 });

@@ -294,7 +294,10 @@ describe("speech never feeds back", () => {
 describe("dosage", () => {
   it("accusations carry their reasoning, in the payload and the line", () => {
     const run = createRun({ seed: 42 });
-    run.run(30 * TPD);
+    // 90 days: under the cooled accusation economy (Oct 27, 2026)
+    // seed 42's first accusation lands on day 62; the 30-day probe
+    // predates that pacing and finds an honestly quiet month.
+    run.run(90 * TPD);
     const accusations = eventsOf(run, "accusation");
     expect(accusations.length).toBeGreaterThan(0);
     for (const event of accusations) {

@@ -235,13 +235,25 @@ wear layer is composited into the static deck so a frame blits
 one base canvas, scratch structures are reused rather than
 allocated, and a paused voyage redraws the deck at about 15 fps.
 
-**The hull exterior.** A third view (the Exterior button, or key
+**The cutaway.** The Decks view shows both deck plans in one
+frame, stacked with a structural gap, each plate-labelled DECK 1
+and DECK 2: there is no deck switching, and a crewmate riding the
+lift between decks is simply in the other plan. Every pass (wear,
+light, systems, bodies, bubbles, staged events) runs per deck in
+its own coordinates; the movement underneath is one shared system,
+so the crew's staging is untouched by there being two plans on the
+canvas. The canvas scales in whole multiples to fill the stage, so
+the ship is as large as the screen allows at a crisp pixel scale.
+Keys 7 and 8 still move the focus deck (the minimap's frame, and
+which deck's shake the scene takes); the minimap tap does the same.
+
+**The hull exterior.** A second view (the Hull button, or key
 9) steps outside to a side profile of the same ship against the
 same sky, her compartment windows lit by who is awake inside, the
 mess glowing warm at table, damage scorching the hull at the hurt
 system's station, and a tap on the hull returning to its deck.
 
-**The star map.** A fourth view (the Map button, or key 0 or M)
+**The star map.** A third view (the Chart button, or key 0 or M)
 opens the sector chart: the seed's ports as named points in their
 factions' colours (a ring for a faction home port, plain grey for
 an independent), the chartered route dashed across the grid, and
@@ -327,7 +339,7 @@ scaled by system condition, hydroponics racks shimmer under a light
 sweep, the bridge screen runs a slow radar sweep, and a room whose
 system drops below 60% flickers and throws orange damage sparks
 (below 30%: faster sparks and a blinking red warning lamp) until it
-is repaired. Thought and speech bubbles appear over crew, Sims-style,
+is repaired. Thought and speech bubbles appear over crew,
 always from real state: a critical need, an active grudge, a strong
 suspicion, an accusation spoken aloud, or crewmates in conversation.
 

@@ -42,6 +42,36 @@ describe("the vote", () => {
     expect(weak.score).toBeLessThan(first.score);
   });
 
+  it("departments bend votes: a mate on trial is shielded", () => {
+    const run = createRun({ seed: 42 });
+    const pick = (role: string) =>
+      run.crew.find((m) => m.roleKey === role) as (typeof run.crew)[number];
+    const chief = pick("chief engineer");
+    const mate = pick("engineer");
+    const outsider = pick("medic");
+    for (const accused of [mate, outsider]) {
+      chief.beliefs.suspicion[accused.id] = 0.5;
+      chief.beliefs.trust[accused.id] = 0;
+    }
+    const ctx = { crew: run.crew, securityId: null };
+    const shielded = computeVote(
+      chief,
+      "chief engineer",
+      { kind: "inquiry", accusedId: mate.id },
+      ctx,
+    );
+    const plain = computeVote(
+      chief,
+      "chief engineer",
+      { kind: "inquiry", accusedId: outsider.id },
+      ctx,
+    );
+    expect(plain.score - shielded.score).toBeCloseTo(
+      CONFIG.council.factionShield,
+      2,
+    );
+  });
+
   it("science abstains on thin evidence", () => {
     const run = createRun({ seed: 42 });
     const accused = run.crew[7] as (typeof run.crew)[number];
@@ -276,5 +306,109 @@ describe("the frequency law", () => {
         expect(again.hash()).toBe(run.hash());
       }
     }
+  }, 300_000);
+});
+
+describe("the society heat law", () => {
+  // Measured before the thermostat (Oct 28 dig): the hot seeds
+  // ran 278 to 483 accusations in 90 days against 6 to 11
+  // inquiries, every claim a restatement of the last. The law
+  // after the adaptive public cooldown and the findings vent:
+  // claims fall by half or better on the hot seeds, sittings
+  // keep happening, and the quiet ship's society still speaks.
+  it("accusations cool on the hot seeds and the council still sits", () => {
+    for (const seed of [11, 40]) {
+      const run = createRun({ seed });
+      run.run(90 * TPD);
+      const accusations = eventsOf(run, "accusation").length;
+      expect(accusations, `seed ${seed} accusations`).toBeLessThan(220);
+      expect(accusations, `seed ${seed} accusations`).toBeGreaterThan(20);
+      const inquiries = eventsOf(run, "council_finding").filter(
+        (e) => e.data.kind === "inquiry",
+      ).length;
+      expect(inquiries, `seed ${seed} inquiries`).toBeGreaterThanOrEqual(3);
+    }
+  }, 300_000);
+
+  it("the quiet ship's society still lives, without an accusation mill", () => {
+    // The law changed with the work-first direction (Oct 28):
+    // a well-run ship may see no public accusations at all, and
+    // that is health, not silence. What must still be true is
+    // that the society moves: bonds form, and the council sits
+    // on the evidence the ship does produce.
+    const run = createRun({ seed: 42 });
+    run.run(90 * TPD);
+    const accusations = eventsOf(run, "accusation").length;
+    expect(accusations).toBeLessThan(30);
+    const inquiries = eventsOf(run, "council_finding").filter(
+      (e) => e.data.kind === "inquiry",
+    ).length;
+    expect(inquiries).toBeGreaterThanOrEqual(3);
+    expect(eventsOf(run, "bond_formed").length).toBeGreaterThanOrEqual(1);
+  }, 300_000);
+});
+
+describe("commendations", () => {
+  it("the vote honours trust: a respected member's deed carries further", () => {
+    const run = createRun({ seed: 42 });
+    const officer = run.crew.find(
+      (m) => m.roleKey === "chief engineer",
+    ) as (typeof run.crew)[number];
+    const member = run.crew.find(
+      (m) => m.roleKey === "medic",
+    ) as (typeof run.crew)[number];
+    const ctx = { crew: run.crew, securityId: null };
+    const motion = {
+      kind: "commendation",
+      subjectId: member.id,
+      proposerId: null,
+      severity: 0.5,
+    };
+    officer.beliefs.trust[member.id] = 0.9;
+    const warm = computeVote(officer, "chief engineer", motion, ctx);
+    officer.beliefs.trust[member.id] = -0.4;
+    const cold = computeVote(officer, "chief engineer", motion, ctx);
+    expect(warm.score).toBeGreaterThan(cold.score);
+    expect(warm.choice).toBe("for");
+  });
+
+  it("every commendation honours a real deed, and deeds get honoured", () => {
+    let carried = 0;
+    for (const seed of [42, 11, 16, 30]) {
+      const run = createRun({ seed });
+      run.run(120 * TPD);
+      const deedReady = new Set<string>();
+      const repairedDeed = new Set<string>();
+      for (const event of run.world.events.events) {
+        if (event.type === "system_failed") {
+          deedReady.add(String(event.data.system));
+        }
+        if (
+          event.type === "sabotage_committed" &&
+          typeof event.data.damage === "number" &&
+          event.data.damage >= CONFIG.council.sabotageInquiryDamage
+        ) {
+          deedReady.add(String(event.data.system));
+        }
+        if (
+          event.type === "system_repaired" &&
+          typeof event.data.by === "string" &&
+          deedReady.has(String(event.data.system))
+        ) {
+          repairedDeed.add(`${event.data.by}:${String(event.data.system)}`);
+          deedReady.delete(String(event.data.system));
+        }
+        if (event.type === "commendation") {
+          carried++;
+          expect(
+            repairedDeed.has(
+              `${String(event.data.member)}:${String(event.data.system)}`,
+            ),
+            `seed ${seed}: commendation without a deed`,
+          ).toBe(true);
+        }
+      }
+    }
+    expect(carried).toBeGreaterThan(0);
   }, 300_000);
 });

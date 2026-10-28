@@ -127,6 +127,11 @@ interface OfficerContext {
  * the sum into a choice. Exported so tests can inspect the terms
  * directly.
  */
+/** The bloc a role belongs to aboard: its department. */
+export function departmentOfRole(roleKey: string): string {
+  return CONFIG.council.departments[roleKey] ?? "Crew";
+}
+
 export function computeVote(
   officer: CrewMember,
   seatKey: string,
@@ -167,6 +172,26 @@ export function computeVote(
     if (accuser !== undefined && accuser !== officer) {
       trustTerm += trustOf(officer.beliefs, accuser.id) * 0.25;
     }
+    // The bloc term: departments look after their own. A mate
+    // on trial is shielded; a mate bringing the claim is backed.
+    // Recusal already removes the closest cases (the accused,
+    // the accuser, the bonded, a chief protecting their own);
+    // what remains is the wider loyalty of the bench.
+    const myDept = departmentOfRole(officer.roleKey);
+    if (
+      accused !== undefined &&
+      accused !== officer &&
+      departmentOfRole(accused.roleKey) === myDept
+    ) {
+      trustTerm -= CONFIG.council.factionShield;
+    }
+    if (
+      accuser !== undefined &&
+      accuser !== officer &&
+      departmentOfRole(accuser.roleKey) === myDept
+    ) {
+      trustTerm += CONFIG.council.factionLoyalty;
+    }
   } else if (kind === "rationing" || kind === "ratification") {
     const days = motion.days ?? 99;
     evidence = Math.max(0, Math.min(1, (CONFIG.stores.rationing.triggerDays - days) / 12));
@@ -196,6 +221,13 @@ export function computeVote(
     if (proposer !== undefined && proposer !== officer) {
       trustTerm += trustOf(officer.beliefs, proposer.id) * 0.15;
     }
+    if (
+      captain !== undefined &&
+      captain !== officer &&
+      departmentOfRole(captain.roleKey) === departmentOfRole(officer.roleKey)
+    ) {
+      trustTerm -= CONFIG.council.factionShield;
+    }
   } else if (kind === "appointment") {
     const appointee = subject;
     evidence =
@@ -203,6 +235,17 @@ export function computeVote(
         ? Math.max(0, trustOf(officer.beliefs, appointee.id))
         : 0;
     evidenceTerm = evidence * 0.8 - 0.1;
+    if (proposer !== undefined && proposer !== officer) {
+      trustTerm += trustOf(officer.beliefs, proposer.id) * 0.2;
+    }
+  } else if (kind === "commendation") {
+    // The deed is public fact; the vote is whether the bench
+    // honours it, priced by trust in the member and the weight
+    // of what they restored.
+    const member = subject;
+    evidence =
+      member !== undefined ? Math.max(0, trustOf(officer.beliefs, member.id)) : 0;
+    evidenceTerm = evidence * 0.7 - 0.18 + ((motion.severity ?? 0.5) - 0.4) * 0.6;
     if (proposer !== undefined && proposer !== officer) {
       trustTerm += trustOf(officer.beliefs, proposer.id) * 0.2;
     }
@@ -291,6 +334,8 @@ interface PendingSitting {
   subjectId: string | null;
   /** The stay a course sitting sets the course out of. */
   stayIndex?: number;
+  /** The system whose restoration a commendation honours. */
+  deed?: string | null;
 }
 
 export interface CouncilState {
@@ -317,6 +362,19 @@ export interface CouncilState {
   reliefMotions: number;
   /** Course sittings held: one per stay the council decided. */
   courseSittings: number;
+  /** Systems that have failed and not yet been repaired, for
+   *  the commendation trigger: only restoring one of these is
+   *  a deed the council can honour. */
+  unrepairedFailures: Set<string>;
+  /** Systems sabotaged and not yet repaired since: restoring
+   *  one is the second commendable deed. A calm ship's systems
+   *  are maintained before they fail, so failure alone would
+   *  make the honour nearly unseen; undoing a saboteur's work
+   *  is witnessed the same way. */
+  sabotagedSystems: Set<string>;
+  /** Tick of each member's last commendation sitting. */
+  commendationAt: Record<string, number>;
+  lastCommendationTick: number;
 }
 
 /** Seat the council from the roster's roles, as the ship sails. */
@@ -347,6 +405,10 @@ export function createCouncil(crew: readonly CrewMember[]): CouncilState {
     sittingsHeld: 0,
     reliefMotions: 0,
     courseSittings: 0,
+    unrepairedFailures: new Set(),
+    sabotagedSystems: new Set(),
+    commendationAt: {},
+    lastCommendationTick: -1000000,
   };
 }
 
@@ -637,6 +699,31 @@ function inquiryFallout(
         if (voterId !== member.id) driftTrust(member.beliefs, voterId, -0.08);
       }
     }
+  }
+  // The finding vents suspicion: what the bench has judged
+  // stops circulating as raw suspicion. Every member's suspicion
+  // of the accused closes part of its distance to the verdict's
+  // resting level, less where the chair is distrusted, and the
+  // accused's suffered-accusation record clears: the next claim
+  // against them is heard fresh, at the base cooldown.
+  if (accused !== undefined) {
+    const cfg = CONFIG.council;
+    const rest = outcome.convicted
+      ? cfg.ventRestConvicted
+      : cfg.ventRestAcquitted;
+    for (const member of crew) {
+      if (!alive(member) || member === accused) continue;
+      const benchTrust =
+        frame.chairId !== null && frame.chairId !== member.id
+          ? Math.max(0, trustOf(member.beliefs, frame.chairId))
+          : 0.5;
+      const share = cfg.ventShare * (0.5 + 0.5 * benchTrust);
+      const current = suspicionOf(member.beliefs, accused.id);
+      if (current > rest) {
+        driftSuspicion(member.beliefs, accused.id, -(current - rest) * share);
+      }
+    }
+    accused.accusationTicks = [];
   }
   // Legitimacy: the share of the crew whose own beliefs agree
   // with the finding moves the sixth store.
@@ -1144,6 +1231,13 @@ function runMotionSitting(
       subjectId: pending.subjectId,
       proposerId: captainId(state),
     };
+  } else if (pending.kind === "commendation") {
+    motion = {
+      kind: "commendation",
+      subjectId: pending.subjectId,
+      proposerId: captainId(state),
+      severity: 0.5,
+    };
   }
   const frame = frameSitting(state, crew, motion);
   emitConvened(w, ship, frame, pending.kind, {
@@ -1261,6 +1355,23 @@ function runMotionSitting(
       }
       break;
     }
+    case "commendation": {
+      const member = byId(crew, pending.subjectId ?? null);
+      if (carried && member !== undefined) {
+        member.needs.morale = Math.min(1, member.needs.morale + 0.12);
+        for (const mate of crew) {
+          if (mate === member || !alive(mate)) continue;
+          driftTrust(mate.beliefs, member.id, 0.04);
+        }
+        state.legitimacy = Math.min(1, state.legitimacy + 0.02);
+        w.emit("commendation", [member.id], {
+          member: member.id,
+          system: pending.deed ?? null,
+          votes,
+        });
+      }
+      break;
+    }
     case "relief": {
       const captain = byId(crew, captainId(state));
       if (carried && captain !== undefined) {
@@ -1305,6 +1416,7 @@ function runMotionSitting(
     kind: pending.kind,
     accused: null,
     victim: null,
+    subject: pending.subjectId,
     cause: pending.kind,
     truthCause: null,
     truthCulprit: null,
@@ -2123,6 +2235,58 @@ function scanTriggers(
     const event = events[state.eventCursor] as (typeof events)[number];
     state.eventCursor++;
     if (event.type === "sabotage_committed") {
+      // Only serious sabotage makes the repair a deed: the same
+      // damage bar that convenes an inquiry. Undoing a scratch
+      // is routine work, and the council does not honour routine.
+      const damage =
+        typeof event.data.damage === "number" ? event.data.damage : 0;
+      if (
+        typeof event.data.system === "string" &&
+        damage >= cfg.sabotageInquiryDamage
+      ) {
+        state.sabotagedSystems.add(event.data.system);
+      }
+    }
+    if (event.type === "system_failed") {
+      if (typeof event.data.system === "string") {
+        state.unrepairedFailures.add(event.data.system);
+      }
+    } else if (event.type === "system_repaired") {
+      const system = typeof event.data.system === "string" ? event.data.system : null;
+      const by = typeof event.data.by === "string" ? event.data.by : null;
+      if (system !== null) {
+        const wasFailed = state.unrepairedFailures.delete(system);
+        const wasSabotaged = state.sabotagedSystems.delete(system);
+        if (
+          (wasFailed || wasSabotaged) &&
+          by !== null &&
+          w.tick - state.lastCommendationTick >= cfg.commendationGlobalCooldownTicks &&
+          w.tick - (state.commendationAt[by] ?? -1000000) >=
+            cfg.commendationMemberCooldownTicks
+        ) {
+          const member = byId(crew, by);
+          if (member !== undefined && alive(member)) {
+            state.lastCommendationTick = w.tick;
+            state.commendationAt[by] = w.tick;
+            state.pending.push({
+              kind: "commendation",
+              atTick: w.tick + cfg.conveneDelayTicks,
+              accusedId: null,
+              accuserId: null,
+              victimId: null,
+              truthCulprit: null,
+              causeKind: "deed",
+              store: null,
+              level: null,
+              movers: [],
+              renewal: 0,
+              subjectId: by,
+              deed: system,
+            });
+          }
+        }
+      }
+    } else if (event.type === "sabotage_committed") {
       const damage = typeof event.data.damage === "number" ? event.data.damage : 0;
       const key = `sabotage:${String(event.data.system)}:${event.tick}`;
       if (damage >= cfg.sabotageInquiryDamage && !state.inquiryKeys.has(key)) {

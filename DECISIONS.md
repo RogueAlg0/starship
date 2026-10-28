@@ -1866,3 +1866,61 @@ the newest card fades in. Verified in Node across six seeds
 (615 testimony posts, 171 sentences, reactions and defences in
 the hundreds) and in the browser at D32 (80 cards, 51 carrying
 reactions).
+
+## The council pass, and the work-first turn (Oct 28, 2026)
+
+Three council slices landed together, then the direction
+turned. The society thermostat: repeat public accusations
+against the same person stretch the public cooldown (each
+claim inside a seven-day window adds a day, capped), and a
+finding vents suspicion toward the verdict's resting level,
+less where the chair is distrusted, and clears the accused's
+suffered-claims record. Measured on the dig: hot seeds fell
+from 278-483 accusations per 90 days to 107-171, inquiries
+steady. Departments bend votes: a bench officer shields a
+department-mate on trial and backs a department-mate's claim
+by small configured weights, and Command shields its captain
+on a relief motion the same way. Commendations: the council's
+one positive motion, honouring the restoration of a failed
+system or the undoing of serious sabotage, gated by cooldowns
+so it stays an honour (a handful per voyage, with refusals).
+
+Then the maintainer redirected: internal drama is not the
+centre; the ship's work is. Seed 42 under the new economy runs
+zero accusations in 90 days, and the old test law ("the quiet
+ship still accuses, a little") was retired on that word: the
+law now reads that a well-run ship may accuse nobody, while
+its society still visibly lives (bonds form, the council sits
+on real evidence). Factions stay in the design, with a
+standing note that they must not stay background: department
+identity, grievances, and voices are the next faction pass,
+interleaved with the jobs expansion (departments own duties).
+
+## The upkeep layer: duties (Oct 28, 2026)
+
+At the maintainer's direction the centre of the game moves
+from internal drama to the ship's work. Slice one is the
+upkeep layer (src/world/duties.ts): four standing duties,
+each owned by a department, done in its place, decaying on
+its own clock. Air filters (Engineering, at life support),
+sanitation (Services, mess/quarters/medbay), crop tending
+(Science, at the hydroponics rig), and the stores audit
+(Services, in cargo). Crew choose duty work the way they
+choose every other work: in the room, scored, with an urgency
+curve that holds until the duty is genuinely healthy, and a
+harder pull once it stands neglected.
+
+Neglect is a slow tax, never a failure state. Neglected
+filters throttle oxygen production toward a floor; neglected
+crops throttle food; neglected sanitation adds a grime term
+to the sickness balance; a neglected audit makes the stores
+tally quietly lose food, surfaced a day later as a suspect-
+less discrepancy (bookkeeping rot, not theft). Crossing into
+neglect is announced once, in the chronicle and the feed, and
+restoration past the line is announced with the name of the
+member whose hands did it. The Ship tab carries a Duties
+section, bars grouped under their departments, which is also
+factions made visible: a department's shame and pride are on
+the board. Measured: a kept-up ship holds its duties near
+0.5-0.7 indefinitely; strained ships lapse and recover, a
+few times a voyage.

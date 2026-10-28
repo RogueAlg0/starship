@@ -287,13 +287,25 @@ export function stepSociety(w: World, crew: readonly CrewMember[]): void {
       if (last !== undefined && w.tick - last < CONFIG.accusation.cooldownTicks) {
         continue;
       }
+      // The public cooldown stretches with repetition inside
+      // the window: the ship hears the first claim at once and
+      // makes the restatements wait, longer each time.
+      const windowStart = w.tick - CONFIG.accusation.repeatWindowTicks;
+      other.accusationTicks = other.accusationTicks.filter(
+        (t) => t > windowStart,
+      );
+      const heat = Math.min(
+        CONFIG.accusation.repeatCooldownCap,
+        other.accusationTicks.length,
+      );
       if (
         w.tick - other.lastAccusationTick <
-        CONFIG.accusation.publicCooldownTicks
+        CONFIG.accusation.publicCooldownTicks * (1 + heat)
       ) {
         continue;
       }
       accuser.beliefs.accusationsMade[other.id] = w.tick;
+      other.accusationTicks.push(w.tick);
       // Speaking it aloud vents a little of the accuser's own suspicion,
       // hardens the accuser against the accused, and plants the claim in
       // the beliefs of the crew who hear it: the ones in the room with

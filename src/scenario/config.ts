@@ -320,12 +320,25 @@ export const CONFIG = {
     threshold: 0.65,
     cooldownTicks: 720,
     /** After a public accusation, the matter is already public: other
-     *  accusers hold off about the same person for this many ticks. */
-    publicCooldownTicks: 36,
+     *  accusers hold off about the same person for this many ticks.
+     *  One ship day. A public claim occupies the ship until it has had
+     *  a day to be weighed, and the council, not repetition, is what
+     *  moves it. At six hours a scapegoat collected a fresh accusation
+     *  every few hours, each one restating the same claim, and the
+     *  chronicle filled with restatements instead of events (measured
+     *  on seed 42 with room-scoped hearing: accusations still settle
+     *  near 25 a day, driven by the per-target re-accusation rate). */
+    publicCooldownTicks: 144,
     /** Suspicion listeners gain toward the accused from a public claim. */
     spreadSuspicion: 0.02,
-    /** Suspicion fades a little every tick; memories are not ledgers. */
-    suspicionDecayPerTick: 0.001,
+    /** Suspicion fades a little every tick; memories are not ledgers.
+     *  About 10% a day: slow enough that a repeat offender's pattern
+     *  accumulates across a fortnight of acts, fast enough that a
+     *  quiet month clears the air. (At 13% a day with the old
+     *  unbounded evidence the fade lost either way; paired with the
+     *  divided evidence weight this is the cooling half of the
+     *  balance.) */
+    suspicionDecayPerTick: 0.0007,
     listenerTrustHit: 0.015,
     /** The accuser's own suspicion vents a little once spoken. */
     ventRelief: 0.12,
@@ -355,7 +368,13 @@ export const CONFIG = {
     catharsisTrust: 0.1,
     /** Presence snapshots kept, one per tick: the witness evidence window. */
     witnessWindowTicks: 8,
-    suspicionBase: 0.34,
+    /** The total suspicion one act casts per observer, divided among
+     *  the suspects seen in or next door to the room by squared
+     *  evidence weight and prior distrust. Sized so the culprit of a
+     *  quiet act takes the larger share and lands near the gossip
+     *  threshold: one act makes a named suspect, two or three acts
+     *  inside the fade make a case. */
+    suspicionBase: 0.55,
   },
 
   chronicle: {
@@ -429,6 +448,17 @@ export const CONFIG = {
      */
     gossipThreshold: 0.48,
     gossipTransfer: 0.008,
+    /** Rumour loses strength as it travels: a listener can catch at
+     *  most this fraction of the level the speaker holds. First-hand
+     *  suspicion (from evidence, or from hearing a claim spoken in
+     *  the room) is untouched; only the gossip path attenuates, so a
+     *  suspicion passed hand to hand sinks below the accusation line
+     *  within a few retellings unless evidence refreshes it. Without
+     *  the attenuation, gossip's cap was the speaker's full level and
+     *  the twice-daily meals re-topped the whole ship at that level
+     *  forever: measured on seed 42, accusations re-saturate near
+     *  10 a day by month six however the evidence inflow is bounded. */
+    gossipFidelity: 0.8,
     /** A tipping of one person's suspicion of one target is recorded at
      *  most once per this many ticks, however often rumour re-tops it. */
     gossipTipCooldownTicks: 144,

@@ -123,9 +123,19 @@ export function applySabotage(
   });
 
   // Evidence: for each person, the closest they were seen to the room
-  // across the window, recent sightings counting for more. Observers
-  // weight that evidence by how little they already trusted the suspect,
-  // so old distrust poisons new evidence.
+  // across the window, recent sightings counting for more. Only the
+  // near are named by evidence at all: a suspect must have been seen
+  // in the room itself or the room next door inside the window, and
+  // distance beyond that is an alibi. The act casts one fixed weight
+  // of suspicion per observer, divided among the near suspects by
+  // the square of their evidence (a sighting in the room itself
+  // outweighs a next-door sighting four to one) and by how little
+  // the observer already trusted each of them, so old distrust
+  // poisons new evidence. (Until the near gate and the division were
+  // applied, every act sprinkled suspicion over most of the ship at
+  // nearly full weight per suspect: measured on seed 42, by day 60
+  // every ordered pair aboard sat over the accusation line, mean
+  // suspicion 0.90 of 1.)
   const windowSize = Math.max(1, history.length);
   for (const observer of crew) {
     // A member ashore saw nothing and was seen nowhere: leave at a
@@ -135,23 +145,36 @@ export function applySabotage(
       (sum, trait) => sum + (CONFIG.traitEffects[trait]?.suspicion ?? 0),
       0,
     );
+    const near: { suspect: CrewMember; weight: number }[] = [];
+    let totalWeight = 0;
     for (const suspect of crew) {
       if (suspect === observer) continue;
       if (suspect.ashore || suspect.dead || suspect.leftShip) continue;
       let evidence = 0;
+      let minDistance = Infinity;
       for (let i = 0; i < history.length; i++) {
         const snapshot = history[i] as Record<string, number>;
         const seenRoom = snapshot[suspect.id];
         if (seenRoom === undefined) continue;
-        const proximity = 1 / (1 + ship.distance(seenRoom, system.room));
+        const distance = ship.distance(seenRoom, system.room);
+        if (distance < minDistance) minDistance = distance;
+        const proximity = 1 / (1 + distance);
         const age = history.length - 1 - i;
         const recency = 1 - 0.4 * (age / windowSize);
         if (proximity * recency > evidence) evidence = proximity * recency;
       }
-      if (evidence <= 0) continue;
+      if (evidence <= 0 || minDistance > 1) continue;
       const distrust = 0.75 + 0.5 * (0.5 - trustOf(observer.beliefs, suspect.id));
+      const weight = evidence * evidence * distrust;
+      near.push({ suspect, weight });
+      totalWeight += weight;
+    }
+    if (totalWeight <= 0) continue;
+    for (const { suspect, weight } of near) {
       const gain =
-        CONFIG.sabotage.suspicionBase * evidence * distrust * (1 + anxiousBonus);
+        CONFIG.sabotage.suspicionBase *
+        (1 + anxiousBonus) *
+        (weight / totalWeight);
       driftSuspicion(observer.beliefs, suspect.id, gain);
     }
   }

@@ -122,8 +122,9 @@ export function accusationThresholdFor(member: CrewMember): number {
  * can take root in the listener: any suspicion the speaker holds at or
  * above the gossip threshold rises in the listener by a small amount,
  * scaled by how much the listener trusts the speaker, and never above
- * the level the speaker holds it at: you cannot catch more suspicion
- * than the teller has. Nor can rumour alone carry a listener past their
+ * a fraction of the level the speaker holds it at (gossipFidelity):
+ * rumour loses strength as it travels, and a suspicion passed hand to
+ * hand fades below the line unless evidence refreshes it. Nor can rumour alone carry a listener past their
  * own accusation threshold: gossip can bring a person to the edge of
  * speaking, but the last step is always evidence or a public claim.
  * Ordinary gossip is silent in the log; only the moment a transferred
@@ -145,7 +146,7 @@ export function spreadGossip(
     const before = suspicionOf(listener.beliefs, id);
     if (before >= held) continue;
     const after = Math.min(
-      held,
+      held * CONFIG.routine.gossipFidelity,
       threshold,
       before + CONFIG.routine.gossipTransfer * receptivity,
     );
@@ -295,12 +296,22 @@ export function stepSociety(w: World, crew: readonly CrewMember[]): void {
       accuser.beliefs.accusationsMade[other.id] = w.tick;
       // Speaking it aloud vents a little of the accuser's own suspicion,
       // hardens the accuser against the accused, and plants the claim in
-      // every listener's beliefs, weighted by nothing but the hearing.
+      // the beliefs of the crew who hear it: the ones in the room with
+      // the accuser. A claim is spoken in a place, never broadcast to
+      // the whole ship. Until the hearing was scoped to the room, every
+      // accusation topped up all ten other crew wherever they were,
+      // suspicion inflow beat decay ship-wide, and the society ran
+      // permanently hot (measured on seed 42: accusations settle near
+      // 25 a day from day 30 on and never cool). Presence is the same
+      // law gossip already obeys: rumour travels between people who
+      // are actually together.
       driftSuspicion(accuser.beliefs, other.id, -CONFIG.accusation.ventRelief);
       driftTrust(accuser.beliefs, other.id, -CONFIG.accusation.selfTrustHit);
       other.lastAccusationTick = w.tick;
       for (const listener of crew) {
         if (listener === accuser || listener === other) continue;
+        if (listener.dead || listener.leftShip || listener.ashore) continue;
+        if (listener.room !== accuser.room) continue;
         driftSuspicion(
           listener.beliefs,
           other.id,

@@ -1417,8 +1417,9 @@ over about 15 days. The frequency-law test in
 test/council.test.ts was amended to carry the carve-out
 plainly: per-seed deaths at most 2, or all deaths on a single
 tick with a `ship_lost` event that tick (the ending firing,
-not an ordinary-mortality leak). The maintainer may overrule
-the carve-out; it is recorded here so the judgment stays
+not an ordinary-mortality leak). The carve-out is kept: on
+Oct 27, 2026 the maintainer ruled the cascade a legitimate
+rare ending; it is recorded here so the judgment stays
 visible.
 
 Still deferred: the distress-call and diversion half of the
@@ -1678,3 +1679,64 @@ marks 1 to 1, plus 18 level-ups that did not exist before.
 Replay stays exact (test/replay.test.ts, test/chatter.test.ts)
 and the full gate is green: 128 tests, typecheck clean on the
 engine and the viewer.
+
+## The accusation economy, cooled (Oct 27, 2026)
+
+The five-year watch on the old build named the defect plainly:
+46,314 accusations over five years, about 25 a day at day 90
+and still 25 a day at year five, and every ordered pair aboard
+over the accusation line (measured mean suspicion 0.90 of 1 at
+day 60 on seed 42). The rate was not drama; it was cooldown
+ceilings dividing the crew count. Four changes, each aimed at
+a mechanism rather than the symptom:
+
+- A public accusation is now heard in the room where it is
+  spoken. The suspicion it plants and the trust it costs reach
+  only the crew present, the same presence law gossip already
+  obeyed; it used to top up all ten other crew ship-wide.
+- A spoken claim holds its target for a full day (the public
+  cooldown, 36 to 144 ticks): a person is publicly accused at
+  most once a day, not four times.
+- Sabotage evidence names only the near. A suspect must have
+  been seen in the room itself or the room next door inside
+  the witness window; distance beyond that is an alibi. The
+  act casts one fixed weight of suspicion per observer,
+  divided among the near suspects by squared evidence and by
+  prior distrust. It used to pay nearly full weight to every
+  suspect at any distance, so each act sprinkled the whole
+  ship.
+- Gossip attenuates (gossipFidelity 0.8): a listener catches
+  at most four fifths of the level the speaker holds, so
+  rumour fades hand to hand unless evidence refreshes it.
+
+Two tunings ride along: suspicionBase 0.34 to 0.55 (the act's
+whole weight, before division), and suspicion decay 0.001 to
+0.0007 a tick, about 10% a day, so a repeat offender's pattern
+accumulates across a fortnight while a quiet month still
+clears the air.
+
+Measured on the shipped path, seed 42: 90 days carry 11
+accusations (was 1,385), focused on three people (7, 3, 1),
+with 22 sabotages, 9 council sittings and 3 sentences, and no
+pair saturation at day 90. The daily seeds were re-vetted on
+the new physics (30-day voyages, drama scored as before):
+seed 11 scores 23, 16 scores 19, 17 scores 8, 30 scores 18,
+39 scores 20, 40 scores 17, 42 scores 12. No ship lost, no
+deaths, no runaways; the list stands. Month one of a voyage
+is now sabotage-and-council led, and accusations typically
+land from the second month, as a case builds.
+
+Known open thread, recorded rather than smoothed over: at
+year scale the society still warms. Seed 42's year carries
+2,341 accusations, ramping over about five months to roughly
+10 a day, as trust damage (which has no recovery term)
+accumulates grudges. A trust-cooling term was tried at two
+rates and rejected on measurement: at both, the cooling
+outran the ship's friction and no grudge ever formed. The
+vent for the year-scale heat belongs to the council, whose
+findings should settle the ship's suspicion of the accused;
+that is future work in the council programme, not another
+suspicion knob.
+
+The seed 11 carve-out above is settled by the maintainer's
+ruling of Oct 27, 2026: kept.

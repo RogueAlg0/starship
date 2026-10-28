@@ -9,7 +9,7 @@ import {
   type CrewMember,
 } from "../src/entities/crew.ts";
 import { renderChronicle } from "../src/log/chronicle.ts";
-import { suspicionOf } from "../src/perception/beliefs.ts";
+import { stepSociety, suspicionOf } from "../src/perception/beliefs.ts";
 import { applySabotage } from "../src/plots/sabotage.ts";
 import { CONFIG } from "../src/scenario/config.ts";
 import { buildWorld, runSimulation } from "../src/sim.ts";
@@ -209,6 +209,55 @@ describe("the living ship", () => {
     // wrongful-accusation engine works.
     expect(bystanderSuspicion).toBeGreaterThan(0);
     expect(culpritSuspicion).toBeGreaterThan(bystanderSuspicion);
+  });
+
+  it("an accusation is heard only by the crew in the room", () => {
+    const world = new World({ seed: 5 }, new UtilitySource());
+    const ship = generateShip(world.rng.get("shipgen"));
+    const crew = generateCrew(world.rng.get("crewgen"), ship);
+    resetBeliefs(crew);
+
+    const accuser = crew[0] as CrewMember;
+    const accused = crew[1] as CrewMember;
+    const present = crew[2] as CrewMember;
+    const absent = crew[3] as CrewMember;
+    const roomA = ship.rooms[0] as { index: number };
+    let farRoom = roomA.index;
+    let farDistance = -1;
+    for (const r of ship.rooms) {
+      const d = ship.distance(roomA.index, r.index);
+      if (d > farDistance) {
+        farDistance = d;
+        farRoom = r.index;
+      }
+    }
+    accuser.room = roomA.index;
+    accused.room = farRoom;
+    present.room = roomA.index;
+    absent.room = farRoom;
+    for (const member of crew) {
+      if (member !== accuser && member !== present) {
+        member.room = farRoom;
+      }
+    }
+    accuser.beliefs.suspicion[accused.id] = 0.95;
+    accused.lastAccusationTick = -1000000;
+
+    stepSociety(world, crew);
+
+    const spoken = world.events.events.find((e) => e.type === "accusation");
+    expect(spoken).toBeDefined();
+    // The crewmate in the room hears the claim and takes some of it on.
+    expect(suspicionOf(present.beliefs, accused.id)).toBeCloseTo(
+      CONFIG.accusation.spreadSuspicion,
+    );
+    expect(present.beliefs.trust[accused.id]).toBeCloseTo(
+      0.2 - CONFIG.accusation.listenerTrustHit,
+    );
+    // The crewmate across the ship hears nothing: no suspicion gained,
+    // no trust lost. A claim is local, like gossip.
+    expect(suspicionOf(absent.beliefs, accused.id)).toBe(0);
+    expect(absent.beliefs.trust[accused.id]).toBe(0.2);
   });
 
   it(

@@ -9,6 +9,7 @@
 // deterministic as the run and no engine stream is ever drawn.
 
 import type { SimEvent } from "../../src/log/events.ts";
+import { dutyDef } from "../../src/world/duties.ts";
 import {
   chatterText,
   denialText,
@@ -391,6 +392,27 @@ export function feedItemFor(event: SimEvent, names: FeedNames): FeedItem | null 
             : `Testifying: "${text}"`,
       };
     }
+    case "duty_neglected": {
+      const def = dutyDef(str(event, "duty"));
+      return {
+        kind: "post",
+        seq,
+        tick,
+        author: null,
+        text: def?.neglectText ?? `The ${str(event, "name")} duty is overdue.`,
+      };
+    }
+    case "duty_restored": {
+      const by = str(event, "by");
+      const def = dutyDef(str(event, "duty"));
+      return {
+        kind: "post",
+        seq,
+        tick,
+        author: null,
+        text: `${by !== "" ? names.person(by) : "The crew"} brings the ${(def?.name ?? "duty").toLowerCase()} back up to standard.`,
+      };
+    }
     case "council_sentence": {
       const member = str(event, "member");
       if (member === "") return null;
@@ -447,6 +469,15 @@ export function feedItemFor(event: SimEvent, names: FeedNames): FeedItem | null 
         } else {
           outcome = `Finding: ${accusedName} is cleared.`;
         }
+      } else if (kind === "commendation") {
+        const subject = str(event, "subject");
+        const subjectName =
+          subject !== "" ? names.person(subject) : "the member";
+        question = `Commend ${subjectName}?`;
+        outcome =
+          event.data.convicted === true
+            ? `${subjectName} is commended.`
+            : "The commendation is refused.";
       } else {
         const phrases: Record<string, string> = {
           rationing: "the rationing proposal",

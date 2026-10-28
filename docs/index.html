@@ -790,6 +790,8 @@
     <section data-sheet="ship" aria-label="Ship" hidden>
       <h3>Stores</h3>
       <div id="stores-strip"></div>
+      <h3>Duties</h3>
+      <div id="duties-list"></div>
       <h3>Voyage</h3>
       <div id="route-readout"></div>
       <div class="seed-group">
@@ -1239,6 +1241,14 @@
        *  on seed 42 with room-scoped hearing: accusations still settle
        *  near 25 a day, driven by the per-target re-accusation rate). */
       publicCooldownTicks: 144,
+      /** The public cooldown stretches with repetition: each public
+       *  accusation the same person has suffered inside this window
+       *  adds one more base cooldown to the next (up to the cap).
+       *  The first answer to fresh evidence stays immediate; the
+       *  fifth restatement of the same claim waits its turn. A
+       *  finding clears the record (see the council's venting). */
+      repeatWindowTicks: 1008,
+      repeatCooldownCap: 3,
       /** Suspicion listeners gain toward the accused from a public claim. */
       spreadSuspicion: 0.02,
       /** Suspicion fades a little every tick; memories are not ledgers.
@@ -1296,6 +1306,36 @@
      * actually together, and free-time texture. Hours are ship hours; a day
      * is CONFIG.time.ticksPerDay ticks of ten minutes.
      */
+    /**
+     * The upkeep layer: standing duties, each owned by a
+     * department, done in its place, decaying on its own clock.
+     * Critical to the routine and quietly expensive to neglect:
+     * the consequences live in the systems that read the levels
+     * (air and food production, sickness, the stores tally).
+     */
+    duties: {
+      /** A duty below this level is neglected: the ship is told. */
+      neglectLine: 0.3,
+      /** Servicing a neglected duty past this level restores it. */
+      restoreLine: 0.55,
+      perDuty: {
+        filters: { decayPerDay: 0.3, servicePerTick: 0.02 },
+        sanitation: { decayPerDay: 0.5, servicePerTick: 0.025 },
+        crops: { decayPerDay: 0.35, servicePerTick: 0.022 },
+        audit: { decayPerDay: 0.22, servicePerTick: 0.03 }
+      },
+      /** Neglected filters throttle oxygen production to this
+       *  floor share; kept filters run at full. */
+      filterFloor: 0.6,
+      /** Neglected crops throttle food production likewise. */
+      cropFloor: 0.45,
+      /** Sickness pressure per day at zero sanitation, scaled by
+       *  how far below the line the ship's hygiene has fallen. */
+      grimeSickPerDay: 0.22,
+      /** Food milli-units the tally quietly loses per day while
+       *  the audit stands neglected, surfaced as a discrepancy. */
+      auditDriftFoodMilliPerDay: 400
+    },
     routine: {
       /** How many crew stand the night watch (drawn one per pool below). */
       nightWatchSize: 2,
@@ -2044,6 +2084,9 @@
       repairMilliPerTick: 60,
       treatMilliPerTick: 55,
       genericMilliPerTick: 45,
+      /** Duty work teaches its discipline slowly: chores are not
+       *  mastery, and the tuning law caps cross-training. */
+      dutyMilliPerTick: 15,
       /** A meal window served books this to the cook's husbandry:
        *  two windows a day, and the cook's primary trade has few
        *  other teachers in this engine, so the service carries the
@@ -2243,6 +2286,40 @@
       reliefCooldownTicks: 8640,
       /** Legitimacy moves: per sitting, scaled by crew agreement. */
       legitimacySwing: 0.06,
+      /** Findings vent suspicion: when a sitting concludes, every
+       *  member's suspicion of the accused closes this share of its
+       *  distance to the verdict's resting level (scaled by their
+       *  trust in the chair: a distrusted bench vents less). What a
+       *  court has judged stops circulating as raw suspicion. */
+      ventShare: 0.35,
+      ventRestAcquitted: 0.32,
+      ventRestConvicted: 0.4,
+      /** The ship's blocs: departments by role. A bench officer
+       *  shields a department-mate on trial and backs a
+       *  department-mate's claim, by these weights on the vote
+       *  score. Small against the evidence term: loyalty bends a
+       *  close vote, it does not buy one. */
+      departments: {
+        captain: "Command",
+        "executive officer": "Command",
+        "chief engineer": "Engineering",
+        engineer: "Engineering",
+        medic: "Medical",
+        scientist: "Science",
+        botanist: "Science",
+        pilot: "Operations",
+        navigator: "Operations",
+        "security officer": "Operations",
+        cook: "Services",
+        quartermaster: "Services"
+      },
+      factionShield: 0.12,
+      /** Commendations: the council's one positive motion. A
+       *  member who restores a failed system may be tabled for
+       *  one, at most this often ship-wide and per member. */
+      factionLoyalty: 0.06,
+      commendationGlobalCooldownTicks: 1440,
+      commendationMemberCooldownTicks: 4320,
       legitimacyStart: 0.7,
       /** A seat holder below this health retires hurt at the daily check. */
       retireHealth: 0.3,
@@ -2723,6 +2800,120 @@
   function denialText(data) {
     const templates = CONFIG.chatter.templates.denial ?? [];
     return templates[num(data, "variant") % Math.max(1, templates.length)] ?? "";
+  }
+
+  // src/world/duties.ts
+  var DUTY_DEFS = [
+    {
+      id: "filters",
+      name: "Air filters",
+      department: "Engineering",
+      owners: ["chief engineer", "engineer"],
+      anchorSystemKind: "life support",
+      discipline: "lifeSystems",
+      neglectText: "The air filters are overdue; the air has gone stale."
+    },
+    {
+      id: "sanitation",
+      name: "Sanitation",
+      department: "Services",
+      owners: ["cook", "quartermaster"],
+      anchorRoomKinds: ["mess", "quarters", "medbay"],
+      discipline: "husbandry",
+      neglectText: "Sanitation is overdue; the ship smells of itself."
+    },
+    {
+      id: "crops",
+      name: "Crop tending",
+      department: "Science",
+      owners: ["botanist", "scientist"],
+      anchorSystemKind: "hydroponics rig",
+      discipline: "husbandry",
+      neglectText: "The crops are overdue for tending; the leaves are curling."
+    },
+    {
+      id: "audit",
+      name: "Stores audit",
+      department: "Services",
+      owners: ["quartermaster"],
+      anchorRoomKinds: ["cargo"],
+      discipline: "operations",
+      neglectText: "The stores audit is overdue; the tally trusts itself less."
+    }
+  ];
+  function createDuties() {
+    const byId2 = {};
+    for (const def of DUTY_DEFS) {
+      byId2[def.id] = { level: 0.9, neglected: false, lastServiceTick: -1 };
+    }
+    return { byId: byId2 };
+  }
+  function dutyDef(id) {
+    return DUTY_DEFS.find((d) => d.id === id);
+  }
+  function dutyLevel(ship, id) {
+    return ship.duties?.byId[id]?.level ?? 1;
+  }
+  function dutyRoom(ship, def) {
+    if (def.anchorSystemKind !== void 0) {
+      const system = ship.systems.find((s) => s.kind === def.anchorSystemKind);
+      return system === void 0 ? -1 : system.room;
+    }
+    for (const kind of def.anchorRoomKinds ?? []) {
+      const room = ship.firstRoomOfKind(kind);
+      if (room >= 0) return room;
+    }
+    return -1;
+  }
+  function dutyRoomMatches(ship, def, room) {
+    if (def.anchorSystemKind !== void 0) {
+      return ship.systemsInRoom(room).some((s) => s.kind === def.anchorSystemKind);
+    }
+    return (def.anchorRoomKinds ?? []).includes(ship.roomKind(room));
+  }
+  function filterFactor(ship) {
+    const floor = CONFIG.duties.filterFloor;
+    return floor + (1 - floor) * dutyLevel(ship, "filters");
+  }
+  function cropFactor(ship) {
+    const floor = CONFIG.duties.cropFloor;
+    return floor + (1 - floor) * dutyLevel(ship, "crops");
+  }
+  function stepDuties(w, ship) {
+    const duties = ship.duties;
+    if (duties === null) return;
+    const tpd = CONFIG.time.ticksPerDay;
+    for (const def of DUTY_DEFS) {
+      const state = duties.byId[def.id];
+      if (state === void 0) continue;
+      const cfg = CONFIG.duties.perDuty[def.id];
+      if (cfg === void 0) continue;
+      state.level = Math.max(0, state.level - cfg.decayPerDay / tpd);
+      if (!state.neglected && state.level < CONFIG.duties.neglectLine) {
+        state.neglected = true;
+        w.emit("duty_neglected", [], {
+          duty: def.id,
+          name: def.name,
+          department: def.department,
+          level: Math.round(state.level * 1e3) / 1e3
+        });
+      }
+    }
+  }
+  function checkDutiesState(ship) {
+    const errors = [];
+    if (ship.duties === null) return errors;
+    for (const def of DUTY_DEFS) {
+      const state = ship.duties.byId[def.id];
+      if (state === void 0) {
+        errors.push(`duty ${def.id} missing`);
+        continue;
+      }
+      if (!(state.level >= 0 && state.level <= 1)) {
+        errors.push(`duty ${def.id} level out of range: ${state.level}`);
+      }
+    }
+    return errors;
   }
 
   // src/world/skills.ts
@@ -3536,6 +3727,7 @@
               emergency: "the grant of emergency powers",
               relief: "the motion of no confidence",
               appointment: "the First Officer's appointment",
+              commendation: "a commendation",
               course: "the captain's course"
             };
             line(
@@ -3608,6 +3800,13 @@
         case "appointment_refused": {
           line(
             `${ts} \u2014 The council refuses to ratify ${person(str2(data, "member"))} as First Officer. The seat stands empty again.`,
+            true
+          );
+          break;
+        }
+        case "commendation": {
+          line(
+            `${ts} \u2014 ${person(str2(data, "member"))} is commended for restoring the ${system(str2(data, "system"))}.`,
             true
           );
           break;
@@ -3914,6 +4113,21 @@
           this.seenStrain.add(key2);
           line(
             `${ts} \u2014 The ${system(systemId)} strains; the whole crew feels it.`,
+            true
+          );
+          break;
+        }
+        case "duty_neglected": {
+          const def = dutyDef(str2(data, "duty"));
+          line(
+            `${ts} \u2014 ${def?.neglectText ?? `The ${str2(data, "name")} duty is overdue.`}`,
+            true
+          );
+          break;
+        }
+        case "duty_restored": {
+          line(
+            `${ts} \u2014 ${person(str2(data, "by"))} brings the ${str2(data, "duty") === "audit" ? "stores audit" : str2(data, "duty")} back up to standard.`,
             true
           );
           break;
@@ -4334,10 +4548,19 @@
         if (last !== void 0 && w.tick - last < CONFIG.accusation.cooldownTicks) {
           continue;
         }
-        if (w.tick - other.lastAccusationTick < CONFIG.accusation.publicCooldownTicks) {
+        const windowStart = w.tick - CONFIG.accusation.repeatWindowTicks;
+        other.accusationTicks = other.accusationTicks.filter(
+          (t) => t > windowStart
+        );
+        const heat = Math.min(
+          CONFIG.accusation.repeatCooldownCap,
+          other.accusationTicks.length
+        );
+        if (w.tick - other.lastAccusationTick < CONFIG.accusation.publicCooldownTicks * (1 + heat)) {
           continue;
         }
         accuser.beliefs.accusationsMade[other.id] = w.tick;
+        other.accusationTicks.push(w.tick);
         driftSuspicion(accuser.beliefs, other.id, -CONFIG.accusation.ventRelief);
         driftTrust(accuser.beliefs, other.id, -CONFIG.accusation.selfTrustHit);
         other.lastAccusationTick = w.tick;
@@ -4853,6 +5076,10 @@
       if ((occupancy.get(member.room) ?? 0) >= cfg.crowdSize) {
         sickDelta += cfg.sickCrowdPerDay / tpd;
       }
+      const hygiene = ship.duties?.byId["sanitation"]?.level ?? 1;
+      if (hygiene < CONFIG.duties.neglectLine) {
+        sickDelta += CONFIG.duties.grimeSickPerDay * (CONFIG.duties.neglectLine - hygiene) / CONFIG.duties.neglectLine / tpd;
+      }
       const spreaders = sickByRoom.get(member.room) ?? 0;
       if (spreaders > 0 && body.sick <= cfg.spreadLine) {
         sickDelta += cfg.spreadPerDay * spreaders / tpd;
@@ -5133,11 +5360,11 @@
     const cfg = CONFIG.stores;
     switch (key2) {
       case "food":
-        return cfg.productionFactor.food * dailyUseMilli(state, key2) * systemCondition2(ship, STORE_PRODUCER_KIND.food);
+        return cfg.productionFactor.food * dailyUseMilli(state, key2) * systemCondition2(ship, STORE_PRODUCER_KIND.food) * cropFactor(ship);
       case "water":
         return cfg.productionFactor.water * dailyUseMilli(state, key2) * systemCondition2(ship, STORE_PRODUCER_KIND.water);
       case "oxygen":
-        return cfg.productionFactor.oxygen * dailyUseMilli(state, key2) * systemCondition2(ship, STORE_PRODUCER_KIND.oxygen);
+        return cfg.productionFactor.oxygen * dailyUseMilli(state, key2) * systemCondition2(ship, STORE_PRODUCER_KIND.oxygen) * filterFactor(ship);
       case "fuel":
         return 0;
       case "parts":
@@ -5505,6 +5732,22 @@
         );
       }
     }
+    if (w.tick % tpd === cfg.theft.checkTickOfDay && ship.duties !== null && (ship.duties.byId["audit"]?.neglected ?? false)) {
+      const drift = Math.min(
+        state.byKey.food.qtyMilli,
+        CONFIG.duties.auditDriftFoodMilliPerDay
+      );
+      if (drift > 0) {
+        state.byKey.food.qtyMilli -= drift;
+        state.totals.food.chargedMilli -= drift;
+        state.discrepancies.push({
+          thiefId: "",
+          atTick: w.tick + tpd,
+          partial: false,
+          shortMilli: drift
+        });
+      }
+    }
     if (w.tick % tpd === cfg.theft.checkTickOfDay && (state.rationing.food || daysOf(state, "food") < cfg.theft.scarceDays)) {
       drawTheft(w, state, ship, crew);
     }
@@ -5608,6 +5851,10 @@
     /** Person currently being treated by this member, for event dedupe. */
     treatTarget = null;
     lastAccusationTick = -1e6;
+    /** Ticks of the public accusations this person has suffered,
+     *  pruned to the accusation repeat window by the society step.
+     *  A council finding clears the record. */
+    accusationTicks = [];
     lastSabotageTick = -1e6;
     /** Tick of this person's last leisure event, for the leisure cooldown. */
     lastLeisureTick = -1e6;
@@ -5616,6 +5863,8 @@
     lastChatterTick = -1e6;
     /** System currently being repaired, for repair-session event dedupe. */
     repairTarget = null;
+    /** Duty currently being serviced, for duty-session event dedupe. */
+    dutyTarget = null;
     constructor(id, name, roleKey, title, affinity, skills, traits, room, needs, beliefs, watch, routine) {
       this.id = id;
       this.name = name;
@@ -5798,6 +6047,20 @@
         base: workScore(member) * CONFIG.scores.genericWorkFactor * workFactor
       });
     }
+    if (ship.duties !== null) {
+      for (const def of DUTY_DEFS) {
+        const state = ship.duties.byId[def.id];
+        if (state === void 0 || state.level >= 0.995) continue;
+        if (!dutyRoomMatches(ship, def, member.room)) continue;
+        const owner = def.owners.includes(member.roleKey);
+        const pull = state.neglected ? owner ? 1.6 : 1.2 : 1;
+        candidates.push({
+          key: `duty:${def.id}`,
+          base: workScore(member) * workFactor * (owner ? 1 : 0.45) * pull,
+          urgency: 0.75 + (1 - state.level) * 0.9
+        });
+      }
+    }
     if (roomKind === "medbay") {
       for (const other of crew) {
         if (other === member || other.dead || other.ashore || other.leftShip) {
@@ -5871,6 +6134,20 @@
           duty.room,
           workScore(member) * (block === "free" ? routine.freeWorkFactor : 1)
         );
+      }
+    }
+    if ((block === "work" || block === "free") && ship.duties !== null) {
+      for (const def of DUTY_DEFS) {
+        const state = ship.duties.byId[def.id];
+        if (state === void 0 || state.level >= 0.8) continue;
+        if (!def.owners.includes(member.roleKey)) continue;
+        const room = dutyRoom(ship, def);
+        if (room >= 0) {
+          consider(
+            room,
+            workScore(member) * (0.6 + (1 - state.level)) * (state.neglected ? 1.5 : 1) * (block === "free" ? routine.freeWorkFactor : 1)
+          );
+        }
       }
     }
     for (const s of ship.systems) {
@@ -5990,6 +6267,46 @@
     const { ship } = ctx;
     if (!key2.startsWith("repair:")) member.repairTarget = null;
     if (!key2.startsWith("treat:")) member.treatTarget = null;
+    if (!key2.startsWith("duty:")) member.dutyTarget = null;
+    if (key2.startsWith("duty:")) {
+      const def = dutyDef(key2.slice("duty:".length));
+      const duties = ship.duties;
+      if (def !== void 0 && duties !== null) {
+        const state = duties.byId[def.id];
+        if (state !== void 0) {
+          const session = member.dutyTarget !== def.id;
+          member.dutyTarget = def.id;
+          member.activity = "work";
+          member.needs.energy = clamp01(
+            member.needs.energy - CONFIG.needs.workEnergyCost
+          );
+          const discipline = def.discipline;
+          const cfg = CONFIG.duties.perDuty[def.id];
+          const amount = (cfg?.servicePerTick ?? 0.02) * (0.5 + skillOf(member, discipline)) * (def.owners.includes(member.roleKey) ? 1 : 0.6);
+          state.level = clamp01(state.level + amount);
+          state.lastServiceTick = w.tick;
+          if (session) {
+            w.emit("duty_started", [member.id], {
+              duty: def.id,
+              room: member.room
+            });
+          }
+          if (state.neglected && state.level >= CONFIG.duties.restoreLine) {
+            state.neglected = false;
+            w.emit("duty_restored", [member.id], {
+              duty: def.id,
+              by: member.id
+            });
+          }
+          bookXp(w, crew, member, discipline, CONFIG.skills.dutyMilliPerTick, {
+            task: `keeping up the ${def.name.toLowerCase()}`,
+            session
+          });
+          driftWithCoworkers(w, member, crew);
+        }
+      }
+      return;
+    }
     if (key2.startsWith("treat:")) {
       const target = crew.find((c) => c.id === key2.slice("treat:".length));
       member.activity = "treat";
@@ -7383,6 +7700,8 @@
      * test harness may sail without them.
      */
     stores = null;
+    /** The upkeep layer's state, attached at build (see duties.ts). */
+    duties = null;
     /**
      * The council's public face, attached by the run builder: whether
      * the medical seat is filled, whether emergency powers stand, and
@@ -7546,6 +7865,9 @@
 
   // src/world/council.ts
   var SEATS = CONFIG.council.seats;
+  function departmentOfRole(roleKey) {
+    return CONFIG.council.departments[roleKey] ?? "Crew";
+  }
   function computeVote(officer, seatKey, motion, ctx) {
     const cfg = CONFIG.council;
     const byId2 = (id) => id === null || id === void 0 ? void 0 : ctx.crew.find((c) => c.id === id);
@@ -7573,6 +7895,13 @@
       }
       if (accuser !== void 0 && accuser !== officer) {
         trustTerm += trustOf(officer.beliefs, accuser.id) * 0.25;
+      }
+      const myDept = departmentOfRole(officer.roleKey);
+      if (accused !== void 0 && accused !== officer && departmentOfRole(accused.roleKey) === myDept) {
+        trustTerm -= CONFIG.council.factionShield;
+      }
+      if (accuser !== void 0 && accuser !== officer && departmentOfRole(accuser.roleKey) === myDept) {
+        trustTerm += CONFIG.council.factionLoyalty;
       }
     } else if (kind === "rationing" || kind === "ratification") {
       const days = motion.days ?? 99;
@@ -7602,10 +7931,20 @@
       if (proposer !== void 0 && proposer !== officer) {
         trustTerm += trustOf(officer.beliefs, proposer.id) * 0.15;
       }
+      if (captain !== void 0 && captain !== officer && departmentOfRole(captain.roleKey) === departmentOfRole(officer.roleKey)) {
+        trustTerm -= CONFIG.council.factionShield;
+      }
     } else if (kind === "appointment") {
       const appointee = subject;
       evidence = appointee !== void 0 ? Math.max(0, trustOf(officer.beliefs, appointee.id)) : 0;
       evidenceTerm = evidence * 0.8 - 0.1;
+      if (proposer !== void 0 && proposer !== officer) {
+        trustTerm += trustOf(officer.beliefs, proposer.id) * 0.2;
+      }
+    } else if (kind === "commendation") {
+      const member = subject;
+      evidence = member !== void 0 ? Math.max(0, trustOf(officer.beliefs, member.id)) : 0;
+      evidenceTerm = evidence * 0.7 - 0.18 + ((motion.severity ?? 0.5) - 0.4) * 0.6;
       if (proposer !== void 0 && proposer !== officer) {
         trustTerm += trustOf(officer.beliefs, proposer.id) * 0.2;
       }
@@ -7675,7 +8014,11 @@
       foRejected: [],
       sittingsHeld: 0,
       reliefMotions: 0,
-      courseSittings: 0
+      courseSittings: 0,
+      unrepairedFailures: /* @__PURE__ */ new Set(),
+      sabotagedSystems: /* @__PURE__ */ new Set(),
+      commendationAt: {},
+      lastCommendationTick: -1e6
     };
   }
   function byId(crew, id) {
@@ -7852,6 +8195,20 @@
           if (voterId !== member.id) driftTrust(member.beliefs, voterId, -0.08);
         }
       }
+    }
+    if (accused !== void 0) {
+      const cfg = CONFIG.council;
+      const rest = outcome.convicted ? cfg.ventRestConvicted : cfg.ventRestAcquitted;
+      for (const member of crew) {
+        if (!alive(member) || member === accused) continue;
+        const benchTrust = frame2.chairId !== null && frame2.chairId !== member.id ? Math.max(0, trustOf(member.beliefs, frame2.chairId)) : 0.5;
+        const share = cfg.ventShare * (0.5 + 0.5 * benchTrust);
+        const current = suspicionOf(member.beliefs, accused.id);
+        if (current > rest) {
+          driftSuspicion(member.beliefs, accused.id, -(current - rest) * share);
+        }
+      }
+      accused.accusationTicks = [];
     }
     let delta = 0;
     if (accused !== void 0) {
@@ -8188,6 +8545,13 @@
         subjectId: pending.subjectId,
         proposerId: captainId(state)
       };
+    } else if (pending.kind === "commendation") {
+      motion = {
+        kind: "commendation",
+        subjectId: pending.subjectId,
+        proposerId: captainId(state),
+        severity: 0.5
+      };
     }
     const frame2 = frameSitting(state, crew, motion);
     emitConvened(w, ship, frame2, pending.kind, {
@@ -8301,6 +8665,23 @@
         }
         break;
       }
+      case "commendation": {
+        const member = byId(crew, pending.subjectId ?? null);
+        if (carried && member !== void 0) {
+          member.needs.morale = Math.min(1, member.needs.morale + 0.12);
+          for (const mate of crew) {
+            if (mate === member || !alive(mate)) continue;
+            driftTrust(mate.beliefs, member.id, 0.04);
+          }
+          state.legitimacy = Math.min(1, state.legitimacy + 0.02);
+          w.emit("commendation", [member.id], {
+            member: member.id,
+            system: pending.deed ?? null,
+            votes
+          });
+        }
+        break;
+      }
       case "relief": {
         const captain = byId(crew, captainId(state));
         if (carried && captain !== void 0) {
@@ -8341,6 +8722,7 @@
       kind: pending.kind,
       accused: null,
       victim: null,
+      subject: pending.subjectId,
       cause: pending.kind,
       truthCause: null,
       truthCulprit: null,
@@ -8900,6 +9282,45 @@
       state.eventCursor++;
       if (event.type === "sabotage_committed") {
         const damage = typeof event.data.damage === "number" ? event.data.damage : 0;
+        if (typeof event.data.system === "string" && damage >= cfg.sabotageInquiryDamage) {
+          state.sabotagedSystems.add(event.data.system);
+        }
+      }
+      if (event.type === "system_failed") {
+        if (typeof event.data.system === "string") {
+          state.unrepairedFailures.add(event.data.system);
+        }
+      } else if (event.type === "system_repaired") {
+        const system = typeof event.data.system === "string" ? event.data.system : null;
+        const by = typeof event.data.by === "string" ? event.data.by : null;
+        if (system !== null) {
+          const wasFailed = state.unrepairedFailures.delete(system);
+          const wasSabotaged = state.sabotagedSystems.delete(system);
+          if ((wasFailed || wasSabotaged) && by !== null && w.tick - state.lastCommendationTick >= cfg.commendationGlobalCooldownTicks && w.tick - (state.commendationAt[by] ?? -1e6) >= cfg.commendationMemberCooldownTicks) {
+            const member = byId(crew, by);
+            if (member !== void 0 && alive(member)) {
+              state.lastCommendationTick = w.tick;
+              state.commendationAt[by] = w.tick;
+              state.pending.push({
+                kind: "commendation",
+                atTick: w.tick + cfg.conveneDelayTicks,
+                accusedId: null,
+                accuserId: null,
+                victimId: null,
+                truthCulprit: null,
+                causeKind: "deed",
+                store: null,
+                level: null,
+                movers: [],
+                renewal: 0,
+                subjectId: by,
+                deed: system
+              });
+            }
+          }
+        }
+      } else if (event.type === "sabotage_committed") {
+        const damage = typeof event.data.damage === "number" ? event.data.damage : 0;
         const key2 = `sabotage:${String(event.data.system)}:${event.tick}`;
         if (damage >= cfg.sabotageInquiryDamage && !state.inquiryKeys.has(key2)) {
           state.inquiryKeys.add(key2);
@@ -9321,6 +9742,7 @@
     );
     const stores = createStores(crew.length);
     ship.stores = stores;
+    ship.duties = createDuties();
     const health = createHealthState();
     const council = createCouncil(crew);
     ship.councilPublic = { cmoFilled: true, emergencyUntil: -1, acting: {} };
@@ -9373,6 +9795,7 @@
       name: "systems",
       step: (w) => stepSystems(w, ship, weather, crew)
     });
+    engine.addSystem({ name: "duties", step: (w) => stepDuties(w, ship) });
     engine.addSystem({
       name: "health",
       step: (w) => stepHealth(w, health, ship, crew, weather)
@@ -9384,6 +9807,7 @@
     });
     engine.addInvariant("crew state in range", () => checkCrewState(crew, ship));
     engine.addInvariant("ship state in range", () => checkShipState(ship));
+    engine.addInvariant("duty levels in range", () => checkDutiesState(ship));
     engine.addInvariant(
       "voyage state in range",
       () => checkVoyageState(voyage, world.tick)
@@ -10160,6 +10584,27 @@
           text: about !== "" && about !== witness ? `Testifying on ${names.firstName(about)}: "${text}"` : `Testifying: "${text}"`
         };
       }
+      case "duty_neglected": {
+        const def = dutyDef(str3(event, "duty"));
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: null,
+          text: def?.neglectText ?? `The ${str3(event, "name")} duty is overdue.`
+        };
+      }
+      case "duty_restored": {
+        const by = str3(event, "by");
+        const def = dutyDef(str3(event, "duty"));
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: null,
+          text: `${by !== "" ? names.person(by) : "The crew"} brings the ${(def?.name ?? "duty").toLowerCase()} back up to standard.`
+        };
+      }
       case "council_sentence": {
         const member = str3(event, "member");
         if (member === "") return null;
@@ -10208,6 +10653,11 @@
           } else {
             outcome = `Finding: ${accusedName} is cleared.`;
           }
+        } else if (kind === "commendation") {
+          const subject = str3(event, "subject");
+          const subjectName = subject !== "" ? names.person(subject) : "the member";
+          question = `Commend ${subjectName}?`;
+          outcome = event.data.convicted === true ? `${subjectName} is commended.` : "The commendation is refused.";
         } else {
           const phrases = {
             rationing: "the rationing proposal",
@@ -17689,6 +18139,13 @@
     return `D${day} \xB7 ${hh}:${mm}`;
   }
   var MAX_FEED_DOM = 80;
+  function wirePersonTap(el, id) {
+    el.classList.add("tappable");
+    el.addEventListener("click", () => {
+      selectCrew(id);
+      openPersonCard(id);
+    });
+  }
   function feedAvatar(author) {
     if (author === null) {
       const div = document.createElement("div");
@@ -17741,7 +18198,13 @@
         track.appendChild(fill2);
         const names = document.createElement("div");
         names.className = "poll-names";
-        names.textContent = bar.voters.map((id) => personName(id)).join(", ");
+        bar.voters.forEach((id, at) => {
+          if (at > 0) names.append(document.createTextNode(", "));
+          const span = document.createElement("span");
+          span.textContent = personName(id);
+          wirePersonTap(span, id);
+          names.append(span);
+        });
         row.append(label, track, names);
         card.appendChild(row);
       }
@@ -17760,14 +18223,7 @@
       const member = crewById(item.author);
       who.textContent = member !== void 0 ? `${member.name} \xB7 ${member.title}` : personName(item.author);
     }
-    if (item.author !== null) {
-      const authorId = item.author;
-      head.classList.add("tappable");
-      head.addEventListener("click", () => {
-        selectCrew(authorId);
-        openPersonCard(authorId);
-      });
-    }
+    if (item.author !== null) wirePersonTap(head, item.author);
     head.append(who, time);
     card.appendChild(head);
     const text = document.createElement("div");
@@ -17785,12 +18241,17 @@
       rname.textContent = personName(entry.author);
       rtext.append(rname, document.createTextNode(` ${entry.text}`));
       reply.appendChild(rtext);
+      wirePersonTap(reply, entry.author);
       card.appendChild(reply);
     }
     if (item.reactions !== void 0 && item.reactions.length > 0) {
       const row = document.createElement("div");
       row.className = "feed-reactions";
-      for (const id of item.reactions) row.append(feedAvatar(id));
+      for (const id of item.reactions) {
+        const face = feedAvatar(id);
+        wirePersonTap(face, id);
+        row.append(face);
+      }
       const heart = document.createElement("span");
       heart.className = "heart";
       heart.textContent = "\u2665";
@@ -18277,6 +18738,42 @@
     parts: "Parts"
   };
   var storeCells = /* @__PURE__ */ new Map();
+  var dutiesSig = "";
+  var dutiesEl = must("duties-list");
+  function updateDutiesList() {
+    const duties = run.ship.duties;
+    if (duties === null) return;
+    const rows = DUTY_DEFS.map((def) => {
+      const state = duties.byId[def.id];
+      const pct2 = state === void 0 ? 100 : Math.round(state.level * 100);
+      return `${def.id}:${pct2}:${state?.neglected ? "!" : ""}`;
+    });
+    const sig = rows.join("|");
+    if (sig === dutiesSig) return;
+    dutiesSig = sig;
+    dutiesEl.replaceChildren();
+    for (const def of DUTY_DEFS) {
+      const state = duties.byId[def.id];
+      if (state === void 0) continue;
+      const pct2 = Math.round(state.level * 100);
+      const row = document.createElement("div");
+      row.className = "seat-row";
+      const name = document.createElement("span");
+      name.className = "seat-name";
+      name.textContent = `${def.name} \xB7 ${def.department}`;
+      const bar = document.createElement("div");
+      bar.className = "sbar";
+      const fill2 = document.createElement("div");
+      fill2.style.width = `${pct2}%`;
+      fill2.className = state.neglected ? "crit" : pct2 < 55 ? "warn" : "";
+      bar.appendChild(fill2);
+      const value = document.createElement("span");
+      value.className = "sval";
+      value.textContent = state.neglected ? `${pct2}% overdue` : `${pct2}%`;
+      row.append(name, bar, value);
+      dutiesEl.appendChild(row);
+    }
+  }
   var legitimacyCell = { fill: null, value: null, sig: "" };
   {
     const strip = must("stores-strip");
@@ -18344,6 +18841,7 @@
     updateStrip();
     updateSceneChip();
     updateStoresStrip();
+    updateDutiesList();
     syncAlerts();
     if (sheetTab === "council") {
       renderCouncilSeats();

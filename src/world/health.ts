@@ -542,6 +542,16 @@ export function stepHealth(
     if ((occupancy.get(member.room) ?? 0) >= cfg.crowdSize) {
       sickDelta += cfg.sickCrowdPerDay / tpd;
     }
+    // A filthy ship is its own source: while sanitation stands
+    // neglected, grime pushes every body's sickness up a little.
+    const hygiene = ship.duties?.byId["sanitation"]?.level ?? 1;
+    if (hygiene < CONFIG.duties.neglectLine) {
+      sickDelta +=
+        (CONFIG.duties.grimeSickPerDay *
+          (CONFIG.duties.neglectLine - hygiene)) /
+        CONFIG.duties.neglectLine /
+        tpd;
+    }
     const spreaders = sickByRoom.get(member.room) ?? 0;
     if (spreaders > 0 && body.sick <= cfg.spreadLine) {
       sickDelta += (cfg.spreadPerDay * spreaders) / tpd;

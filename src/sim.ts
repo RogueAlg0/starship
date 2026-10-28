@@ -40,6 +40,11 @@ import {
   type StoresState,
 } from "./world/stores.ts";
 import {
+  checkDutiesState,
+  createDuties,
+  stepDuties,
+} from "./world/duties.ts";
+import {
   checkCouncilState,
   createCouncil,
   stepCouncil,
@@ -118,6 +123,8 @@ export function buildWorld(
   // no draws, so the loading cannot shift any other stream.
   const stores = createStores(crew.length);
   ship.stores = stores;
+  // Duties likewise: fixed starting levels, no draws.
+  ship.duties = createDuties();
   // Bodies and the council draw nothing at generation: health is
   // state the tick loop accrues, and the council's seats follow
   // the roster's roles. Neither can shift another stream.
@@ -175,6 +182,7 @@ export function buildWorld(
     name: "systems",
     step: (w) => stepSystems(w, ship, weather, crew),
   });
+  engine.addSystem({ name: "duties", step: (w) => stepDuties(w, ship) });
   engine.addSystem({
     name: "health",
     step: (w) => stepHealth(w, health, ship, crew, weather),
@@ -187,6 +195,7 @@ export function buildWorld(
   });
   engine.addInvariant("crew state in range", () => checkCrewState(crew, ship));
   engine.addInvariant("ship state in range", () => checkShipState(ship));
+  engine.addInvariant("duty levels in range", () => checkDutiesState(ship));
   engine.addInvariant("voyage state in range", () =>
     checkVoyageState(voyage, world.tick),
   );

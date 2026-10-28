@@ -23,6 +23,7 @@ import { currentBlock } from "../entities/routine.ts";
 import { r3 } from "../log/events.ts";
 import { driftSuspicion } from "../perception/beliefs.ts";
 import { CONFIG } from "../scenario/config.ts";
+import { cropFactor, filterFactor } from "./duties.ts";
 import type { Port, Sector, Voyage } from "./galaxy.ts";
 import type { Ship } from "./ship.ts";
 import { bookXp } from "./skills.ts";
@@ -251,7 +252,8 @@ export function productionMilliPerDay(
       return (
         cfg.productionFactor.food *
         dailyUseMilli(state, key) *
-        systemCondition(ship, STORE_PRODUCER_KIND.food)
+        systemCondition(ship, STORE_PRODUCER_KIND.food) *
+        cropFactor(ship)
       );
     case "water":
       return (
@@ -263,7 +265,8 @@ export function productionMilliPerDay(
       return (
         cfg.productionFactor.oxygen *
         dailyUseMilli(state, key) *
-        systemCondition(ship, STORE_PRODUCER_KIND.oxygen)
+        systemCondition(ship, STORE_PRODUCER_KIND.oxygen) *
+        filterFactor(ship)
       );
     case "fuel":
       return 0;
@@ -813,6 +816,32 @@ export function stepStores(
       member.needs.morale = clamp01(
         member.needs.morale - cfg.rationing.moralePerDay / tpd,
       );
+    }
+  }
+
+  // ---- the audit's price: while the stores audit stands
+  // neglected, the tally quietly loses food it cannot account
+  // for, surfaced a day later as a discrepancy with no suspect:
+  // bookkeeping rot, not theft. Booked as charged, so the
+  // stores identity still reconciles.
+  if (
+    w.tick % tpd === cfg.theft.checkTickOfDay &&
+    ship.duties !== null &&
+    (ship.duties.byId["audit"]?.neglected ?? false)
+  ) {
+    const drift = Math.min(
+      state.byKey.food.qtyMilli,
+      CONFIG.duties.auditDriftFoodMilliPerDay,
+    );
+    if (drift > 0) {
+      state.byKey.food.qtyMilli -= drift;
+      state.totals.food.chargedMilli -= drift;
+      state.discrepancies.push({
+        thiefId: "",
+        atTick: w.tick + tpd,
+        partial: false,
+        shortMilli: drift,
+      });
     }
   }
 

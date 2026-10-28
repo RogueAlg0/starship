@@ -22,6 +22,7 @@ import {
   type SpeechNames,
 } from "../perception/speech.ts";
 import { CONFIG } from "../scenario/config.ts";
+import { dutyDef } from "../world/duties.ts";
 import { DISCIPLINE_LABEL, type Discipline } from "../world/skills.ts";
 import type { SimEvent } from "./events.ts";
 
@@ -696,6 +697,7 @@ class Renderer implements ChronicleRenderer {
             emergency: "the grant of emergency powers",
             relief: "the motion of no confidence",
             appointment: "the First Officer's appointment",
+            commendation: "a commendation",
             course: "the captain's course",
           };
           line(
@@ -772,6 +774,13 @@ class Renderer implements ChronicleRenderer {
       case "appointment_refused": {
         line(
           `${ts} — The council refuses to ratify ${person(str(data, "member"))} as First Officer. The seat stands empty again.`,
+          true,
+        );
+        break;
+      }
+      case "commendation": {
+        line(
+          `${ts} — ${person(str(data, "member"))} is commended for restoring the ${system(str(data, "system"))}.`,
           true,
         );
         break;
@@ -1166,6 +1175,21 @@ class Renderer implements ChronicleRenderer {
         this.seenStrain.add(key);
         line(
           `${ts} — The ${system(systemId)} strains; the whole crew feels it.`,
+          true,
+        );
+        break;
+      }
+      case "duty_neglected": {
+        const def = dutyDef(str(data, "duty"));
+        line(
+          `${ts} — ${def?.neglectText ?? `The ${str(data, "name")} duty is overdue.`}`,
+          true,
+        );
+        break;
+      }
+      case "duty_restored": {
+        line(
+          `${ts} — ${person(str(data, "by"))} brings the ${str(data, "duty") === "audit" ? "stores audit" : str(data, "duty")} back up to standard.`,
           true,
         );
         break;

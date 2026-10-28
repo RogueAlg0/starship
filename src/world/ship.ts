@@ -32,6 +32,8 @@ export class Ship {
    * test harness may sail without them.
    */
   stores: StoresState | null = null;
+  /** The upkeep layer's state, attached at build (see duties.ts). */
+  duties: import("./duties.ts").DutiesState | null = null;
   /**
    * The council's public face, attached by the run builder: whether
    * the medical seat is filled, whether emergency powers stand, and

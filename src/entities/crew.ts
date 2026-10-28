@@ -35,6 +35,12 @@ import {
 import { applySabotage, sabotageCandidate } from "../plots/sabotage.ts";
 import { maybeSocialSpeech } from "../perception/speech.ts";
 import { CONFIG } from "../scenario/config.ts";
+import {
+  DUTY_DEFS,
+  dutyDef,
+  dutyRoom,
+  dutyRoomMatches,
+} from "../world/duties.ts";
 import { createBody, totalSeverity, type BodyState } from "../world/health.ts";
 import {
   bookXp,
@@ -111,6 +117,10 @@ export class CrewMember {
   /** Person currently being treated by this member, for event dedupe. */
   treatTarget: string | null = null;
   lastAccusationTick = -1000000;
+  /** Ticks of the public accusations this person has suffered,
+   *  pruned to the accusation repeat window by the society step.
+   *  A council finding clears the record. */
+  accusationTicks: number[] = [];
   lastSabotageTick = -1000000;
   /** Tick of this person's last leisure event, for the leisure cooldown. */
   lastLeisureTick = -1000000;
@@ -119,6 +129,8 @@ export class CrewMember {
   lastChatterTick = -1000000;
   /** System currently being repaired, for repair-session event dedupe. */
   repairTarget: string | null = null;
+  /** Duty currently being serviced, for duty-session event dedupe. */
+  dutyTarget: string | null = null;
 
   constructor(
     id: string,
@@ -460,6 +472,30 @@ function buildCandidates(
     });
   }
 
+  // The upkeep layer: a duty that can be done in this room is
+  // work, scored like the ship's other business. Its urgency is
+  // its neglect: the lower it stands, the harder it pulls, and
+  // its owners feel the pull at full strength.
+  if (ship.duties !== null) {
+    for (const def of DUTY_DEFS) {
+      const state = ship.duties.byId[def.id];
+      if (state === undefined || state.level >= 0.995) continue;
+      if (!dutyRoomMatches(ship, def, member.room)) continue;
+      const owner = def.owners.includes(member.roleKey);
+      // The pull holds until the duty is genuinely healthy: the
+      // curve crosses plain work near three-quarters, so a crew
+      // that starts a duty finishes it past the restore line
+      // instead of balancing on the neglect line. A neglected
+      // duty pulls harder still, owners most of all.
+      const pull = state.neglected ? (owner ? 1.6 : 1.2) : 1;
+      candidates.push({
+        key: `duty:${def.id}`,
+        base: workScore(member) * workFactor * (owner ? 1 : 0.45) * pull,
+        urgency: 0.75 + (1 - state.level) * 0.9,
+      });
+    }
+  }
+
   // Treatment is work: in the medbay, a member who can tend the
   // medbay unit can tend the wounded lying there. The medic is
   // best at it; anyone's hands are better than none (and the
@@ -560,6 +596,23 @@ function buildCandidates(
         duty.room,
         workScore(member) * (block === "free" ? routine.freeWorkFactor : 1),
       );
+    }
+  }
+  if ((block === "work" || block === "free") && ship.duties !== null) {
+    for (const def of DUTY_DEFS) {
+      const state = ship.duties.byId[def.id];
+      if (state === undefined || state.level >= 0.8) continue;
+      if (!def.owners.includes(member.roleKey)) continue;
+      const room = dutyRoom(ship, def);
+      if (room >= 0) {
+        consider(
+          room,
+          workScore(member) *
+            (0.6 + (1 - state.level)) *
+            (state.neglected ? 1.5 : 1) *
+            (block === "free" ? routine.freeWorkFactor : 1),
+        );
+      }
     }
   }
   for (const s of ship.systems) {
@@ -724,6 +777,49 @@ function applyChoice(
   const { ship } = ctx;
   if (!key.startsWith("repair:")) member.repairTarget = null;
   if (!key.startsWith("treat:")) member.treatTarget = null;
+  if (!key.startsWith("duty:")) member.dutyTarget = null;
+  if (key.startsWith("duty:")) {
+    const def = dutyDef(key.slice("duty:".length));
+    const duties = ship.duties;
+    if (def !== undefined && duties !== null) {
+      const state = duties.byId[def.id];
+      if (state !== undefined) {
+        const session = member.dutyTarget !== def.id;
+        member.dutyTarget = def.id;
+        member.activity = "work";
+        member.needs.energy = clamp01(
+          member.needs.energy - CONFIG.needs.workEnergyCost,
+        );
+        const discipline = def.discipline as Discipline;
+        const cfg = CONFIG.duties.perDuty[def.id];
+        const amount =
+          (cfg?.servicePerTick ?? 0.02) *
+          (0.5 + skillOf(member, discipline)) *
+          (def.owners.includes(member.roleKey) ? 1 : 0.6);
+        state.level = clamp01(state.level + amount);
+        state.lastServiceTick = w.tick;
+        if (session) {
+          w.emit("duty_started", [member.id], {
+            duty: def.id,
+            room: member.room,
+          });
+        }
+        if (state.neglected && state.level >= CONFIG.duties.restoreLine) {
+          state.neglected = false;
+          w.emit("duty_restored", [member.id], {
+            duty: def.id,
+            by: member.id,
+          });
+        }
+        bookXp(w, crew, member, discipline, CONFIG.skills.dutyMilliPerTick, {
+          task: `keeping up the ${def.name.toLowerCase()}`,
+          session,
+        });
+        driftWithCoworkers(w, member, crew);
+      }
+    }
+    return;
+  }
   if (key.startsWith("treat:")) {
     const target = crew.find((c) => c.id === key.slice("treat:".length));
     member.activity = "treat";

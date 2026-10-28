@@ -329,6 +329,14 @@ export const CONFIG = {
      *  on seed 42 with room-scoped hearing: accusations still settle
      *  near 25 a day, driven by the per-target re-accusation rate). */
     publicCooldownTicks: 144,
+    /** The public cooldown stretches with repetition: each public
+     *  accusation the same person has suffered inside this window
+     *  adds one more base cooldown to the next (up to the cap).
+     *  The first answer to fresh evidence stays immediate; the
+     *  fifth restatement of the same claim waits its turn. A
+     *  finding clears the record (see the council's venting). */
+    repeatWindowTicks: 1008,
+    repeatCooldownCap: 3,
     /** Suspicion listeners gain toward the accused from a public claim. */
     spreadSuspicion: 0.02,
     /** Suspicion fades a little every tick; memories are not ledgers.
@@ -389,6 +397,37 @@ export const CONFIG = {
    * actually together, and free-time texture. Hours are ship hours; a day
    * is CONFIG.time.ticksPerDay ticks of ten minutes.
    */
+  /**
+   * The upkeep layer: standing duties, each owned by a
+   * department, done in its place, decaying on its own clock.
+   * Critical to the routine and quietly expensive to neglect:
+   * the consequences live in the systems that read the levels
+   * (air and food production, sickness, the stores tally).
+   */
+  duties: {
+    /** A duty below this level is neglected: the ship is told. */
+    neglectLine: 0.3,
+    /** Servicing a neglected duty past this level restores it. */
+    restoreLine: 0.55,
+    perDuty: {
+      filters: { decayPerDay: 0.3, servicePerTick: 0.02 },
+      sanitation: { decayPerDay: 0.5, servicePerTick: 0.025 },
+      crops: { decayPerDay: 0.35, servicePerTick: 0.022 },
+      audit: { decayPerDay: 0.22, servicePerTick: 0.03 },
+    } as Record<string, { decayPerDay: number; servicePerTick: number }>,
+    /** Neglected filters throttle oxygen production to this
+     *  floor share; kept filters run at full. */
+    filterFloor: 0.6,
+    /** Neglected crops throttle food production likewise. */
+    cropFloor: 0.45,
+    /** Sickness pressure per day at zero sanitation, scaled by
+     *  how far below the line the ship's hygiene has fallen. */
+    grimeSickPerDay: 0.22,
+    /** Food milli-units the tally quietly loses per day while
+     *  the audit stands neglected, surfaced as a discrepancy. */
+    auditDriftFoodMilliPerDay: 400,
+  },
+
   routine: {
     /** How many crew stand the night watch (drawn one per pool below). */
     nightWatchSize: 2,
@@ -1138,6 +1177,9 @@ export const CONFIG = {
     repairMilliPerTick: 60,
     treatMilliPerTick: 55,
     genericMilliPerTick: 45,
+    /** Duty work teaches its discipline slowly: chores are not
+     *  mastery, and the tuning law caps cross-training. */
+    dutyMilliPerTick: 15,
     /** A meal window served books this to the cook's husbandry:
      *  two windows a day, and the cook's primary trade has few
      *  other teachers in this engine, so the service carries the
@@ -1338,6 +1380,40 @@ export const CONFIG = {
     reliefCooldownTicks: 8640,
     /** Legitimacy moves: per sitting, scaled by crew agreement. */
     legitimacySwing: 0.06,
+    /** Findings vent suspicion: when a sitting concludes, every
+     *  member's suspicion of the accused closes this share of its
+     *  distance to the verdict's resting level (scaled by their
+     *  trust in the chair: a distrusted bench vents less). What a
+     *  court has judged stops circulating as raw suspicion. */
+    ventShare: 0.35,
+    ventRestAcquitted: 0.32,
+    ventRestConvicted: 0.4,
+    /** The ship's blocs: departments by role. A bench officer
+     *  shields a department-mate on trial and backs a
+     *  department-mate's claim, by these weights on the vote
+     *  score. Small against the evidence term: loyalty bends a
+     *  close vote, it does not buy one. */
+    departments: {
+      captain: "Command",
+      "executive officer": "Command",
+      "chief engineer": "Engineering",
+      engineer: "Engineering",
+      medic: "Medical",
+      scientist: "Science",
+      botanist: "Science",
+      pilot: "Operations",
+      navigator: "Operations",
+      "security officer": "Operations",
+      cook: "Services",
+      quartermaster: "Services",
+    } as Record<string, string>,
+    factionShield: 0.12,
+    /** Commendations: the council's one positive motion. A
+     *  member who restores a failed system may be tabled for
+     *  one, at most this often ship-wide and per member. */
+    factionLoyalty: 0.06,
+    commendationGlobalCooldownTicks: 1440,
+    commendationMemberCooldownTicks: 4320,
     legitimacyStart: 0.7,
     /** A seat holder below this health retires hurt at the daily check. */
     retireHealth: 0.3,

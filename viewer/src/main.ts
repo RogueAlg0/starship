@@ -22,6 +22,7 @@ import {
 import type { SimEvent } from "../../src/log/events.ts";
 import { chatterText } from "../../src/perception/speech.ts";
 import { CONFIG } from "../../src/scenario/config.ts";
+import { DUTY_DEFS } from "../../src/world/duties.ts";
 import { createRun, type RunContext } from "../../src/sim.ts";
 import { canRepair, type CrewMember } from "../../src/entities/crew.ts";
 import {
@@ -1966,6 +1967,16 @@ function feedTime(tick: number): string {
 
 const MAX_FEED_DOM = 80;
 
+/** Every face and name in the feed opens that person's card:
+ *  posters, repliers, reactors, and poll voters alike. */
+function wirePersonTap(el: HTMLElement, id: string): void {
+  el.classList.add("tappable");
+  el.addEventListener("click", () => {
+    selectCrew(id);
+    openPersonCard(id);
+  });
+}
+
 function feedAvatar(author: string | null): HTMLElement {
   if (author === null) {
     const div = document.createElement("div");
@@ -2019,7 +2030,13 @@ function buildFeedCard(item: FeedItem): HTMLDivElement {
       track.appendChild(fill);
       const names = document.createElement("div");
       names.className = "poll-names";
-      names.textContent = bar.voters.map((id) => personName(id)).join(", ");
+      bar.voters.forEach((id, at) => {
+        if (at > 0) names.append(document.createTextNode(", "));
+        const span = document.createElement("span");
+        span.textContent = personName(id);
+        wirePersonTap(span, id);
+        names.append(span);
+      });
       row.append(label, track, names);
       card.appendChild(row);
     }
@@ -2041,14 +2058,7 @@ function buildFeedCard(item: FeedItem): HTMLDivElement {
         ? `${member.name} · ${member.title}`
         : personName(item.author);
   }
-  if (item.author !== null) {
-    const authorId = item.author;
-    head.classList.add("tappable");
-    head.addEventListener("click", () => {
-      selectCrew(authorId);
-      openPersonCard(authorId);
-    });
-  }
+  if (item.author !== null) wirePersonTap(head, item.author);
   head.append(who, time);
   card.appendChild(head);
   const text = document.createElement("div");
@@ -2066,12 +2076,17 @@ function buildFeedCard(item: FeedItem): HTMLDivElement {
     rname.textContent = personName(entry.author);
     rtext.append(rname, document.createTextNode(` ${entry.text}`));
     reply.appendChild(rtext);
+    wirePersonTap(reply, entry.author);
     card.appendChild(reply);
   }
   if (item.reactions !== undefined && item.reactions.length > 0) {
     const row = document.createElement("div");
     row.className = "feed-reactions";
-    for (const id of item.reactions) row.append(feedAvatar(id));
+    for (const id of item.reactions) {
+      const face = feedAvatar(id);
+      wirePersonTap(face, id);
+      row.append(face);
+    }
     const heart = document.createElement("span");
     heart.className = "heart";
     heart.textContent = "♥";
@@ -2700,6 +2715,45 @@ interface StoreCell {
 }
 
 const storeCells = new Map<StoreKey, StoreCell>();
+let dutiesSig = "";
+const dutiesEl = must<HTMLElement>("duties-list");
+/** The upkeep layer on the Ship tab: one bar per duty, grouped
+ *  under its department, banded like the stores. */
+function updateDutiesList(): void {
+  const duties = run.ship.duties;
+  if (duties === null) return;
+  const rows = DUTY_DEFS.map((def) => {
+    const state = duties.byId[def.id];
+    const pct = state === undefined ? 100 : Math.round(state.level * 100);
+    return `${def.id}:${pct}:${state?.neglected ? "!" : ""}`;
+  });
+  const sig = rows.join("|");
+  if (sig === dutiesSig) return;
+  dutiesSig = sig;
+  dutiesEl.replaceChildren();
+  for (const def of DUTY_DEFS) {
+    const state = duties.byId[def.id];
+    if (state === undefined) continue;
+    const pct = Math.round(state.level * 100);
+    const row = document.createElement("div");
+    row.className = "seat-row";
+    const name = document.createElement("span");
+    name.className = "seat-name";
+    name.textContent = `${def.name} · ${def.department}`;
+    const bar = document.createElement("div");
+    bar.className = "sbar";
+    const fill = document.createElement("div");
+    fill.style.width = `${pct}%`;
+    fill.className = state.neglected ? "crit" : pct < 55 ? "warn" : "";
+    bar.appendChild(fill);
+    const value = document.createElement("span");
+    value.className = "sval";
+    value.textContent = state.neglected ? `${pct}% overdue` : `${pct}%`;
+    row.append(name, bar, value);
+    dutiesEl.appendChild(row);
+  }
+}
+
 /** The sixth, unnumbered store: the council's legitimacy. */
 const legitimacyCell: {
   fill: HTMLDivElement | null;
@@ -2794,6 +2848,7 @@ function updateSlowUi(): void {
   updateStrip();
   updateSceneChip();
   updateStoresStrip();
+  updateDutiesList();
   syncAlerts();
   if (sheetTab === "council") {
     renderCouncilSeats();

@@ -1125,6 +1125,31 @@ class Renderer implements ChronicleRenderer {
           ? data.participants.map((id) => person(String(id)))
           : [];
         if (players.length === 0) break;
+        const duelRaw = data.duel;
+        if (typeof duelRaw === "object" && duelRaw !== null) {
+          const duel = duelRaw as Record<string, unknown>;
+          const a = typeof duel.a === "string" ? duel.a : "";
+          const b = typeof duel.b === "string" ? duel.b : "";
+          const condition =
+            typeof duel.condition === "string" ? duel.condition : "";
+          const scoreA = typeof duel.scoreA === "number" ? duel.scoreA : 0;
+          const scoreB = typeof duel.scoreB === "number" ? duel.scoreB : 0;
+          if (a !== "" && b !== "") {
+            const winner = str(data, "winner");
+            const result =
+              winner === ""
+                ? `it ends level at ${scoreA}–${scoreB}`
+                : winner === a
+                  ? `${person(a)} wins ${scoreA}–${scoreB}`
+                  : `${person(b)} wins ${scoreB}–${scoreA}`;
+            line(
+              `${ts} — ${person(a)} and ${person(b)} play PORTFALL in the ` +
+                `${room(num(data, "room"))} on a ${condition} table; ${result}.`,
+              true,
+            );
+            break;
+          }
+        }
         const names =
           players.length === 1
             ? players[0]

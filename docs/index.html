@@ -536,6 +536,24 @@
   .feed-reactions { display: flex; gap: 4px; align-items: center; margin-top: 6px; }
   .feed-reactions .feed-avatar { width: 18px; height: 18px; }
   .feed-reactions .heart { color: #e88ca0; font-size: 11px; margin-left: 2px; }
+  .match-strip { margin-top: 7px; background: #0d1421; border: 1px solid #22304a; border-radius: 8px; padding: 6px 8px; }
+  .match-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 5px; }
+  .match-cond { font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: capitalize; padding: 2px 6px; border-radius: 6px; background: #1a2438; color: #c3cfe0; }
+  .match-score { font-size: 11px; color: #a9bcd6; text-align: right; }
+  .match-runs { display: flex; gap: 4px; flex-wrap: wrap; }
+  .match-run { display: flex; flex-direction: column; gap: 3px; }
+  .mini-card { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; padding: 3px 4px; border-radius: 5px; border: 1px solid #33436b; background: #16203a; color: #d7e2f0; font-size: 11px; font-weight: 700; line-height: 1; }
+  .mini-card.suit-helm { border-color: #3f6ea6; background: #14273e; }
+  .mini-card.suit-forge { border-color: #a66a2f; background: #38220f; }
+  .mini-card.suit-leaf { border-color: #4d8a4a; background: #17301a; }
+  .mini-card.suit-coin { border-color: #a68d2f; background: #38300f; }
+  .match-cond.suit-helm { color: #8fc3ff; }
+  .match-cond.suit-forge { color: #ffbe78; }
+  .match-cond.suit-leaf { color: #9fe89f; }
+  .match-cond.suit-coin { color: #ffe98a; }
+  .mini-card.won { box-shadow: 0 0 0 1px #e8eef7, 0 0 7px rgba(232, 238, 247, 0.45); color: #ffffff; }
+  .mini-card.burned { opacity: 0.45; }
+  .deck-strip { display: flex; flex-wrap: wrap; gap: 3px; margin: 2px 0 8px; }
   @keyframes feed-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
   .feed-card:first-child { animation: feed-in 0.3s ease-out; }
   .log-toggle button.active {
@@ -4128,6 +4146,24 @@
         case "leisure_game": {
           const players = Array.isArray(data.participants) ? data.participants.map((id) => person(String(id))) : [];
           if (players.length === 0) break;
+          const duelRaw = data.duel;
+          if (typeof duelRaw === "object" && duelRaw !== null) {
+            const duel = duelRaw;
+            const a = typeof duel.a === "string" ? duel.a : "";
+            const b = typeof duel.b === "string" ? duel.b : "";
+            const condition = typeof duel.condition === "string" ? duel.condition : "";
+            const scoreA = typeof duel.scoreA === "number" ? duel.scoreA : 0;
+            const scoreB = typeof duel.scoreB === "number" ? duel.scoreB : 0;
+            if (a !== "" && b !== "") {
+              const winner = str2(data, "winner");
+              const result = winner === "" ? `it ends level at ${scoreA}\u2013${scoreB}` : winner === a ? `${person(a)} wins ${scoreA}\u2013${scoreB}` : `${person(b)} wins ${scoreB}\u2013${scoreA}`;
+              line(
+                `${ts} \u2014 ${person(a)} and ${person(b)} play PORTFALL in the ${room(num2(data, "room"))} on a ${condition} table; ${result}.`,
+                true
+              );
+              break;
+            }
+          }
           const names = players.length === 1 ? players[0] : `${players.slice(0, -1).join(", ")} and ${players[players.length - 1]}`;
           line(
             `${ts} \u2014 ${names} play a table game in the ${room(num2(data, "room"))}; ${person(str2(data, "winner"))} wins.`,
@@ -4920,6 +4956,103 @@
     return blockAt(member.routine, tick);
   }
 
+  // src/entities/cards.ts
+  var SUITS = ["helm", "forge", "leaf", "coin"];
+  var PLAIN_POWERS = [7, 6, 6, 5, 5, 4, 4, 3, 3, 2];
+  var ANCHOR_POWER = 4;
+  var SURGE_POWER = 3;
+  function hashSequence(key2) {
+    let h = 2166136261;
+    for (let i = 0; i < key2.length; i++) {
+      h ^= key2.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    let state = h >>> 0 || 1;
+    return () => {
+      state ^= state << 13;
+      state ^= state >>> 17;
+      state ^= state << 5;
+      return (state >>> 0) / 4294967296;
+    };
+  }
+  function shuffledBy(items, next) {
+    const out = [...items];
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = Math.floor(next() * (i + 1));
+      const tmp = out[i];
+      out[i] = out[j];
+      out[j] = tmp;
+    }
+    return out;
+  }
+  function starterDeck(seed, memberId) {
+    const next = hashSequence(`portfall:${String(seed)}:${memberId}`);
+    const suits = shuffledBy(
+      SUITS.flatMap((suit) => [suit, suit, suit]),
+      next
+    );
+    const cards = PLAIN_POWERS.map((power, i) => ({
+      suit: suits[i],
+      power
+    }));
+    cards.push({ suit: suits[10], power: ANCHOR_POWER, effect: "anchor" });
+    cards.push({ suit: suits[11], power: SURGE_POWER, effect: "surge" });
+    return shuffledBy(cards, next);
+  }
+  function conditionFor(inPort, weatherName2) {
+    if (inPort) return "coin";
+    if (weatherName2 === "solar wind") return "helm";
+    if (weatherName2 === "radiation storm") return "forge";
+    return "leaf";
+  }
+  var REGULATION_RUNS = 5;
+  function effective(card, condition, mine, theirs) {
+    let value = card.power;
+    if (card.suit === condition) value += 1;
+    if (card.effect === "surge" && mine < theirs) value += 2;
+    return value;
+  }
+  function playMatch(deckA, deckB, condition, int) {
+    const shuffle = (deck2) => {
+      const out = [...deck2];
+      for (let i = out.length - 1; i > 0; i--) {
+        const j = int(i + 1);
+        const tmp = out[i];
+        out[i] = out[j];
+        out[j] = tmp;
+      }
+      return out;
+    };
+    const handA = shuffle(deckA);
+    const handB = shuffle(deckB);
+    const runs = [];
+    let scoreA = 0;
+    let scoreB = 0;
+    const limit = Math.min(handA.length, handB.length);
+    for (let i = 0; i < limit; i++) {
+      const a = handA[i];
+      const b = handB[i];
+      const aEff = effective(a, condition, scoreA, scoreB);
+      const bEff = effective(b, condition, scoreB, scoreA);
+      let point = null;
+      if (aEff > bEff) point = "a";
+      else if (bEff > aEff) point = "b";
+      else if (a.effect === "anchor" && b.effect !== "anchor") point = "a";
+      else if (b.effect === "anchor" && a.effect !== "anchor") point = "b";
+      if (point === "a") scoreA++;
+      else if (point === "b") scoreB++;
+      runs.push({ a, b, aEff, bEff, point });
+      if (i + 1 >= REGULATION_RUNS && scoreA !== scoreB) break;
+    }
+    return {
+      runs,
+      scoreA,
+      scoreB,
+      winner: scoreA > scoreB ? "a" : scoreB > scoreA ? "b" : null,
+      condition
+    };
+  }
+
   // src/plots/sabotage.ts
   function sabotageTraitFactor(traits) {
     const sum = traits.reduce(
@@ -5071,9 +5204,9 @@
   function bookHarm(member, tick, cause, amount, part = null, source = null) {
     if (amount === 0) return;
     const next = clamp01(member.body.health - amount);
-    const effective = member.body.health - next;
-    if (effective === 0) return;
-    member.body.ledger.push({ tick, cause, amount: effective, part, source });
+    const effective2 = member.body.health - next;
+    if (effective2 === 0) return;
+    member.body.ledger.push({ tick, cause, amount: effective2, part, source });
     member.body.health = next;
   }
   var MARK_BY_PART = {
@@ -6809,7 +6942,16 @@
       member.activity = "idle";
       return;
     }
-    const winner = participants[w.rng.get("routine").int(participants.length)];
+    const opponent = participants[1];
+    const condition = conditionFor(ctx.voyage.inPortAt(w.tick), ctx.weather.name);
+    const cards = w.rng.get("cards");
+    const match = playMatch(
+      starterDeck(w.config.seed, member.id),
+      starterDeck(w.config.seed, opponent.id),
+      condition,
+      (n) => cards.int(n)
+    );
+    const winner = match.winner === "a" ? member : match.winner === "b" ? opponent : null;
     for (const player of participants) {
       player.needs.social = clamp01(player.needs.social + cfg.gameSocialRestore);
       player.needs.morale = clamp01(
@@ -6832,7 +6974,23 @@
     w.emit("leisure_game", [member.id], {
       room: member.room,
       participants: participants.map((p) => p.id),
-      winner: winner.id
+      winner: winner?.id ?? "",
+      duel: {
+        a: member.id,
+        b: opponent.id,
+        condition,
+        scoreA: match.scoreA,
+        scoreB: match.scoreB,
+        runs: match.runs.map((run2) => [
+          run2.a.suit,
+          run2.a.power,
+          run2.a.effect ?? "",
+          run2.b.suit,
+          run2.b.power,
+          run2.b.effect ?? "",
+          run2.point ?? ""
+        ])
+      }
     });
   }
   function recordMealAttendance(w, member, crew, ctx, mealName) {
@@ -10872,6 +11030,41 @@
     const index = Math.floor(hash01(seq, salt) * bank.length) % bank.length;
     return bank[index];
   }
+  function readDuel(event) {
+    const raw = event.data.duel;
+    if (typeof raw !== "object" || raw === null) return null;
+    const duel = raw;
+    const a = duel.a;
+    const b = duel.b;
+    const condition = duel.condition;
+    const scoreA = duel.scoreA;
+    const scoreB = duel.scoreB;
+    if (typeof a !== "string" || typeof b !== "string" || typeof condition !== "string" || typeof scoreA !== "number" || typeof scoreB !== "number" || !Array.isArray(duel.runs)) {
+      return null;
+    }
+    const runs = [];
+    for (const entry of duel.runs) {
+      if (!Array.isArray(entry) || entry.length < 7) return null;
+      const [aSuit, aPower, aEffect, bSuit, bPower, bEffect, point] = entry;
+      if (typeof aSuit !== "string" || typeof aPower !== "number" || typeof bSuit !== "string" || typeof bPower !== "number") {
+        return null;
+      }
+      runs.push({
+        a: {
+          suit: aSuit,
+          power: aPower,
+          effect: typeof aEffect === "string" && aEffect !== "" ? aEffect : void 0
+        },
+        b: {
+          suit: bSuit,
+          power: bPower,
+          effect: typeof bEffect === "string" && bEffect !== "" ? bEffect : void 0
+        },
+        point: point === "a" || point === "b" ? point : null
+      });
+    }
+    return { strip: { condition, a, b, runs }, scoreA, scoreB };
+  }
   var REPLIES_AGREE = [
     "Anytime.",
     "You had to be there. You were there, but still.",
@@ -11024,14 +11217,51 @@
         const players = Array.isArray(event.data.participants) ? event.data.participants.filter(
           (p) => typeof p === "string"
         ) : [];
-        if (winner === "" || players.length === 0) return null;
-        const others = players.filter((p) => p !== winner).map((p) => names.firstName(p)).join(", ");
+        if (players.length === 0) return null;
+        const duel = readDuel(event);
+        if (duel === null) {
+          if (winner === "") return null;
+          const others = players.filter((p) => p !== winner).map((p) => names.firstName(p)).join(", ");
+          return {
+            kind: "post",
+            seq,
+            tick,
+            author: winner,
+            text: others === "" ? `Champion of the ${names.room(num3(event, "room"))}. Unopposed, undefeated.` : `Beat ${others} at the table in the ${names.room(num3(event, "room"))}. Rematch when you have recovered.`
+          };
+        }
+        const { strip, scoreA, scoreB } = duel;
+        const roomName2 = names.room(num3(event, "room"));
+        const score = winner === strip.b ? `${scoreB}\u2013${scoreA}` : `${scoreA}\u2013${scoreB}`;
+        if (winner === "") {
+          return {
+            kind: "post",
+            seq,
+            tick,
+            author: strip.a,
+            text: `Played ${names.firstName(strip.b)} to a standstill at PORTFALL in the ${roomName2}, ${scoreA}\u2013${scoreB} on a ${strip.condition} table. The cards settle nothing. Rematch pending.`,
+            match: strip
+          };
+        }
+        const loser = winner === strip.a ? strip.b : strip.a;
+        const winnerRuns = winner === strip.a ? scoreA : scoreB;
+        const loserRuns = winner === strip.a ? scoreB : scoreA;
+        let flavour = "Rematch when you have recovered.";
+        const lastRun = strip.runs[strip.runs.length - 1];
+        if (loserRuns === 0) {
+          flavour = "Not close. The table saw it.";
+        } else if (lastRun !== void 0 && (lastRun.point === "a" && winner === strip.a || lastRun.point === "b" && winner === strip.b) && (winner === strip.a ? lastRun.a : lastRun.b).effect === "anchor") {
+          flavour = "The Anchor held the last run. That is the whole story.";
+        } else if (winnerRuns - loserRuns === 1) {
+          flavour = "By a single run. It will be argued about at breakfast.";
+        }
         return {
           kind: "post",
           seq,
           tick,
           author: winner,
-          text: others === "" ? `Champion of the ${names.room(num3(event, "room"))}. Unopposed, undefeated.` : `Beat ${others} at the table in the ${names.room(num3(event, "room"))}. Rematch when you have recovered.`
+          text: `Beat ${names.firstName(loser)} ${score} at PORTFALL in the ${roomName2}, on a ${strip.condition} table. ${flavour}`,
+          match: strip
         };
       }
       case "meal_service": {
@@ -11830,10 +12060,12 @@
       }
       if (event.type === "leisure_game") {
         const winner = str3(event, "winner");
-        const wins = (this.gameWins.get(winner) ?? 0) + 1;
-        this.gameWins.set(winner, wins);
-        if (winner === author && wins >= 3) {
-          item.text += ` That is win number ${wins} at the table. The others have noticed.`;
+        if (winner !== "") {
+          const wins = (this.gameWins.get(winner) ?? 0) + 1;
+          this.gameWins.set(winner, wins);
+          if (winner === author && wins >= 3) {
+            item.text += ` That is win number ${wins} at the table. The others have noticed.`;
+          }
         }
       }
       if (event.type === "grudge_formed") {
@@ -17927,6 +18159,24 @@
   var currentSeed = 42;
   var toastTimer = 0;
   var seenEvents = 0;
+  var portfallRecord = /* @__PURE__ */ new Map();
+  function recordPortfall(a, b, winner) {
+    const bump = (id, key2) => {
+      const entry = portfallRecord.get(id) ?? { w: 0, l: 0, d: 0 };
+      entry[key2]++;
+      portfallRecord.set(id, entry);
+    };
+    if (winner === "") {
+      bump(a, "d");
+      bump(b, "d");
+    } else if (winner === a) {
+      bump(a, "w");
+      bump(b, "l");
+    } else if (winner === b) {
+      bump(b, "w");
+      bump(a, "l");
+    }
+  }
   var allLines = [];
   var playing = true;
   var speedIndex = 2;
@@ -18886,6 +19136,22 @@
       needs.appendChild(cell);
     }
     personDossierEl.appendChild(needs);
+    personDossierEl.appendChild(dossierLabel("PORTFALL"));
+    const record = portfallRecord.get(member.id);
+    if (record !== void 0 && record.w + record.l + record.d > 0) {
+      personDossierEl.appendChild(
+        dossierRow(
+          "Record",
+          record.d > 0 ? `${record.w} W \xB7 ${record.l} L \xB7 ${record.d} D` : `${record.w} W \xB7 ${record.l} L`
+        )
+      );
+    }
+    const deckStrip = document.createElement("div");
+    deckStrip.className = "deck-strip";
+    for (const cardFace of starterDeck(currentSeed, member.id)) {
+      deckStrip.appendChild(miniCardEl(cardFace, false, false));
+    }
+    personDossierEl.appendChild(deckStrip);
     if (member.dead) {
       personDossierEl.appendChild(
         dossierRow("Body", "Deceased. The ledger is closed.")
@@ -19391,6 +19657,48 @@
     }
     return canvas;
   }
+  var SUIT_LETTER = {
+    helm: "H",
+    forge: "F",
+    leaf: "L",
+    coin: "C"
+  };
+  function miniCardEl(face, won, burned) {
+    const el = document.createElement("span");
+    el.className = `mini-card suit-${face.suit}` + (won ? " won" : "") + (burned ? " burned" : "");
+    const mark = face.effect === "anchor" ? "\u2693" : face.effect === "surge" ? "\u21AF" : "";
+    el.textContent = `${SUIT_LETTER[face.suit] ?? "?"}${face.power}${mark}`;
+    return el;
+  }
+  function buildMatchStrip(match) {
+    const strip = document.createElement("div");
+    strip.className = "match-strip";
+    const head = document.createElement("div");
+    head.className = "match-head";
+    const cond = document.createElement("span");
+    cond.className = `match-cond suit-${match.condition}`;
+    cond.textContent = `${SUIT_LETTER[match.condition] ?? "?"} ${match.condition} table`;
+    const scoreA = match.runs.filter((r) => r.point === "a").length;
+    const scoreB = match.runs.filter((r) => r.point === "b").length;
+    const score = document.createElement("span");
+    score.className = "match-score";
+    score.textContent = `${personName(match.a)} ${scoreA}\u2013${scoreB} ${personName(match.b)}`;
+    head.append(cond, score);
+    strip.appendChild(head);
+    const runs = document.createElement("div");
+    runs.className = "match-runs";
+    for (const run2 of match.runs) {
+      const col = document.createElement("div");
+      col.className = "match-run";
+      col.append(
+        miniCardEl(run2.a, run2.point === "a", run2.point === null),
+        miniCardEl(run2.b, run2.point === "b", run2.point === null)
+      );
+      runs.appendChild(col);
+    }
+    strip.appendChild(runs);
+    return strip;
+  }
   function buildFeedCard(item) {
     const card = document.createElement("div");
     card.className = "feed-card";
@@ -19457,6 +19765,9 @@
     text.className = "feed-text";
     text.textContent = item.text;
     card.appendChild(text);
+    if (item.match !== void 0) {
+      card.appendChild(buildMatchStrip(item.match));
+    }
     for (const entry of item.replies ?? []) {
       const reply = document.createElement("div");
       reply.className = "feed-reply";
@@ -19672,6 +19983,19 @@
         if (feedItems.length > 400) feedItems.shift();
         feedDirty = true;
       }
+      if (event.type === "leisure_game") {
+        const duel = event.data.duel;
+        if (typeof duel === "object" && duel !== null) {
+          const d = duel;
+          if (typeof d.a === "string" && typeof d.b === "string") {
+            recordPortfall(
+              d.a,
+              d.b,
+              typeof event.data.winner === "string" ? event.data.winner : ""
+            );
+          }
+        }
+      }
       for (const line of renderer.push(event)) {
         const entry = { line, type: event.type };
         allLines.push(entry);
@@ -19712,6 +20036,7 @@
     run = createRun({ seed });
     renderer = createChronicleRenderer();
     seenEvents = 0;
+    portfallRecord.clear();
     allLines = [];
     selectedCrew = null;
     closePersonCard();

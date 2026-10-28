@@ -50,7 +50,14 @@ import {
   hash01,
   stateSignature,
 } from "./faces.ts";
-import { FeedBuilder, type FeedItem, type FeedNames } from "./feed.ts";
+import {
+  FeedBuilder,
+  type FeedItem,
+  type FeedNames,
+  type MatchCardFace,
+  type MatchStrip,
+} from "./feed.ts";
+import { starterDeck } from "../../src/entities/cards.ts";
 import {
   ALERT_KIND_DEFS,
   AlertStack,
@@ -117,6 +124,26 @@ let renderer: ChronicleRenderer;
 let currentSeed = 42;
 let toastTimer = 0;
 let seenEvents = 0;
+/** PORTFALL results this voyage, by crew id, for the crew card. */
+const portfallRecord = new Map<string, { w: number; l: number; d: number }>();
+
+function recordPortfall(a: string, b: string, winner: string): void {
+  const bump = (id: string, key: "w" | "l" | "d"): void => {
+    const entry = portfallRecord.get(id) ?? { w: 0, l: 0, d: 0 };
+    entry[key]++;
+    portfallRecord.set(id, entry);
+  };
+  if (winner === "") {
+    bump(a, "d");
+    bump(b, "d");
+  } else if (winner === a) {
+    bump(a, "w");
+    bump(b, "l");
+  } else if (winner === b) {
+    bump(b, "w");
+    bump(a, "l");
+  }
+}
 let allLines: LogLine[] = [];
 let playing = true;
 let speedIndex = 2; // 3x
@@ -1401,6 +1428,27 @@ function buildDossier(member: CrewMember): void {
   }
   personDossierEl.appendChild(needs);
 
+  // PORTFALL sits at the root of the card, under the needs: the
+  // record this voyage and the deck they carry, dealt face up.
+  personDossierEl.appendChild(dossierLabel("PORTFALL"));
+  const record = portfallRecord.get(member.id);
+  if (record !== undefined && record.w + record.l + record.d > 0) {
+    personDossierEl.appendChild(
+      dossierRow(
+        "Record",
+        record.d > 0
+          ? `${record.w} W · ${record.l} L · ${record.d} D`
+          : `${record.w} W · ${record.l} L`,
+      ),
+    );
+  }
+  const deckStrip = document.createElement("div");
+  deckStrip.className = "deck-strip";
+  for (const cardFace of starterDeck(currentSeed, member.id)) {
+    deckStrip.appendChild(miniCardEl(cardFace, false, false));
+  }
+  personDossierEl.appendChild(deckStrip);
+
   // The body, as the consequences chapter keeps it: one health
   // figure, the open wounds by part, the sickness, and the marks
   // that stay. The dead keep their record; the roster says why
@@ -2050,6 +2098,62 @@ function feedAvatar(author: string | null): HTMLElement {
   return canvas;
 }
 
+const SUIT_LETTER: Record<string, string> = {
+  helm: "H",
+  forge: "F",
+  leaf: "L",
+  coin: "C",
+};
+
+function miniCardEl(
+  face: MatchCardFace,
+  won: boolean,
+  burned: boolean,
+): HTMLSpanElement {
+  const el = document.createElement("span");
+  el.className =
+    `mini-card suit-${face.suit}` +
+    (won ? " won" : "") +
+    (burned ? " burned" : "");
+  const mark =
+    face.effect === "anchor" ? "⚓" : face.effect === "surge" ? "↯" : "";
+  el.textContent = `${SUIT_LETTER[face.suit] ?? "?"}${face.power}${mark}`;
+  return el;
+}
+
+/** The PORTFALL strip on a result post: the table condition, the
+ *  score, and every run as a pair of mini cards, winner lit. */
+function buildMatchStrip(match: MatchStrip): HTMLDivElement {
+  const strip = document.createElement("div");
+  strip.className = "match-strip";
+  const head = document.createElement("div");
+  head.className = "match-head";
+  const cond = document.createElement("span");
+  cond.className = `match-cond suit-${match.condition}`;
+  cond.textContent = `${SUIT_LETTER[match.condition] ?? "?"} ${match.condition} table`;
+  const scoreA = match.runs.filter((r) => r.point === "a").length;
+  const scoreB = match.runs.filter((r) => r.point === "b").length;
+  const score = document.createElement("span");
+  score.className = "match-score";
+  score.textContent =
+    `${personName(match.a)} ${scoreA}–${scoreB} ${personName(match.b)}`;
+  head.append(cond, score);
+  strip.appendChild(head);
+  const runs = document.createElement("div");
+  runs.className = "match-runs";
+  for (const run of match.runs) {
+    const col = document.createElement("div");
+    col.className = "match-run";
+    col.append(
+      miniCardEl(run.a, run.point === "a", run.point === null),
+      miniCardEl(run.b, run.point === "b", run.point === null),
+    );
+    runs.appendChild(col);
+  }
+  strip.appendChild(runs);
+  return strip;
+}
+
 function buildFeedCard(item: FeedItem): HTMLDivElement {
   const card = document.createElement("div");
   card.className = "feed-card";
@@ -2119,6 +2223,9 @@ function buildFeedCard(item: FeedItem): HTMLDivElement {
   text.className = "feed-text";
   text.textContent = item.text;
   card.appendChild(text);
+  if (item.match !== undefined) {
+    card.appendChild(buildMatchStrip(item.match));
+  }
   for (const entry of item.replies ?? []) {
     const reply = document.createElement("div");
     reply.className = "feed-reply";
@@ -2394,6 +2501,19 @@ function drainEvents(): void {
       if (feedItems.length > 400) feedItems.shift();
       feedDirty = true;
     }
+    if (event.type === "leisure_game") {
+      const duel = event.data.duel;
+      if (typeof duel === "object" && duel !== null) {
+        const d = duel as Record<string, unknown>;
+        if (typeof d.a === "string" && typeof d.b === "string") {
+          recordPortfall(
+            d.a,
+            d.b,
+            typeof event.data.winner === "string" ? event.data.winner : "",
+          );
+        }
+      }
+    }
     for (const line of renderer.push(event)) {
       const entry: LogLine = { line, type: event.type };
       allLines.push(entry);
@@ -2448,6 +2568,7 @@ function startVoyage(seed: number, opts?: { daily?: boolean }): void {
   run = createRun({ seed });
   renderer = createChronicleRenderer();
   seenEvents = 0;
+  portfallRecord.clear();
   allLines = [];
   selectedCrew = null;
   closePersonCard();

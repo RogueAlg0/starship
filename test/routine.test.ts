@@ -128,7 +128,7 @@ describe("the scheduled ship, live", () => {
     expect(events.size).toBeLessThan(65000);
     const chronicle = renderChronicle(events.events);
     expect(chronicle).toContain("at table.");
-    expect(chronicle).toContain("play a table game");
+    expect(chronicle).toContain("play PORTFALL");
   });
 });
 

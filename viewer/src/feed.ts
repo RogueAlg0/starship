@@ -26,6 +26,22 @@ export interface FeedNames {
   ship: string;
 }
 
+/** One face of a PORTFALL card, as the feed strip draws it. */
+export interface MatchCardFace {
+  suit: string;
+  power: number;
+  effect?: string;
+}
+
+/** A played PORTFALL match, carried on its result post so the
+ *  card can draw the runs instead of only talking about them. */
+export interface MatchStrip {
+  condition: string;
+  a: string;
+  b: string;
+  runs: Array<{ a: MatchCardFace; b: MatchCardFace; point: "a" | "b" | null }>;
+}
+
 export interface FeedPost {
   kind: "post";
   seq: number;
@@ -36,6 +52,8 @@ export interface FeedPost {
   replies?: Array<{ author: string; text: string }>;
   /** Crew ids whose faces react warmly, from bonds already formed. */
   reactions?: string[];
+  /** Set on PORTFALL result posts: the match, for the strip. */
+  match?: MatchStrip;
 }
 
 export interface FeedPoll {
@@ -62,6 +80,69 @@ function num(event: SimEvent, key: string): number {
 function pick<T>(seq: number, salt: number, bank: readonly T[]): T {
   const index = Math.floor(hash01(seq, salt) * bank.length) % bank.length;
   return bank[index] as T;
+}
+
+/** The PORTFALL duel carried on a leisure_game event, parsed
+ *  into the strip shape; null when the event predates the game
+ *  or the payload is not the shape the engine writes. */
+function readDuel(event: SimEvent): {
+  strip: MatchStrip;
+  scoreA: number;
+  scoreB: number;
+} | null {
+  const raw = event.data.duel;
+  if (typeof raw !== "object" || raw === null) return null;
+  const duel = raw as Record<string, unknown>;
+  const a = duel.a;
+  const b = duel.b;
+  const condition = duel.condition;
+  const scoreA = duel.scoreA;
+  const scoreB = duel.scoreB;
+  if (
+    typeof a !== "string" ||
+    typeof b !== "string" ||
+    typeof condition !== "string" ||
+    typeof scoreA !== "number" ||
+    typeof scoreB !== "number" ||
+    !Array.isArray(duel.runs)
+  ) {
+    return null;
+  }
+  const runs: MatchStrip["runs"] = [];
+  for (const entry of duel.runs) {
+    if (!Array.isArray(entry) || entry.length < 7) return null;
+    const [aSuit, aPower, aEffect, bSuit, bPower, bEffect, point] = entry as [
+      unknown,
+      unknown,
+      unknown,
+      unknown,
+      unknown,
+      unknown,
+      unknown,
+    ];
+    if (
+      typeof aSuit !== "string" ||
+      typeof aPower !== "number" ||
+      typeof bSuit !== "string" ||
+      typeof bPower !== "number"
+    ) {
+      return null;
+    }
+    runs.push({
+      a: {
+        suit: aSuit,
+        power: aPower,
+        effect: typeof aEffect === "string" && aEffect !== "" ? aEffect : undefined,
+      },
+      b: {
+        suit: bSuit,
+        power: bPower,
+        effect: typeof bEffect === "string" && bEffect !== "" ? bEffect : undefined,
+      },
+      point: point === "a" || point === "b" ? point : null,
+    });
+  }
+  return { strip: { condition, a, b, runs }, scoreA, scoreB };
 }
 
 const REPLIES_AGREE = [
@@ -236,20 +317,70 @@ export function feedItemFor(event: SimEvent, names: FeedNames): FeedItem | null 
             (p): p is string => typeof p === "string",
           )
         : [];
-      if (winner === "" || players.length === 0) return null;
-      const others = players
-        .filter((p) => p !== winner)
-        .map((p) => names.firstName(p))
-        .join(", ");
+      if (players.length === 0) return null;
+      const duel = readDuel(event);
+      if (duel === null) {
+        // A game with no recorded match: the old table brag.
+        if (winner === "") return null;
+        const others = players
+          .filter((p) => p !== winner)
+          .map((p) => names.firstName(p))
+          .join(", ");
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: winner,
+          text:
+            others === ""
+              ? `Champion of the ${names.room(num(event, "room"))}. Unopposed, undefeated.`
+              : `Beat ${others} at the table in the ${names.room(num(event, "room"))}. Rematch when you have recovered.`,
+        };
+      }
+      const { strip, scoreA, scoreB } = duel;
+      const roomName = names.room(num(event, "room"));
+      const score =
+        winner === strip.b
+          ? `${scoreB}–${scoreA}`
+          : `${scoreA}–${scoreB}`;
+      if (winner === "") {
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: strip.a,
+          text:
+            `Played ${names.firstName(strip.b)} to a standstill at PORTFALL in the ${roomName}, ` +
+            `${scoreA}–${scoreB} on a ${strip.condition} table. The cards settle nothing. Rematch pending.`,
+          match: strip,
+        };
+      }
+      const loser = winner === strip.a ? strip.b : strip.a;
+      const winnerRuns = winner === strip.a ? scoreA : scoreB;
+      const loserRuns = winner === strip.a ? scoreB : scoreA;
+      let flavour = "Rematch when you have recovered.";
+      const lastRun = strip.runs[strip.runs.length - 1];
+      if (loserRuns === 0) {
+        flavour = "Not close. The table saw it.";
+      } else if (
+        lastRun !== undefined &&
+        ((lastRun.point === "a" && winner === strip.a) ||
+          (lastRun.point === "b" && winner === strip.b)) &&
+        (winner === strip.a ? lastRun.a : lastRun.b).effect === "anchor"
+      ) {
+        flavour = "The Anchor held the last run. That is the whole story.";
+      } else if (winnerRuns - loserRuns === 1) {
+        flavour = "By a single run. It will be argued about at breakfast.";
+      }
       return {
         kind: "post",
         seq,
         tick,
         author: winner,
         text:
-          others === ""
-            ? `Champion of the ${names.room(num(event, "room"))}. Unopposed, undefeated.`
-            : `Beat ${others} at the table in the ${names.room(num(event, "room"))}. Rematch when you have recovered.`,
+          `Beat ${names.firstName(loser)} ${score} at PORTFALL in the ${roomName}, ` +
+          `on a ${strip.condition} table. ${flavour}`,
+        match: strip,
       };
     }
     case "meal_service": {
@@ -1182,10 +1313,12 @@ export class FeedBuilder {
     }
     if (event.type === "leisure_game") {
       const winner = str(event, "winner");
-      const wins = (this.gameWins.get(winner) ?? 0) + 1;
-      this.gameWins.set(winner, wins);
-      if (winner === author && wins >= 3) {
-        item.text += ` That is win number ${wins} at the table. The others have noticed.`;
+      if (winner !== "") {
+        const wins = (this.gameWins.get(winner) ?? 0) + 1;
+        this.gameWins.set(winner, wins);
+        if (winner === author && wins >= 3) {
+          item.text += ` That is win number ${wins} at the table. The others have noticed.`;
+        }
       }
     }
     // A friend of the grudge's target answers the cold post.

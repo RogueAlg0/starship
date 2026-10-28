@@ -32,6 +32,7 @@ import {
   type Routine,
   type WatchName,
 } from "./routine.ts";
+import { conditionFor, playMatch, starterDeck } from "./cards.ts";
 import { applySabotage, sabotageCandidate } from "../plots/sabotage.ts";
 import { maybeSocialSpeech } from "../perception/speech.ts";
 import { CONFIG } from "../scenario/config.ts";
@@ -1114,11 +1115,12 @@ function applyChoice(
 }
 
 /**
- * A table game in the mess: the member and the company present (up to the
- * table size) play, one of them wins, and an hour of cards does what
- * cards do: company restored, small change in how the players regard
- * each other, a lift for the winner. The winner is drawn on the
- * "routine" stream, so the game replays exactly.
+ * PORTFALL in the mess: the member and the company present (up to
+ * the table size) gather, the member and the first of the company
+ * play a real match on the "cards" stream, and an hour of cards
+ * does what cards do: company restored, small change in how the
+ * players regard each other, a lift for the winner. The rest of
+ * the table watches, which on a ship is most of the game anyway.
  */
 function resolveGame(
   w: World,
@@ -1139,9 +1141,17 @@ function resolveGame(
     member.activity = "idle";
     return;
   }
-  const winner = participants[
-    w.rng.get("routine").int(participants.length)
-  ] as CrewMember;
+  const opponent = participants[1] as CrewMember;
+  const condition = conditionFor(ctx.voyage.inPortAt(w.tick), ctx.weather.name);
+  const cards = w.rng.get("cards");
+  const match = playMatch(
+    starterDeck(w.config.seed, member.id),
+    starterDeck(w.config.seed, opponent.id),
+    condition,
+    (n) => cards.int(n),
+  );
+  const winner =
+    match.winner === "a" ? member : match.winner === "b" ? opponent : null;
   for (const player of participants) {
     player.needs.social = clamp01(player.needs.social + cfg.gameSocialRestore);
     player.needs.morale = clamp01(
@@ -1165,7 +1175,23 @@ function resolveGame(
   w.emit("leisure_game", [member.id], {
     room: member.room,
     participants: participants.map((p) => p.id),
-    winner: winner.id,
+    winner: winner?.id ?? "",
+    duel: {
+      a: member.id,
+      b: opponent.id,
+      condition,
+      scoreA: match.scoreA,
+      scoreB: match.scoreB,
+      runs: match.runs.map((run) => [
+        run.a.suit,
+        run.a.power,
+        run.a.effect ?? "",
+        run.b.suit,
+        run.b.power,
+        run.b.effect ?? "",
+        run.point ?? "",
+      ]),
+    },
   });
 }
 

@@ -378,31 +378,30 @@
   /* Hull exterior: her side elevation, chosen from the deck bar.
      The name rides the plating in the same spaced capitals as the
      plans' hull name, only bigger — it is painted on a ship. */
-  #ship-svg .ext-name { fill: #e8dcc2; font-size: 25px; font-weight: 700; letter-spacing: 0.34em; pointer-events: none; }
-  #ship-svg .ext-sub { fill: #b7a67f; font-size: 10px; letter-spacing: 0.22em; pointer-events: none; }
+  #ship-svg .ext-name { fill: #e6edf8; font-size: 25px; font-weight: 700; letter-spacing: 0.34em; pointer-events: none; }
+  #ship-svg .ext-sub { fill: #93a7c9; font-size: 10px; letter-spacing: 0.22em; pointer-events: none; }
   #ship-svg .ext-window { stroke: rgba(0,0,0,0.35); stroke-width: 0.6; }
-  /* Cutaway: the airship shell drawn around the deck plans. The back
-     layer is a ghost of canvas and seams behind the rooms; the edge
-     layer rides on top, a brass cut line where the near hull was
-     taken away, with the gondola still slung underneath. */
-  #ship-svg .cut-shell { fill: rgba(201, 166, 90, 0.07); }
-  #ship-svg .cut-seam { stroke: rgba(201, 166, 90, 0.16); stroke-width: 1.1; fill: none; }
-  #ship-svg .cut-fin { fill: rgba(122, 95, 52, 0.28); stroke: rgba(201, 166, 90, 0.3); stroke-width: 1.2; }
+  /* Cutaway: the ship's own hull drawn around the deck plans — a
+     starship silhouette, nose cone at the bow, tail fins and engine
+     bells at the stern. The back layer is a ghost of plating and
+     seams behind the rooms; the edge layer rides on top, a brass
+     cut line where the near hull was taken away. */
+  #ship-svg .cut-shell { fill: rgba(126, 160, 210, 0.06); }
+  #ship-svg .cut-seam { stroke: rgba(126, 160, 210, 0.16); stroke-width: 1.1; fill: none; }
+  #ship-svg .cut-fin { fill: rgba(70, 88, 122, 0.3); stroke: rgba(126, 160, 210, 0.32); stroke-width: 1.2; }
   #ship-svg .cut-line-shadow { fill: none; stroke: rgba(0, 0, 0, 0.55); stroke-width: 5; stroke-linecap: round; }
   #ship-svg .cut-line { fill: none; stroke: #c9963c; stroke-width: 2.4; stroke-dasharray: 14 6; stroke-linecap: round; }
-  #ship-svg .cut-gondola { fill: #171008; stroke: #8a6d35; stroke-width: 1.4; }
-  #ship-svg .cut-gondola-win { fill: #ffd9a0; opacity: 0.9; }
-  /* Airship exterior: canvas skin tones ride in the SVG fills; the
-     prop hubs carry a pre-baked two-blade prop each, turned by the
-     frame loop and nothing else. */
-  #ship-svg .ext-fin { fill: #4a3a22; stroke: #2c2113; stroke-width: 1.4; }
-  #ship-svg .ext-patch-bone { fill: #a68d5f; stroke: #6e5836; stroke-width: 1.1; stroke-dasharray: 4 2.6; }
+  #ship-svg .cut-bell { fill: rgba(16, 22, 34, 0.6); stroke: #c9963c; stroke-width: 1.6; }
+  /* Hull exterior: steel plating tones ride in the SVG fills; the
+     engine bells glow through the CSS engine pulse, and nothing
+     about her is repainted per frame. */
+  #ship-svg .ext-fin { fill: #2c3a55; stroke: #101827; stroke-width: 1.4; }
+  #ship-svg .ext-patch-plate { fill: #5f718f; stroke: #33455f; stroke-width: 1.1; stroke-dasharray: 4 2.6; }
   #ship-svg .ext-patch-rust { fill: #7a4326; opacity: 0.75; }
   #ship-svg .ext-glass { fill: #cfe8e2; opacity: 0.88; }
-  #ship-svg .ext-gondola { fill: #241a10; stroke: #8a6d35; stroke-width: 1.5; }
-  #ship-svg .ext-strut { stroke: #6e5836; stroke-width: 1.6; }
-  #ship-svg .ext-propcar { fill: #2e2416; stroke: #6b5836; stroke-width: 1.2; }
-  #ship-svg .ext-prop-blade { fill: #c9b083; }
+  #ship-svg .ext-bell { fill: #1c2635; stroke: #5a6c8c; stroke-width: 1.3; }
+  #ship-svg .ext-radiator { fill: #46201b; stroke: #7c3a2c; stroke-width: 1.2; }
+  #ship-svg .ext-truss { stroke: #46587a; stroke-width: 1.6; }
   #ship-svg .corridor-wear { stroke: rgba(0,0,0,0.42); stroke-width: 3.5; stroke-linecap: round; fill: none; stroke-dasharray: 7 13; pointer-events: none; }
   #ship-svg .corridor-shine { stroke: rgba(215,228,250,0.13); stroke-width: 6; stroke-linecap: round; fill: none; pointer-events: none; }
   #wear-readout {
@@ -788,7 +787,7 @@
   <section id="ship-section" aria-label="Ship schematic">
     <div class="canvas-wrap">
       <div id="alerts" aria-live="polite" aria-label="Ship alerts"></div>
-      <svg id="ship-svg" role="img" aria-label="The ship in three views: outside her airship hull, a cutaway through the shell to both decks and crew positions, and inside the midship section, with wear, scorch and damage marks"></svg>
+      <svg id="ship-svg" role="img" aria-label="The ship in three views: outside her plated hull, a cutaway through the hull to both decks and crew positions, and inside the midship section, with wear, scorch and damage marks"></svg>
     </div>
     <svg id="minimap" role="img" aria-label="Minimap of both decks with crew positions"></svg>
   </section>
@@ -897,7 +896,7 @@
             <button type="button" id="deck-btn-1">Lower</button>
             <button type="button" id="deck-btn-both" class="active">Both</button>
           </div>
-          <p class="minimap-key">Outside: the hull only, props turning. Cutaway: the near hull ghosts away along the brass cut line and both decks show through. Inside: the camera dollies into midship. Pick a deck while outside and the cutaway opens on it. Minimap, bottom-right: tap a strip to focus a deck. On the Chart, tap a port or a passing ship to hear about it.</p>
+          <p class="minimap-key">Outside: the hull only, engine bells lit. Cutaway: the near hull ghosts away along the brass cut line and both decks show through. Inside: the camera dollies into midship. Pick a deck while outside and the cutaway opens on it. Minimap, bottom-right: tap a strip to focus a deck. On the Chart, tap a port or a passing ship to hear about it.</p>
         </section>
       </div>
     </div>
@@ -5758,8 +5757,8 @@
   // an accumulator, and the render pass interpolates between the
   // last two steps, so a hitch changes nothing about the motion
   // itself. Backlog past MAX_FIXED_STEPS is dropped, never chased:
-  // no spiral after a stall. Heavy layers (decks, hull, props,
-  // glows) are painted once into the scene at build time; the loop
+  // no spiral after a stall. Heavy layers (decks, hull, glows)
+  // are painted once into the scene at build time; the loop
   // only writes transforms and opacities, and allocates nothing.
   var FIXED_STEP = 1 / 30;
   var MAX_FIXED_STEPS = 5;
@@ -5843,7 +5842,7 @@
   var shaftGroup = null;
   var shaftCx = 0;
   // Views, Sims-style: which world the witness is in. "outside"
-  // shows the airship hull only; "cutaway" ghosts the near hull
+  // shows the plated hull only; "cutaway" ghosts the near hull
   // along its brass cut line so both deck plans show through the
   // shell drawn around them; "inside" dollies the camera into the
   // midship section; "chart" shows the reach. She is drawn in the
@@ -5858,7 +5857,6 @@
   var cutBox = null;
   var cutBackEl = null;
   var cutEdgeEl = null;
-  var extProps = [];
   // The star chart hangs below the exterior in the same canvas: the
   // ports of the reach, the leg she is on, and her marker moving
   // along it. chartRefs carries the pieces updateChart() moves.
@@ -6476,22 +6474,22 @@
     // Soot: three soft streaks trailing off the stern bells.
     const soot = add(wear, "g", { opacity: 0.15 });
     const cy = (ext.y0 + ext.y1) / 2;
-    for (const off of [-38, 0, 38]) {
+    for (const off of [-32, 0, 32]) {
       add(soot, "ellipse", { cx: ext.x1 - 12, cy: cy + off, rx: 32, ry: 6, fill: "url(#wear-soot)", opacity: 0.75 });
     }
     return { light, heavy, soot };
   }
   /**
-   * The hull exterior, rebuilt on the trench airships' pattern:
-   * a long canvas envelope with a tapered bow and lobed tail
-   * fins, a worked skin of seams and patches, a row of lit
-   * windows and glass at the bridge, an engine block at the stern
-   * with the reactor glowing through it, ember markers low on the
-   * belly, and a gondola with two prop cars slung underneath.
-   * The props are pre-baked two-blade groups; the frame loop only
-   * turns them. updateWear() still parks the damage scorch over
-   * the worst room's stretch of skin and lights the windows by
-   * the ship's hour.
+   * The hull exterior: a starship in side elevation — ogive nose
+   * cone, a cylindrical run of plated hull, swept tail fins,
+   * radiator wings above and below the hull amidships, a worked
+   * skin of seams and patches, a row of lit portholes and glass
+   * at the bridge, and three engine bells on the stern bulkhead
+   * with the drive glow in their throats. Everything is baked
+   * once here; the frame loop only stretches the engine wash.
+   * updateWear() still parks the damage scorch over the worst
+   * room's stretch of plating and lights the windows by the
+   * ship's hour.
    */
   function buildExterior(ship, ext) {
     const g = add(svgEl, "g", { class: "exterior", "pointer-events": "none" });
@@ -6513,17 +6511,19 @@
     const cy = (ext.y0 + ext.y1) / 2;
     // Engine wash first, so the hull sits over its root; updateSpace
     // stretches it with the throttle, like the plans' trails.
-    for (const off of [-30, 30]) {
-      const trail = add(hullG, "rect", { x: ext.x1 + 18, y: cy + off - 3, width: 90, height: 6, rx: 3, fill: "url(#engine-wash)", opacity: 0.3, class: "engine-trail" });
+    for (const off of [-32, 0, 32]) {
+      const trail = add(hullG, "rect", { x: ext.x1 + 24, y: cy + off - 3, width: 90, height: 6, rx: 3, fill: "url(#engine-wash)", opacity: 0.3, class: "engine-trail" });
       extTrails.push(trail);
     }
-    // Fins behind the skin, roots hidden under the envelope.
-    drawAirshipFins(hullG, ext, "ext-fin");
-    // The envelope herself: canvas lit from above, belly heavy.
-    add(hullG, "path", { d: airshipPathD(ext), fill: "url(#airship-skin)", stroke: "#241a0e", "stroke-width": 2 });
+    // Fins and radiator wings behind the plating, roots hidden
+    // under the hull.
+    drawShipFins(hullG, ext, "ext-fin");
+    drawRadiators(hullG, ext);
+    // The hull herself: steel lit from above, belly in shadow.
+    add(hullG, "path", { d: starshipPathD(ext), fill: "url(#ship-plate)", stroke: "#0d1420", "stroke-width": 2 });
     // A worked skin: hoop seams around the body and two long
     // seams down the flank, all clipped to the silhouette.
-    const seams = add(hullG, "g", { "clip-path": "url(#hull-clip-ext)", stroke: "rgba(30,22,10,0.4)", "stroke-width": 1.2, fill: "none" });
+    const seams = add(hullG, "g", { "clip-path": "url(#hull-clip-ext)", stroke: "rgba(8,12,20,0.45)", "stroke-width": 1.2, fill: "none" });
     for (let i = 1; i < 9; i++) {
       const fx = ext.x0 + w * i / 9;
       add(seams, "path", { d: `M ${fx.toFixed(1)} ${ext.y0.toFixed(1)} C ${(fx - w * 0.03).toFixed(1)} ${(ext.y0 + h * 0.33).toFixed(1)} ${(fx - w * 0.03).toFixed(1)} ${(ext.y1 - h * 0.33).toFixed(1)} ${fx.toFixed(1)} ${ext.y1.toFixed(1)}` });
@@ -6532,11 +6532,14 @@
       const yy = ext.y0 + h * f;
       add(seams, "line", { x1: ext.x0, y1: yy, x2: ext.x1, y2: yy });
     }
-    // Patches, the way the Whale wears hers: one stitched bone
-    // patch amidships, one rust bloom low toward the stern.
+    // Patches, the way a worked hull wears hers: one riveted
+    // plate patch amidships, one rust bloom low toward the stern.
     const patchG = add(hullG, "g", { "clip-path": "url(#hull-clip-ext)" });
-    add(patchG, "rect", { x: (ext.x0 + w * 0.46).toFixed(1), y: (ext.y0 + h * 0.18).toFixed(1), width: (w * 0.085).toFixed(1), height: (h * 0.3).toFixed(1), rx: 5, class: "ext-patch-bone", transform: `rotate(-4 ${(ext.x0 + w * 0.5).toFixed(1)} ${(ext.y0 + h * 0.33).toFixed(1)})` });
+    add(patchG, "rect", { x: (ext.x0 + w * 0.46).toFixed(1), y: (ext.y0 + h * 0.18).toFixed(1), width: (w * 0.085).toFixed(1), height: (h * 0.3).toFixed(1), rx: 5, class: "ext-patch-plate", transform: `rotate(-4 ${(ext.x0 + w * 0.5).toFixed(1)} ${(ext.y0 + h * 0.33).toFixed(1)})` });
     add(patchG, "ellipse", { cx: (ext.x0 + w * 0.7).toFixed(1), cy: (ext.y1 - h * 0.2).toFixed(1), rx: (w * 0.045).toFixed(1), ry: (h * 0.13).toFixed(1), class: "ext-patch-rust" });
+    // Livery: one amber band along the flank, clipped to the hull.
+    const stripeG = add(hullG, "g", { "clip-path": "url(#hull-clip-ext)" });
+    add(stripeG, "rect", { x: ext.x0, y: (cy + h * 0.1).toFixed(1), width: w, height: 6, fill: "#e8a33d", opacity: 0.4 });
     // Windows: one long lit row along the flank, a few frames
     // dark where no room sits behind the skin.
     const windows = [];
@@ -6552,9 +6555,9 @@
     // Bridge glass at the bow: one wide pane where the watch stands.
     add(hullG, "ellipse", { cx: (ext.x0 + w * 0.085).toFixed(1), cy: (cy - h * 0.17).toFixed(1), rx: (w * 0.028).toFixed(1), ry: (h * 0.075).toFixed(1), class: "ext-glass", transform: `rotate(-18 ${(ext.x0 + w * 0.085).toFixed(1)} ${(cy - h * 0.17).toFixed(1)})` });
     // Her name, painted on the canvas the way ships wear it.
-    const nameText = add(hullG, "text", { x: ext.x0 + w * 0.19, y: ext.y0 + h * 0.3, class: "ext-name", fill: "#e8dcc2" });
+    const nameText = add(hullG, "text", { x: ext.x0 + w * 0.19, y: ext.y0 + h * 0.3, class: "ext-name", fill: "#e6edf8" });
     nameText.textContent = ship.name.toUpperCase();
-    const subText = add(hullG, "text", { x: ext.x0 + w * 0.19 + 2, y: ext.y0 + h * 0.3 + 18, class: "ext-sub", fill: "#b7a67f" });
+    const subText = add(hullG, "text", { x: ext.x0 + w * 0.19 + 2, y: ext.y0 + h * 0.3 + 18, class: "ext-sub", fill: "#93a7c9" });
     subText.textContent = `SIDE ELEVATION · CREW OF ${run.crew.length}`;
     // The airlock hatch, low in the hull under its room, hazard
     // stripes at the sill, the way the plans mark it inside.
@@ -6563,54 +6566,32 @@
       const frac = (roomRects[airRoom.index].cx - shipBoxRef.x0) / Math.max(1, shipBoxRef.x1 - shipBoxRef.x0);
       const ax = ext.x0 + frac * w;
       const ay = ext.y0 + h * 0.68;
-      add(hullG, "rect", { x: (ax - 13).toFixed(1), y: (ay - 16).toFixed(1), width: 26, height: 32, rx: 4, fill: "#1c1409", stroke: "#6e5836", "stroke-width": 1.4 });
+      add(hullG, "rect", { x: (ax - 13).toFixed(1), y: (ay - 16).toFixed(1), width: 26, height: 32, rx: 4, fill: "#101827", stroke: "#5a6c8c", "stroke-width": 1.4 });
       add(hullG, "rect", { x: (ax - 13).toFixed(1), y: (ay + 10).toFixed(1), width: 26, height: 6, fill: "url(#pat-hazard)", opacity: 0.75 });
-      const airLabel = add(hullG, "text", { x: ax, y: ay + 29, class: "ext-sub", "text-anchor": "middle", fill: "#b7a67f" });
+      const airLabel = add(hullG, "text", { x: ax, y: ay + 29, class: "ext-sub", "text-anchor": "middle", fill: "#93a7c9" });
       airLabel.textContent = "AIRLOCK";
     }
-    // Comms mast at the bow and ember markers low on the belly.
+    // Sensor mast on the dorsal bow: a whip, a small dish, and
+    // the masthead light. Running lights low on the belly.
     const mastX = ext.x0 + w * 0.21;
-    add(hullG, "line", { x1: mastX, y1: ext.y0 + h * 0.06, x2: mastX, y2: ext.y0 - h * 0.13, stroke: "#6e5836", "stroke-width": 2 });
-    add(hullG, "path", { d: `M ${mastX} ${ext.y0 - h * 0.13} l 12 -5 l -3 7 l -9 2 Z`, fill: "#4a3a22", stroke: "#2c2113", "stroke-width": 0.8 });
-    navLight(hullG, mastX, ext.y0 - h * 0.15, "#e8f2ff", "nav/mast");
+    add(hullG, "line", { x1: mastX, y1: ext.y0 + h * 0.05, x2: mastX, y2: ext.y0 - h * 0.14, stroke: "#5a6c8c", "stroke-width": 2 });
+    add(hullG, "path", { d: `M ${(mastX - 8).toFixed(1)} ${(ext.y0 - h * 0.14).toFixed(1)} A 9 9 0 0 0 ${(mastX + 8).toFixed(1)} ${(ext.y0 - h * 0.14).toFixed(1)} Z`, fill: "#33455f", stroke: "#5a6c8c", "stroke-width": 0.9 });
+    navLight(hullG, mastX, ext.y0 - h * 0.17, "#e8f2ff", "nav/mast");
     for (let i = 0; i < 5; i++) {
       const ex = ext.x0 + w * (0.3 + i * 0.11);
       const ey = ext.y1 - h * (0.1 + (i % 2) * 0.03);
       const ember = add(hullG, "circle", { cx: ex.toFixed(1), cy: ey.toFixed(1), r: 2.1, fill: "#ff8a3c", class: "blink" });
       ember.setAttribute("style", `animation-duration:${(1.9 + rnd(`ember/${currentSeed}/${i}`) * 1.6).toFixed(1)}s;animation-delay:${(-rnd(`ember/${currentSeed}/${i}/d`) * 2).toFixed(1)}s`);
     }
-    navLight(hullG, ext.x0 + w * 0.045, cy - h * 0.3, "#3ae08a", "nav/et");
-    navLight(hullG, ext.x1 - 4, cy, "#e8f2ff", "nav/es");
-    // Engine block at the stern: a housing on the centreline with
-    // the reactor glowing through its grille.
-    const engX = ext.x1 - w * 0.055;
-    add(hullG, "rect", { x: (engX - 15).toFixed(1), y: (cy - 13).toFixed(1), width: 30, height: 26, rx: 5, fill: "#33270f", stroke: "#6e5836", "stroke-width": 1.3 });
-    add(hullG, "circle", { cx: engX.toFixed(1), cy: cy.toFixed(1), r: 7.5, fill: "#ffb35c", class: "reactor-glow", opacity: 0.9 });
-    add(hullG, "circle", { cx: engX.toFixed(1), cy: cy.toFixed(1), r: 3.2, fill: "#ffe3b0" });
-    // Slung underneath: a gondola with lit windows, and two prop
-    // cars on struts. The props are baked once here; updateSpace
-    // turns them and nothing else about them ever repaints.
-    const gondCx = ext.x0 + w * 0.44;
-    const gondY = ext.y1 - h * 0.03;
-    for (const gx of [gondCx - w * 0.05, gondCx, gondCx + w * 0.05]) {
-      add(hullG, "line", { x1: gx.toFixed(1), y1: (ext.y1 - h * 0.16).toFixed(1), x2: gx.toFixed(1), y2: (gondY + 2).toFixed(1), class: "ext-strut" });
-    }
-    add(hullG, "path", { d: `M ${(gondCx - w * 0.085).toFixed(1)} ${gondY.toFixed(1)} L ${(gondCx + w * 0.085).toFixed(1)} ${gondY.toFixed(1)} L ${(gondCx + w * 0.06).toFixed(1)} ${(gondY + 21).toFixed(1)} Q ${gondCx.toFixed(1)} ${(gondY + 28).toFixed(1)} ${(gondCx - w * 0.06).toFixed(1)} ${(gondY + 21).toFixed(1)} Z`, class: "ext-gondola" });
-    for (let i = 0; i < 6; i++) {
-      const wx = gondCx - w * 0.06 + i * w * 0.024;
-      add(hullG, "rect", { x: wx.toFixed(1), y: (gondY + 6).toFixed(1), width: 9, height: 5.5, rx: 2.4, fill: "#ffd9a0", opacity: 0.92, class: "ext-window" });
-    }
-    extProps = [];
-    for (const frac of [0.22, 0.68]) {
-      const carCx = ext.x0 + w * frac;
-      const carY = ext.y1 + h * 0.14;
-      add(hullG, "line", { x1: carCx.toFixed(1), y1: (ext.y1 - h * 0.1).toFixed(1), x2: carCx.toFixed(1), y2: (carY - 4).toFixed(1), class: "ext-strut" });
-      add(hullG, "rect", { x: (carCx - 16).toFixed(1), y: (carY - 5.5).toFixed(1), width: 32, height: 11, rx: 5.5, class: "ext-propcar" });
-      const prop = add(hullG, "g", {});
-      add(prop, "ellipse", { cx: (carCx + 19).toFixed(1), cy: (carY - 9).toFixed(1), rx: 2.3, ry: 9, class: "ext-prop-blade" });
-      add(prop, "ellipse", { cx: (carCx + 19).toFixed(1), cy: (carY + 9).toFixed(1), rx: 2.3, ry: 9, class: "ext-prop-blade" });
-      add(prop, "circle", { cx: (carCx + 19).toFixed(1), cy: carY.toFixed(1), r: 2.8, fill: "#e8dcc2" });
-      extProps.push({ el: prop, cx: carCx + 19, cy: carY, phase: frac * 140 });
+    navLight(hullG, ext.x0 + w * 0.07, cy - h * 0.26, "#3ae08a", "nav/et");
+    navLight(hullG, ext.x0 + w * 0.96, ext.y0 - h * 0.24, "#e8f2ff", "nav/es");
+    // Engine bells on the stern bulkhead: three nozzles flaring
+    // off the tail cone, drive glow in each throat. The wash
+    // trails root just past the bell mouths.
+    for (const off of [-32, 0, 32]) {
+      add(hullG, "path", { d: `M ${(ext.x1 - 16).toFixed(1)} ${(cy + off - 8).toFixed(1)} L ${(ext.x1 + 15).toFixed(1)} ${(cy + off - 13).toFixed(1)} L ${(ext.x1 + 15).toFixed(1)} ${(cy + off + 13).toFixed(1)} L ${(ext.x1 - 16).toFixed(1)} ${(cy + off + 8).toFixed(1)} Z`, class: "ext-bell" });
+      add(hullG, "ellipse", { cx: (ext.x1 + 12).toFixed(1), cy: (cy + off).toFixed(1), rx: 3.6, ry: 9.5, fill: "#8ec9ff", class: "engine-glow", opacity: 0.5 });
+      add(hullG, "ellipse", { cx: (ext.x1 + 12).toFixed(1), cy: (cy + off).toFixed(1), rx: 1.6, ry: 4.6, fill: "#dceeff", opacity: 0.85 });
     }
     // Wear over the canvas, and the damage scorch updateWear()
     // parks over the worst room's stretch of skin.
@@ -6926,30 +6907,58 @@
     return `M ${x0} ${cy} Q ${x0 + 30} ${y0 + 4} ${noseX} ${y0} L ${x1 - 16} ${y0} Q ${x1} ${y0} ${x1} ${y0 + 16} L ${x1} ${y1 - 16} Q ${x1} ${y1} ${x1 - 16} ${y1} L ${noseX} ${y1} Q ${x0 + 30} ${y1 - 4} ${x0} ${cy} Z`;
   }
   /**
-   * The airship envelope, learned from the trench sheets: a long
-   * plump body, bow rounded at the left, tapering to a soft point
-   * at the stern where the fins root. Silhouette first; everything
-   * else hangs off this path or clips to it.
+   * The ship herself, in side elevation: an ogive nose cone at
+   * the bow, a long cylindrical run of hull, then a tapered tail
+   * cone ending in a flat engine bulkhead where the bells mount.
+   * Silhouette first; everything else hangs off this path or
+   * clips to it.
    */
-  function airshipPathD(box) {
+  function starshipPathD(box) {
     const { x0, x1, y0, y1 } = box;
     const w = x1 - x0;
     const h = y1 - y0;
     const cy = (y0 + y1) / 2;
-    const bx = x0 + 2;
-    const sx = x1 - 2;
-    return `M ${bx} ${cy} C ${(x0 + w * 0.14).toFixed(1)} ${(y0 + h * 0.04).toFixed(1)} ${(x0 + w * 0.38).toFixed(1)} ${y0.toFixed(1)} ${(x0 + w * 0.62).toFixed(1)} ${(y0 + h * 0.05).toFixed(1)} C ${(x0 + w * 0.84).toFixed(1)} ${(y0 + h * 0.12).toFixed(1)} ${(x0 + w * 0.96).toFixed(1)} ${(y0 + h * 0.3).toFixed(1)} ${sx} ${cy} C ${(x0 + w * 0.96).toFixed(1)} ${(y1 - h * 0.3).toFixed(1)} ${(x0 + w * 0.84).toFixed(1)} ${(y1 - h * 0.12).toFixed(1)} ${(x0 + w * 0.62).toFixed(1)} ${(y1 - h * 0.05).toFixed(1)} C ${(x0 + w * 0.38).toFixed(1)} ${y1.toFixed(1)} ${(x0 + w * 0.14).toFixed(1)} ${(y1 - h * 0.04).toFixed(1)} ${bx} ${cy} Z`;
+    const f = (v) => v.toFixed(1);
+    return `M ${f(x0 + 2)} ${f(cy)} C ${f(x0 + w * 0.06)} ${f(y0 + h * 0.17)} ${f(x0 + w * 0.17)} ${f(y0 + h * 0.02)} ${f(x0 + w * 0.32)} ${f(y0 + h * 0.005)} L ${f(x0 + w * 0.68)} ${f(y0 + h * 0.01)} C ${f(x0 + w * 0.84)} ${f(y0 + h * 0.03)} ${f(x0 + w * 0.93)} ${f(y0 + h * 0.12)} ${f(x1 - 12)} ${f(cy - h * 0.26)} Q ${f(x1 - 3)} ${f(cy)} ${f(x1 - 12)} ${f(cy + h * 0.26)} C ${f(x0 + w * 0.93)} ${f(y1 - h * 0.12)} ${f(x0 + w * 0.84)} ${f(y1 - h * 0.03)} ${f(x0 + w * 0.68)} ${f(y1 - h * 0.01)} L ${f(x0 + w * 0.32)} ${f(y1 - h * 0.005)} C ${f(x0 + w * 0.17)} ${f(y1 - h * 0.02)} ${f(x0 + w * 0.06)} ${f(y1 - h * 0.17)} ${f(x0 + 2)} ${f(cy)} Z`;
   }
-  /** The lobed tail fins at the stern: upper, lower, and the
-   *  far-side horizontal read as a shallow ellipse at the root. */
-  function drawAirshipFins(parent, box, cls) {
+  /** The tail fins at the stern: angular swept fins above and
+   *  below the tail cone, and the far-side horizontal fin read as
+   *  a shallow delta at the root. Straight edges, not lobes — she
+   *  is a ship, not a balloon. */
+  function drawShipFins(parent, box, cls) {
     const { x0, x1, y0, y1 } = box;
     const w = x1 - x0;
     const h = y1 - y0;
     const cy = (y0 + y1) / 2;
-    add(parent, "path", { d: `M ${(x0 + w * 0.78).toFixed(1)} ${(y0 + h * 0.14).toFixed(1)} C ${(x0 + w * 0.9).toFixed(1)} ${(y0 - h * 0.3).toFixed(1)} ${(x0 + w * 0.99).toFixed(1)} ${(y0 - h * 0.34).toFixed(1)} ${(x1 + 2).toFixed(1)} ${(y0 - h * 0.02).toFixed(1)} C ${(x0 + w * 0.94).toFixed(1)} ${(y0 + h * 0.1).toFixed(1)} ${(x0 + w * 0.86).toFixed(1)} ${(y0 + h * 0.2).toFixed(1)} ${(x0 + w * 0.78).toFixed(1)} ${(y0 + h * 0.14).toFixed(1)} Z`, class: cls });
-    add(parent, "path", { d: `M ${(x0 + w * 0.78).toFixed(1)} ${(y1 - h * 0.14).toFixed(1)} C ${(x0 + w * 0.9).toFixed(1)} ${(y1 + h * 0.3).toFixed(1)} ${(x0 + w * 0.99).toFixed(1)} ${(y1 + h * 0.34).toFixed(1)} ${(x1 + 2).toFixed(1)} ${(y1 + h * 0.02).toFixed(1)} C ${(x0 + w * 0.94).toFixed(1)} ${(y1 - h * 0.1).toFixed(1)} ${(x0 + w * 0.86).toFixed(1)} ${(y1 - h * 0.2).toFixed(1)} ${(x0 + w * 0.78).toFixed(1)} ${(y1 - h * 0.14).toFixed(1)} Z`, class: cls });
-    add(parent, "ellipse", { cx: (x0 + w * 0.93).toFixed(1), cy: cy.toFixed(1), rx: (w * 0.075).toFixed(1), ry: (h * 0.13).toFixed(1), class: cls });
+    add(parent, "path", { d: `M ${(x0 + w * 0.79).toFixed(1)} ${(y0 + h * 0.13).toFixed(1)} L ${(x0 + w * 0.9).toFixed(1)} ${(y0 - h * 0.31).toFixed(1)} L ${(x0 + w * 0.975).toFixed(1)} ${(y0 - h * 0.27).toFixed(1)} L ${(x1 - 4).toFixed(1)} ${(y0 + h * 0.05).toFixed(1)} L ${(x0 + w * 0.88).toFixed(1)} ${(y0 + h * 0.17).toFixed(1)} Z`, class: cls });
+    add(parent, "path", { d: `M ${(x0 + w * 0.79).toFixed(1)} ${(y1 - h * 0.13).toFixed(1)} L ${(x0 + w * 0.9).toFixed(1)} ${(y1 + h * 0.31).toFixed(1)} L ${(x0 + w * 0.975).toFixed(1)} ${(y1 + h * 0.27).toFixed(1)} L ${(x1 - 4).toFixed(1)} ${(y1 - h * 0.05).toFixed(1)} L ${(x0 + w * 0.88).toFixed(1)} ${(y1 - h * 0.17).toFixed(1)} Z`, class: cls });
+    add(parent, "path", { d: `M ${(x0 + w * 0.9).toFixed(1)} ${(cy - h * 0.1).toFixed(1)} L ${(x1 + w * 0.02).toFixed(1)} ${cy.toFixed(1)} L ${(x0 + w * 0.9).toFixed(1)} ${(cy + h * 0.1).toFixed(1)} Z`, class: cls });
+  }
+  /** Radiator wings: segmented panel arrays on trusses above and
+   *  below the hull amidships. Pure silhouette work, baked once;
+   *  they never move. The ventral wing rides shallower — the
+   *  exterior's stretch of void is deeper above her than below. */
+  function drawRadiators(parent, box) {
+    const { x0, x1, y0, y1 } = box;
+    const w = x1 - x0;
+    const h = y1 - y0;
+    const px0 = x0 + w * 0.45;
+    const px1 = x0 + w * 0.63;
+    const panelH = h * 0.14;
+    for (const dir of [-1, 1]) {
+      const rootY = dir < 0 ? y0 + h * 0.05 : y1 - h * 0.05;
+      const panelY = dir < 0 ? y0 - h * 0.3 : y1 + h * 0.17;
+      const nearEdge = dir < 0 ? panelY + panelH : panelY;
+      for (const frac of [0.18, 0.82]) {
+        const tx = px0 + (px1 - px0) * frac;
+        add(parent, "line", { x1: tx.toFixed(1), y1: rootY.toFixed(1), x2: tx.toFixed(1), y2: nearEdge.toFixed(1), class: "ext-truss" });
+      }
+      add(parent, "rect", { x: px0.toFixed(1), y: panelY.toFixed(1), width: (px1 - px0).toFixed(1), height: panelH.toFixed(1), class: "ext-radiator" });
+      for (let i = 1; i < 4; i++) {
+        const sx = px0 + (px1 - px0) * i / 4;
+        add(parent, "line", { x1: sx.toFixed(1), y1: panelY.toFixed(1), x2: sx.toFixed(1), y2: (panelY + panelH).toFixed(1), stroke: "rgba(0,0,0,0.35)", "stroke-width": 1 });
+      }
+    }
   }
   function navLight(parent, x, y, color, seed) {
     add(parent, "circle", { cx: x, cy: y, r: 6, fill: color, opacity: 0.25 });
@@ -7169,8 +7178,8 @@
    * Show the world the witness is in, and hide the others. Outside
    * hides the plans, the crew, the lift and the staged effects:
    * from outside she is a hull in the dark, with no little people
-   * on her. The cutaway keeps the plans and draws the airship
-   * shell around them, its near side ghosted to a wash behind the
+   * on her. The cutaway keeps the plans and draws the ship's
+   * hull around them, its near side ghosted to a wash behind the
    * rooms and its brass cut line riding on top; Inside is the same
    * plans with the shell gone and the camera in close. The chart
    * hides all of it and shows the reach instead. Coming back
@@ -7486,8 +7495,8 @@
       return { x: box.x0 + bw / 2 - iw / 2, y: box.y0 + bh / 2 - ih / 2, w: iw, h: ih };
     };
     insideRegions = { both: midRegion(shipBox), 0: midRegion(hulls[0]), 1: midRegion(hulls[1]) };
-    // The cutaway shell: one airship envelope drawn around both
-    // deck plans, fins at the stern, the gondola slung below.
+    // The cutaway shell: the ship's own silhouette drawn around
+    // both deck plans — nose cone, tail fins, engine bells.
     cutBox = { x0: shipBox.x0 - 26, x1: shipBox.x1 + 34, y0: shipBox.y0 - 16, y1: shipBox.y1 + 16 };
     camTarget = viewMode === "exterior" && extRegion !== null ? extRegion : viewMode === "chart" && chartRegion !== null ? chartRegion : viewMode === "inside" && insideRegions !== null ? (activeDeck === null ? insideRegions.both : insideRegions[activeDeck]) : activeDeck === null ? deckRegions.both : deckRegions[activeDeck];
     camCur = { ...camTarget };
@@ -7503,7 +7512,6 @@
     exteriorRefs = null;
     cutBackEl = null;
     cutEdgeEl = null;
-    extProps = [];
     chartGroup = null;
     chartRefs = null;
     lastChartKey = "";
@@ -7588,7 +7596,7 @@
     // from above — outside, she is a solid in space, not a plan.
     if (extBox !== null) {
       const extClip = svg("clipPath", { id: "hull-clip-ext" });
-      extClip.appendChild(svg("path", { d: airshipPathD(extBox) }));
+      extClip.appendChild(svg("path", { d: starshipPathD(extBox) }));
       defs.appendChild(extClip);
     }
     const plateGrad = svg("linearGradient", { id: "hull-plate", x1: "0%", y1: "0%", x2: "0%", y2: "100%" });
@@ -7596,13 +7604,13 @@
     plateGrad.appendChild(svg("stop", { offset: "45%", "stop-color": "#1a2740" }));
     plateGrad.appendChild(svg("stop", { offset: "100%", "stop-color": "#0a1120" }));
     defs.appendChild(plateGrad);
-    // Airship canvas: a lighter back, a heavier belly, warm from
-    // the lamp side, the way the trench sheets paint their skins.
-    const skinGrad = svg("linearGradient", { id: "airship-skin", x1: "0%", y1: "0%", x2: "0%", y2: "100%" });
-    skinGrad.appendChild(svg("stop", { offset: "0%", "stop-color": "#8a7550" }));
-    skinGrad.appendChild(svg("stop", { offset: "42%", "stop-color": "#6b573a" }));
-    skinGrad.appendChild(svg("stop", { offset: "78%", "stop-color": "#453723" }));
-    skinGrad.appendChild(svg("stop", { offset: "100%", "stop-color": "#2e2415" }));
+    // Hull plating: steel lit from above, the belly falling off
+    // into shadow — outside, she is a solid in space, not a plan.
+    const skinGrad = svg("linearGradient", { id: "ship-plate", x1: "0%", y1: "0%", x2: "0%", y2: "100%" });
+    skinGrad.appendChild(svg("stop", { offset: "0%", "stop-color": "#7d90ad" }));
+    skinGrad.appendChild(svg("stop", { offset: "42%", "stop-color": "#4d607f" }));
+    skinGrad.appendChild(svg("stop", { offset: "78%", "stop-color": "#2b3a55" }));
+    skinGrad.appendChild(svg("stop", { offset: "100%", "stop-color": "#182437" }));
     defs.appendChild(skinGrad);
     // Sector defs: deep-space wash, one radial gradient per nebula
     // colour, a soft blur for the clouds, and the engine-wash streak.
@@ -7730,8 +7738,9 @@
     const sectorSub = add(svgEl, "text", { x: view.x + 16, y: view.y + view.h - 12, class: "space-sub" });
     sectorSub.textContent = `SECTOR ${String(currentSeed).padStart(3, "0")} · UNDERWAY`;
     add(svgEl, "rect", { x: view.x, y: view.y, width: view.w, height: view.h, fill: "url(#space-vignette)", "pointer-events": "none" });
-    // The cutaway shell's back layer: the airship envelope ghosted
-    // around both deck plans, fins at the stern, seams on the skin.
+    // The cutaway shell's back layer: the ship's hull ghosted
+    // around both deck plans — nose cone at the bow, fins at the
+    // stern, seams on the plating.
     // The decks paint over it; the brass cut edge paints last, in
     // the edge layer near the end of this build. Shown only in the
     // cutaway view (applyViewVisibility owns that).
@@ -7741,8 +7750,8 @@
       // a fin box centred on the shell's midline keeps the lobes
       // in proportion.
       const shellCy = (cutBox.y0 + cutBox.y1) / 2;
-      drawAirshipFins(cutBackEl, { x0: cutBox.x0, x1: cutBox.x1, y0: shellCy - 78, y1: shellCy + 78 }, "cut-fin");
-      add(cutBackEl, "path", { d: airshipPathD(cutBox), class: "cut-shell" });
+      drawShipFins(cutBackEl, { x0: cutBox.x0, x1: cutBox.x1, y0: shellCy - 78, y1: shellCy + 78 }, "cut-fin");
+      add(cutBackEl, "path", { d: starshipPathD(cutBox), class: "cut-shell" });
       const cutSeams = add(cutBackEl, "g", {});
       for (let i = 1; i < 7; i++) {
         const fx = cutBox.x0 + (cutBox.x1 - cutBox.x0) * i / 7;
@@ -7943,17 +7952,15 @@
       deckGhostEls[d].push(labelsLayer);
     }
     // The cut edge itself, over everything the shell wraps: the
-    // brass line where the near hull was cut away, and the gondola
-    // still slung under the belly, windows lit.
+    // brass line where the near hull was cut away, and the engine
+    // bells standing proud of the stern bulkhead.
     if (cutBox !== null) {
       cutEdgeEl = add(svgEl, "g", { class: "cut-edge", "pointer-events": "none" });
-      add(cutEdgeEl, "path", { d: airshipPathD(cutBox), class: "cut-line-shadow" });
-      add(cutEdgeEl, "path", { d: airshipPathD(cutBox), class: "cut-line" });
-      const gondCx = cutBox.x0 + (cutBox.x1 - cutBox.x0) * 0.44;
-      const gondY = cutBox.y1 - 4;
-      add(cutEdgeEl, "path", { d: `M ${(gondCx - 52).toFixed(1)} ${gondY.toFixed(1)} L ${(gondCx + 52).toFixed(1)} ${gondY.toFixed(1)} L ${(gondCx + 38).toFixed(1)} ${(gondY + 17).toFixed(1)} Q ${gondCx.toFixed(1)} ${(gondY + 23).toFixed(1)} ${(gondCx - 38).toFixed(1)} ${(gondY + 17).toFixed(1)} Z`, class: "cut-gondola" });
-      for (let i = 0; i < 5; i++) {
-        add(cutEdgeEl, "rect", { x: (gondCx - 34 + i * 15).toFixed(1), y: (gondY + 5).toFixed(1), width: 8, height: 4.6, rx: 2, class: "cut-gondola-win" });
+      add(cutEdgeEl, "path", { d: starshipPathD(cutBox), class: "cut-line-shadow" });
+      add(cutEdgeEl, "path", { d: starshipPathD(cutBox), class: "cut-line" });
+      const shellCy = (cutBox.y0 + cutBox.y1) / 2;
+      for (const off of [-36, 0, 36]) {
+        add(cutEdgeEl, "path", { d: `M ${(cutBox.x1 - 14).toFixed(1)} ${(shellCy + off - 8).toFixed(1)} L ${(cutBox.x1 + 13).toFixed(1)} ${(shellCy + off - 12).toFixed(1)} L ${(cutBox.x1 + 13).toFixed(1)} ${(shellCy + off + 12).toFixed(1)} L ${(cutBox.x1 - 14).toFixed(1)} ${(shellCy + off + 8).toFixed(1)} Z`, class: "cut-bell" });
       }
     }
     applyGhost();
@@ -9371,15 +9378,6 @@
         `translate(${nebOff.toFixed(1)} ${sway.toFixed(1)}) translate(${ncx} ${ncy}) scale(${breathe.toFixed(3)}) translate(${-spaceNebula.cx} ${-spaceNebula.cy})`
       );
       spaceNebula.group.setAttribute("opacity", (0.88 + Math.sin(spaceTime * 0.09) * 0.08).toFixed(2));
-    }
-    // The prop cars turn: pre-baked blades, one transform write
-    // each, and only while the outside is actually on show.
-    if (viewMode === "exterior" && extProps.length > 0) {
-      const propRate = playing ? 660 : 130;
-      for (const prop of extProps) {
-        const ang = (spaceTime * propRate + prop.phase) % 360;
-        prop.el.setAttribute("transform", `rotate(${ang.toFixed(1)} ${prop.cx.toFixed(1)} ${prop.cy.toFixed(1)})`);
-      }
     }
     // Engine wash answers the throttle: longer and brighter the
     // faster she cruises, a faint idle shimmer when paused.

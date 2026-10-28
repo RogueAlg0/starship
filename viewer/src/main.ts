@@ -23,6 +23,7 @@ import type { SimEvent } from "../../src/log/events.ts";
 import { chatterText } from "../../src/perception/speech.ts";
 import { CONFIG } from "../../src/scenario/config.ts";
 import { DUTY_DEFS } from "../../src/world/duties.ts";
+import { bandOf } from "../../src/world/factions.ts";
 import { createRun, type RunContext } from "../../src/sim.ts";
 import { canRepair, type CrewMember } from "../../src/entities/crew.ts";
 import {
@@ -1682,9 +1683,19 @@ function renderPortCard(): void {
   const faction = sector.factionOf(port);
   portNameEl.textContent = port.name;
   const isHome = faction !== null && faction.homePort === port.index;
-  portFactionEl.textContent =
-    (faction === null ? "Independent" : faction.name) +
-    (isHome ? " · faction home port" : "");
+  if (faction === null) {
+    portFactionEl.textContent = "Independent";
+  } else {
+    const band = bandOf(run.standing.byId[faction.id] ?? 0);
+    const bandLabel =
+      band === "unregarded"
+        ? "Unregarded"
+        : band.charAt(0).toUpperCase() + band.slice(1);
+    portFactionEl.textContent =
+      `${faction.name} · a ${faction.kind}, ${faction.temperament}` +
+      (isHome ? " · home port" : "") +
+      ` · they hold us: ${bandLabel}`;
+  }
   const lightDays = starMap.distanceFromShip(port, run.tick);
   const days = starMap.distanceDaysFromShip(port, run.tick);
   portWhereEl.textContent =
@@ -2754,6 +2765,45 @@ function updateDutiesList(): void {
   }
 }
 
+let factionsSig = "";
+const factionsEl = must<HTMLElement>("factions-list");
+/** The sector's powers on the Ship tab: each faction's form,
+ *  temperament, and the band it currently holds the ship in. */
+function updateFactionsList(): void {
+  const sector = run.galaxy.sector;
+  const rows = sector.factions.map((f) => {
+    const v = run.standing.byId[f.id] ?? 0;
+    return `${f.id}:${Math.round(v * 1000)}`;
+  });
+  const sig = rows.join("|");
+  if (sig === factionsSig) return;
+  factionsSig = sig;
+  factionsEl.replaceChildren();
+  for (const f of sector.factions) {
+    const v = run.standing.byId[f.id] ?? 0;
+    const band = bandOf(v);
+    const row = document.createElement("div");
+    row.className = "seat-row";
+    const name = document.createElement("span");
+    name.className = "seat-name";
+    name.textContent = `${f.name} · ${f.kind}, ${f.temperament}`;
+    const bar = document.createElement("div");
+    bar.className = "sbar";
+    const fill = document.createElement("div");
+    fill.style.width = `${Math.round(((v + 1) / 2) * 100)}%`;
+    fill.className = band === "cold" ? "crit" : band === "warm" || band === "honoured" ? "" : "warn";
+    bar.appendChild(fill);
+    const value = document.createElement("span");
+    value.className = "sval";
+    value.textContent =
+      band === "unregarded"
+        ? "Unregarded"
+        : band.charAt(0).toUpperCase() + band.slice(1);
+    row.append(name, bar, value);
+    factionsEl.appendChild(row);
+  }
+}
+
 /** The sixth, unnumbered store: the council's legitimacy. */
 const legitimacyCell: {
   fill: HTMLDivElement | null;
@@ -2849,6 +2899,7 @@ function updateSlowUi(): void {
   updateSceneChip();
   updateStoresStrip();
   updateDutiesList();
+  updateFactionsList();
   syncAlerts();
   if (sheetTab === "council") {
     renderCouncilSeats();

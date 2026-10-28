@@ -202,6 +202,21 @@ class Renderer implements ChronicleRenderer {
         );
         break;
       }
+      case "faction_standing": {
+        const phrases: Record<string, string> = {
+          cold: "open coldness",
+          unregarded: "no regard worth the name",
+          warm: "warm regard",
+          honoured: "high honour",
+        };
+        const band = str(data, "band");
+        line(
+          `${ts} — Word from the wider world: the ${str(data, "name")} ` +
+            `now hold the ${this.shipName} in ${phrases[band] ?? band}.`,
+          true,
+        );
+        break;
+      }
       case "resupply": {
         const words: Record<string, string> = {
           food: "food",

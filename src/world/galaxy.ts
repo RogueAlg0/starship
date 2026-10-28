@@ -41,6 +41,10 @@ export interface Faction {
   name: string;
   /** Index into Sector.ports: where this faction's flag flies. */
   homePort: number;
+  /** The faction's organisational form (a combine, a church...). */
+  kind: string;
+  /** How the faction holds itself toward the world. */
+  temperament: string;
 }
 
 export class Sector {
@@ -89,6 +93,8 @@ export class Sector {
       factions: this.factions.map((f) => ({
         name: f.name,
         homePort: f.homePort,
+        kind: f.kind,
+        temperament: f.temperament,
       })),
     });
   }
@@ -106,6 +112,18 @@ function shuffled<T>(rng: Rng, items: readonly T[]): T[] {
 }
 
 /** A name from the tables that this sector has not spent yet. */
+/** A small stable string hash (FNV-1a) for deriving a faction's
+ *  kind and temperament from its name without drawing on any
+ *  stream: derivation must never shift a seed's generated world. */
+export function nameHash(text: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
 export function drawName(
   rng: Rng,
   first: readonly string[],
@@ -171,16 +189,27 @@ export function generateSector(rng: Rng): Sector {
   const factions: Faction[] = [];
   const usedFactionNames = new Set<string>();
   for (let i = 0; i < factionCount; i++) {
+    const name = drawName(
+      rng,
+      g.factionNameFirst,
+      g.factionNameSecond,
+      usedFactionNames,
+    );
     factions.push({
       index: i,
       id: `faction-${i}`,
-      name: drawName(
-        rng,
-        g.factionNameFirst,
-        g.factionNameSecond,
-        usedFactionNames,
-      ),
+      name,
       homePort: -1,
+      // Kind and temperament are DERIVED from the name by hash,
+      // never drawn: the galaxy stream's draw order is load-
+      // bearing for every seed's ports, homes, and voyage, and
+      // two extra draws per faction reshuffled all of it. A
+      // faction's form follows its name the way a house's style
+      // follows its founder.
+      kind: g.factionKinds[nameHash(name) % g.factionKinds.length] as string,
+      temperament: g.factionTemperaments[
+        nameHash(`${name}|temperament`) % g.factionTemperaments.length
+      ] as string,
     });
   }
 

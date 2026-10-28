@@ -811,6 +811,46 @@ export const CONFIG = {
       "Concord",
       "Cartel",
     ],
+    /** What a faction IS, organisationally. The name's tail word
+     *  is part of its name; the kind is its form, and the two may
+     *  differ the way a named Trust can be a church. */
+    factionKinds: [
+      "combine",
+      "syndicate",
+      "order",
+      "church",
+      "cartel",
+      "league",
+      "company",
+      "communion",
+    ],
+    /** How a faction holds itself toward the world. */
+    factionTemperaments: [
+      "greedy",
+      "pious",
+      "martial",
+      "curious",
+      "insular",
+      "generous",
+      "jealous",
+      "patient",
+      "proud",
+      "weary",
+    ],
+  },
+
+  /**
+   * Standing: the ship's reputation with each galactic faction,
+   * a ledger in [-1, 1] moved by the voyage itself. Bands are
+   * the names the wider world uses; crossing one is news.
+   */
+  factions: {
+    arrivalGain: 0.03,
+    stayBonus: 0.02,
+    stayBonusDays: 2,
+    coldLine: -0.3,
+    warmLine: 0.15,
+    honouredLine: 0.5,
   },
 
   /**

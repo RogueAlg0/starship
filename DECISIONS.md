@@ -1924,3 +1924,44 @@ factions made visible: a department's shame and pride are on
 the board. Measured: a kept-up ship holds its duties near
 0.5-0.7 indefinitely; strained ships lapse and recover, a
 few times a voyage.
+
+## 2026-10-28 (later): vocabulary corrected, and galactic factions made real, slice 1
+
+The maintainer corrected the vocabulary, and the record follows
+him: DEPARTMENTS are the ship's internal blocs (what the council
+pass bends votes by); FACTIONS are the external, procedural
+galactic powers. Nothing internal is called a faction again.
+
+Factions were cardboard: a name and a home port. Slice 1 gives
+each a kind (combine, syndicate, order, church, cartel, league,
+company, communion) and a temperament (greedy, pious, martial,
+curious, insular, generous, jealous, patient, proud, weary).
+Kind and temperament are DERIVED from the faction's name by a
+stable hash, never drawn: the first cut drew them and the two
+extra draws per faction reshuffled every seed's home ports and
+course outcomes (two course-sitting tests caught it), so the
+ledger's rule is that derivation must never shift a generated
+world. Slice 1 also adds the
+standing ledger (src/world/factions.ts): the ship's reputation
+per faction in [-1, 1], moved by the voyage itself. A port call
+at a faction's harbour adds arrivalGain; a stay of two days or
+more adds stayBonus (half again for a greedy faction, which
+loves the business); an insular faction warms at 0.6 rate
+whatever happens. Bands (cold under -0.3, warm at 0.15,
+honoured at 0.5) name the regard; crossing one emits
+faction_standing once. No new RNG streams: the ledger draws
+nothing, and generation draws stay inside the galaxy stream.
+
+Surfacing, per the standing law that every system ships with
+its feed voice: the chronicle records crossings as word from
+the wider world; Scuttlebutt posts them in the crew's register;
+port cards now read name, kind, temperament, and the band the
+faction holds the ship in; the Ship tab gains a Powers of the
+sector section with a standing bar per faction.
+
+Not yet (named, not forgotten): the cold movers (theft in a
+faction's ports, course votes that snub a faction), standing
+spending its weight (prices, welcomes, bounties), and the
+liaison/imposed-officer arrivals, which belong to the crew
+arrivals build. Council elections and campaigning follow as
+their own build on the council machinery.

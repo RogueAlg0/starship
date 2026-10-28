@@ -51,6 +51,12 @@ import {
   type CouncilState,
 } from "./world/council.ts";
 import {
+  checkFactionState,
+  createFactionStanding,
+  stepFactionStanding,
+  type FactionStanding,
+} from "./world/factions.ts";
+import {
   checkHealthState,
   createHealthState,
   stepHealth,
@@ -74,6 +80,8 @@ export interface BuiltWorld {
   health: HealthState;
   /** The Ship's Council: seats, sittings, legitimacy. */
   council: CouncilState;
+  /** The ship's reputation with each galactic faction. */
+  standing: FactionStanding;
   /** Records of the live source; empty when a replay source was supplied. */
   readonly decisions: DecisionRecord[];
   /**
@@ -130,6 +138,7 @@ export function buildWorld(
   // the roster's roles. Neither can shift another stream.
   const health = createHealthState();
   const council = createCouncil(crew);
+  const standing = createFactionStanding(sector);
   ship.councilPublic = { cmoFilled: true, emergencyUntil: -1, acting: {} };
   const weather = new Weather();
   const ctx: CrewContext = {
@@ -193,6 +202,10 @@ export function buildWorld(
     step: (w) =>
       stepCouncil(w, council, ship, crew, health, stores, { sector, voyage }),
   });
+  engine.addSystem({
+    name: "factions",
+    step: (w) => stepFactionStanding(w, standing, sector),
+  });
   engine.addInvariant("crew state in range", () => checkCrewState(crew, ship));
   engine.addInvariant("ship state in range", () => checkShipState(ship));
   engine.addInvariant("duty levels in range", () => checkDutiesState(ship));
@@ -210,6 +223,9 @@ export function buildWorld(
   );
   engine.addInvariant("council state in range", () =>
     checkCouncilState(council, crew),
+  );
+  engine.addInvariant("faction standing in range", () =>
+    checkFactionState(sector, standing),
   );
 
   let started = false;
@@ -235,6 +251,7 @@ export function buildWorld(
     stores,
     health,
     council,
+    standing,
     get decisions() {
       return decisions instanceof UtilitySource ? decisions.records : [];
     },
@@ -268,6 +285,8 @@ export interface RunContext {
   readonly health: HealthState;
   /** The Ship's Council: seats, sittings, legitimacy. */
   readonly council: CouncilState;
+  /** The ship's reputation with each galactic faction. */
+  readonly standing: FactionStanding;
   /** Records of the live source; empty when a replay source was supplied. */
   readonly decisions: DecisionRecord[];
   /** The current tick (ticks completed so far). */
@@ -293,6 +312,7 @@ export function createRun(
     stores: built.stores,
     health: built.health,
     council: built.council,
+    standing: built.standing,
     get decisions() {
       return built.decisions;
     },

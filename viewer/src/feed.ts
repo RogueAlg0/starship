@@ -314,6 +314,20 @@ export function feedItemFor(event: SimEvent, names: FeedNames): FeedItem | null 
         text: `Made port at ${port}. Shore leave rosters are with the quartermaster. Behave like the posters are watching.`,
       };
     }
+    case "faction_standing": {
+      const name = str(event, "name");
+      if (name === "") return null;
+      const band = str(event, "band");
+      const texts: Record<string, string> = {
+        warm: `Word travels faster than we do: the ${name} now speak well of this ship in their harbours.`,
+        honoured: `The ${name} have raised this ship's name in their hall, and word travels. We are somebody out here now.`,
+        cold: `Word travels: the ${name} have cooled on this ship. Mind your manners in their harbours.`,
+        unregarded: `The ${name} no longer speak of this ship one way or the other. Ports forget fast.`,
+      };
+      const text = texts[band];
+      if (text === undefined) return null;
+      return { kind: "post", seq, tick, author: null, text };
+    }
     case "resupply": {
       const port = str(event, "port");
       const manifest = Array.isArray(event.data.manifest)

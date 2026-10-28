@@ -792,6 +792,8 @@
       <div id="stores-strip"></div>
       <h3>Duties</h3>
       <div id="duties-list"></div>
+      <h3>Powers of the sector</h3>
+      <div id="factions-list"></div>
       <h3>Voyage</h3>
       <div id="route-readout"></div>
       <div class="seed-group">
@@ -1716,7 +1718,46 @@
         "Trust",
         "Concord",
         "Cartel"
+      ],
+      /** What a faction IS, organisationally. The name's tail word
+       *  is part of its name; the kind is its form, and the two may
+       *  differ the way a named Trust can be a church. */
+      factionKinds: [
+        "combine",
+        "syndicate",
+        "order",
+        "church",
+        "cartel",
+        "league",
+        "company",
+        "communion"
+      ],
+      /** How a faction holds itself toward the world. */
+      factionTemperaments: [
+        "greedy",
+        "pious",
+        "martial",
+        "curious",
+        "insular",
+        "generous",
+        "jealous",
+        "patient",
+        "proud",
+        "weary"
       ]
+    },
+    /**
+     * Standing: the ship's reputation with each galactic faction,
+     * a ledger in [-1, 1] moved by the voyage itself. Bands are
+     * the names the wider world uses; crossing one is news.
+     */
+    factions: {
+      arrivalGain: 0.03,
+      stayBonus: 0.02,
+      stayBonusDays: 2,
+      coldLine: -0.3,
+      warmLine: 0.15,
+      honouredLine: 0.5
     },
     /**
      * The galaxy, step 2: traffic. Other ships cross the sector on
@@ -3338,6 +3379,20 @@
           );
           break;
         }
+        case "faction_standing": {
+          const phrases = {
+            cold: "open coldness",
+            unregarded: "no regard worth the name",
+            warm: "warm regard",
+            honoured: "high honour"
+          };
+          const band = str2(data, "band");
+          line(
+            `${ts} \u2014 Word from the wider world: the ${str2(data, "name")} now hold the ${this.shipName} in ${phrases[band] ?? band}.`,
+            true
+          );
+          break;
+        }
         case "resupply": {
           const words = {
             food: "food",
@@ -4159,37 +4214,6 @@
     return new Renderer(options);
   }
 
-  // src/decision/decisions.ts
-  var UtilitySource = class {
-    records = [];
-    noise;
-    constructor(noise) {
-      this.noise = noise;
-    }
-    choose(agentId, candidates, context) {
-      if (candidates.length === 0) {
-        throw new Error(`UtilitySource: no candidates for agent ${agentId}`);
-      }
-      const scores = candidates.map(
-        (c) => c.base * (c.urgency ?? 1) + (this.noise !== void 0 ? this.noise() * 0.01 : 0)
-      );
-      let best = 0;
-      for (let i = 1; i < scores.length; i++) {
-        if (scores[i] > scores[best]) best = i;
-      }
-      this.records.push({
-        tick: context.tick,
-        agentId,
-        candidateCount: candidates.length,
-        chosen: best,
-        chosenKey: candidates[best].key,
-        keys: candidates.map((c) => c.key),
-        scores
-      });
-      return best;
-    }
-  };
-
   // src/log/events.ts
   var EventLog = class {
     events = [];
@@ -4242,6 +4266,109 @@
   function r3(value) {
     return Math.round(value * 1e3) / 1e3;
   }
+
+  // src/world/factions.ts
+  function bandOf(standing) {
+    const f = CONFIG.factions;
+    if (standing < f.coldLine) return "cold";
+    if (standing >= f.honouredLine) return "honoured";
+    if (standing >= f.warmLine) return "warm";
+    return "unregarded";
+  }
+  function createFactionStanding(sector) {
+    const byId2 = {};
+    const band = {};
+    for (const f of sector.factions) {
+      byId2[f.id] = 0;
+      band[f.id] = bandOf(0);
+    }
+    return { byId: byId2, band, eventCursor: 0 };
+  }
+  function stepFactionStanding(w, standing, sector) {
+    const f = CONFIG.factions;
+    const events = w.events.events;
+    while (standing.eventCursor < events.length) {
+      const ev = events[standing.eventCursor];
+      standing.eventCursor++;
+      if (ev.type !== "port_call" && ev.type !== "arrival") continue;
+      const portIndex = ev.data["portIndex"];
+      if (typeof portIndex !== "number") continue;
+      const port = sector.portAt(portIndex);
+      if (port.faction === null) continue;
+      const faction = sector.factionAt(port.faction);
+      let gain = f.arrivalGain;
+      const stayDays = ev.data["stayDays"];
+      if (ev.type === "port_call" && typeof stayDays === "number" && stayDays >= f.stayBonusDays) {
+        gain += faction.temperament === "greedy" ? f.stayBonus * 1.5 : f.stayBonus;
+      }
+      if (faction.temperament === "insular") gain *= 0.6;
+      const next = Math.max(
+        -1,
+        Math.min(1, (standing.byId[faction.id] ?? 0) + gain)
+      );
+      standing.byId[faction.id] = next;
+      const band = bandOf(next);
+      if (band !== standing.band[faction.id]) {
+        standing.band[faction.id] = band;
+        w.emit("faction_standing", [], {
+          faction: faction.id,
+          name: faction.name,
+          kind: faction.kind,
+          temperament: faction.temperament,
+          band,
+          standing: r3(next)
+        });
+      }
+    }
+  }
+  function checkFactionState(sector, standing) {
+    const problems = [];
+    for (const f of sector.factions) {
+      const v = standing.byId[f.id];
+      if (v === void 0) {
+        problems.push(`faction ${f.id} has no standing entry`);
+      } else if (v < -1 || v > 1) {
+        problems.push(`faction ${f.id} standing ${v} outside [-1, 1]`);
+      }
+      if (standing.band[f.id] !== bandOf(v ?? 0)) {
+        problems.push(
+          `faction ${f.id} band ${standing.band[f.id]} disagrees with its standing`
+        );
+      }
+    }
+    return problems;
+  }
+
+  // src/decision/decisions.ts
+  var UtilitySource = class {
+    records = [];
+    noise;
+    constructor(noise) {
+      this.noise = noise;
+    }
+    choose(agentId, candidates, context) {
+      if (candidates.length === 0) {
+        throw new Error(`UtilitySource: no candidates for agent ${agentId}`);
+      }
+      const scores = candidates.map(
+        (c) => c.base * (c.urgency ?? 1) + (this.noise !== void 0 ? this.noise() * 0.01 : 0)
+      );
+      let best = 0;
+      for (let i = 1; i < scores.length; i++) {
+        if (scores[i] > scores[best]) best = i;
+      }
+      this.records.push({
+        tick: context.tick,
+        agentId,
+        candidateCount: candidates.length,
+        chosen: best,
+        chosenKey: candidates[best].key,
+        keys: candidates.map((c) => c.key),
+        scores
+      });
+      return best;
+    }
+  };
 
   // src/engine/engine.ts
   var World = class {
@@ -6841,7 +6968,9 @@
         })),
         factions: this.factions.map((f) => ({
           name: f.name,
-          homePort: f.homePort
+          homePort: f.homePort,
+          kind: f.kind,
+          temperament: f.temperament
         }))
       });
     }
@@ -6855,6 +6984,14 @@
       out[j] = tmp;
     }
     return out;
+  }
+  function nameHash(text) {
+    let h = 2166136261;
+    for (let i = 0; i < text.length; i++) {
+      h ^= text.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
   }
   function drawName(rng, first, second, used) {
     for (let attempt = 0; attempt < 200; attempt++) {
@@ -6904,16 +7041,25 @@
     const factions = [];
     const usedFactionNames = /* @__PURE__ */ new Set();
     for (let i = 0; i < factionCount; i++) {
+      const name = drawName(
+        rng,
+        g.factionNameFirst,
+        g.factionNameSecond,
+        usedFactionNames
+      );
       factions.push({
         index: i,
         id: `faction-${i}`,
-        name: drawName(
-          rng,
-          g.factionNameFirst,
-          g.factionNameSecond,
-          usedFactionNames
-        ),
-        homePort: -1
+        name,
+        homePort: -1,
+        // Kind and temperament are DERIVED from the name by hash,
+        // never drawn: the galaxy stream's draw order is load-
+        // bearing for every seed's ports, homes, and voyage, and
+        // two extra draws per faction reshuffled all of it. A
+        // faction's form follows its name the way a house's style
+        // follows its founder.
+        kind: g.factionKinds[nameHash(name) % g.factionKinds.length],
+        temperament: g.factionTemperaments[nameHash(`${name}|temperament`) % g.factionTemperaments.length]
       });
     }
     const homeDeck = shuffled2(
@@ -9745,6 +9891,7 @@
     ship.duties = createDuties();
     const health = createHealthState();
     const council = createCouncil(crew);
+    const standing = createFactionStanding(sector);
     ship.councilPublic = { cmoFilled: true, emergencyUntil: -1, acting: {} };
     const weather = new Weather();
     const ctx = {
@@ -9805,6 +9952,10 @@
       name: "council",
       step: (w) => stepCouncil(w, council, ship, crew, health, stores, { sector, voyage })
     });
+    engine.addSystem({
+      name: "factions",
+      step: (w) => stepFactionStanding(w, standing, sector)
+    });
     engine.addInvariant("crew state in range", () => checkCrewState(crew, ship));
     engine.addInvariant("ship state in range", () => checkShipState(ship));
     engine.addInvariant("duty levels in range", () => checkDutiesState(ship));
@@ -9828,6 +9979,10 @@
       "council state in range",
       () => checkCouncilState(council, crew)
     );
+    engine.addInvariant(
+      "faction standing in range",
+      () => checkFactionState(sector, standing)
+    );
     let started = false;
     const start = () => {
       if (started) return;
@@ -9850,6 +10005,7 @@
       stores,
       health,
       council,
+      standing,
       get decisions() {
         return decisions instanceof UtilitySource ? decisions.records : [];
       },
@@ -9874,6 +10030,7 @@
       stores: built.stores,
       health: built.health,
       council: built.council,
+      standing: built.standing,
       get decisions() {
         return built.decisions;
       },
@@ -10519,6 +10676,20 @@
           author: null,
           text: `Made port at ${port}. Shore leave rosters are with the quartermaster. Behave like the posters are watching.`
         };
+      }
+      case "faction_standing": {
+        const name = str3(event, "name");
+        if (name === "") return null;
+        const band = str3(event, "band");
+        const texts = {
+          warm: `Word travels faster than we do: the ${name} now speak well of this ship in their harbours.`,
+          honoured: `The ${name} have raised this ship's name in their hall, and word travels. We are somebody out here now.`,
+          cold: `Word travels: the ${name} have cooled on this ship. Mind your manners in their harbours.`,
+          unregarded: `The ${name} no longer speak of this ship one way or the other. Ports forget fast.`
+        };
+        const text = texts[band];
+        if (text === void 0) return null;
+        return { kind: "post", seq, tick, author: null, text };
       }
       case "resupply": {
         const port = str3(event, "port");
@@ -12382,7 +12553,7 @@
   var AGE_STEP_TICKS = 720;
   var AGE_FULL_TICKS = 12960;
   var AGE_MAX_ALPHA = 0.15;
-  function bandOf(condition) {
+  function bandOf2(condition) {
     return Math.max(0, Math.min(20, Math.floor(condition / BAND)));
   }
   function strHash(text) {
@@ -12462,7 +12633,7 @@
           track.hurt = false;
         }
         parts.push(
-          `${system.id}:${bandOf(track.current)}:${bandOf(track.worst)}:${track.patches}`
+          `${system.id}:${bandOf2(track.current)}:${bandOf2(track.worst)}:${track.patches}`
         );
       }
       this.ageAlpha = Math.min(
@@ -12715,7 +12886,7 @@
     }
     return Math.abs(h % 1e5);
   }
-  function bandOf2(condition, failed) {
+  function bandOf3(condition, failed) {
     if (failed || condition < CRITICAL_BELOW2) return "critical";
     if (condition < MAJOR_BELOW) return "major";
     return "ok";
@@ -12800,7 +12971,7 @@
     syncSystems(states, nowMs, anchorFor) {
       const crossed = [];
       for (const state of states) {
-        const band = bandOf2(state.condition, state.failed);
+        const band = bandOf3(state.condition, state.failed);
         const prev = this.systems.get(state.id);
         const prevBand = prev?.band;
         if (prev === void 0) {
@@ -17910,7 +18081,13 @@
     const faction = sector.factionOf(port);
     portNameEl.textContent = port.name;
     const isHome = faction !== null && faction.homePort === port.index;
-    portFactionEl.textContent = (faction === null ? "Independent" : faction.name) + (isHome ? " \xB7 faction home port" : "");
+    if (faction === null) {
+      portFactionEl.textContent = "Independent";
+    } else {
+      const band = bandOf(run.standing.byId[faction.id] ?? 0);
+      const bandLabel = band === "unregarded" ? "Unregarded" : band.charAt(0).toUpperCase() + band.slice(1);
+      portFactionEl.textContent = `${faction.name} \xB7 a ${faction.kind}, ${faction.temperament}` + (isHome ? " \xB7 home port" : "") + ` \xB7 they hold us: ${bandLabel}`;
+    }
     const lightDays = starMap.distanceFromShip(port, run.tick);
     const days = starMap.distanceDaysFromShip(port, run.tick);
     portWhereEl.textContent = `${oneDecimal2(lightDays)} light-days from the ${run.ship.name} \xB7 ${oneDecimal2(days)} days at cruise`;
@@ -18774,6 +18951,39 @@
       dutiesEl.appendChild(row);
     }
   }
+  var factionsSig = "";
+  var factionsEl = must("factions-list");
+  function updateFactionsList() {
+    const sector = run.galaxy.sector;
+    const rows = sector.factions.map((f) => {
+      const v = run.standing.byId[f.id] ?? 0;
+      return `${f.id}:${Math.round(v * 1e3)}`;
+    });
+    const sig = rows.join("|");
+    if (sig === factionsSig) return;
+    factionsSig = sig;
+    factionsEl.replaceChildren();
+    for (const f of sector.factions) {
+      const v = run.standing.byId[f.id] ?? 0;
+      const band = bandOf(v);
+      const row = document.createElement("div");
+      row.className = "seat-row";
+      const name = document.createElement("span");
+      name.className = "seat-name";
+      name.textContent = `${f.name} \xB7 ${f.kind}, ${f.temperament}`;
+      const bar = document.createElement("div");
+      bar.className = "sbar";
+      const fill2 = document.createElement("div");
+      fill2.style.width = `${Math.round((v + 1) / 2 * 100)}%`;
+      fill2.className = band === "cold" ? "crit" : band === "warm" || band === "honoured" ? "" : "warn";
+      bar.appendChild(fill2);
+      const value = document.createElement("span");
+      value.className = "sval";
+      value.textContent = band === "unregarded" ? "Unregarded" : band.charAt(0).toUpperCase() + band.slice(1);
+      row.append(name, bar, value);
+      factionsEl.appendChild(row);
+    }
+  }
   var legitimacyCell = { fill: null, value: null, sig: "" };
   {
     const strip = must("stores-strip");
@@ -18842,6 +19052,7 @@
     updateSceneChip();
     updateStoresStrip();
     updateDutiesList();
+    updateFactionsList();
     syncAlerts();
     if (sheetTab === "council") {
       renderCouncilSeats();

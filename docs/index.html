@@ -10848,6 +10848,46 @@
     "The log will sort this out.",
     "Bold words from someone who eats my cooking."
   ];
+  var REPLIES_DRY = [
+    "Some of us remember the whole story.",
+    "Posted with great confidence, as always.",
+    "The rest of the ship was there too, you know.",
+    "Keeping this one for the memoirs."
+  ];
+  var REPLIES_EXCUSE = [
+    "I was mid-repair. The ship comes first, apparently.",
+    "Rest is a duty too. Ask the roster.",
+    "Rain check. A real one, not a corridor one.",
+    "My hands were full. My conscience is clear."
+  ];
+  var SNUBBED = [
+    "Walked up, said hello, got the back of a schedule. Noted, with love.",
+    "Some conversations need an appointment now. Fine. Booking never.",
+    "A nod would have cost nothing. Just putting that in the minutes."
+  ];
+  var CALLBACK_REPAIRED = [
+    "After everything, this.",
+    "Took the long way round, this one.",
+    "Water under the hull, then.",
+    "Nobody frame this. It will not last a week. (It might.)"
+  ];
+  var CALLBACK_FALLEN = [
+    "We used to eat together. Used to.",
+    "There was a time this post would have read the other way.",
+    "The mess seating chart feels this, even if nobody says it."
+  ];
+  var REPAIR_AGAIN = [
+    "Fixed. Again. The {system} and I are on familiar terms now.",
+    "The {system} hums again. It knows the way to my toolbox by heart.",
+    "{system}: restored, encore performance. I am taking a bow nobody asked for."
+  ];
+  var STORE_LABELS = {
+    food: "food",
+    water: "water",
+    parts: "spare parts",
+    medicine: "medicine",
+    fuel: "fuel"
+  };
   function maybeReply(event, author, bank) {
     if (hash01(event.seq, 91) >= 0.45) return void 0;
     return { author, text: pick2(event.seq, 97, bank) };
@@ -11149,12 +11189,257 @@
       case "duty_restored": {
         const by = str3(event, "by");
         const def = dutyDef(str3(event, "duty"));
+        const dutyName = (def?.name ?? "duty").toLowerCase();
+        if (by === "") {
+          return {
+            kind: "post",
+            seq,
+            tick,
+            author: null,
+            text: `The crew brings the ${dutyName} back up to standard.`
+          };
+        }
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: by,
+          text: pick2(seq, 31, [
+            `${def?.name ?? "The duty"}: back up to standard. It was not the standard fairy.`,
+            `${dutyName}, handled. You may all breathe the good air again.`,
+            `For the record: the ${dutyName} did not restore itself either.`
+          ])
+        };
+      }
+      case "socialize_refused": {
+        const withId = str3(event, "with");
+        if (actor === void 0) return null;
+        if (hash01(seq, 83) >= 0.06) return null;
+        const post = {
+          kind: "post",
+          seq,
+          tick,
+          author: actor,
+          text: pick2(seq, 37, SNUBBED)
+        };
+        if (withId !== "") {
+          const reply = maybeReply(event, withId, REPLIES_EXCUSE);
+          if (reply !== void 0) post.replies = [reply];
+        }
+        return post;
+      }
+      case "level_up": {
+        const person = str3(event, "person");
+        if (person === "") return null;
+        const task = str3(event, "task");
+        const level = num3(event, "level");
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: person,
+          text: pick2(seq, 41, [
+            `${task === "" ? "The work" : task[0]?.toUpperCase() + task.slice(1)}: level ${level}. The work teaches, if you let it.`,
+            `Level ${level}, earned the slow way. No ceremony. This is the ceremony.`,
+            `Turns out repetition is a teacher. Level ${level}. She charges nothing and forgives less.`
+          ])
+        };
+      }
+      case "shore_leave": {
+        const port = str3(event, "port");
+        const members = Array.isArray(event.data.members) ? event.data.members.filter(
+          (m) => typeof m === "string"
+        ) : [];
+        const first = members[0];
+        if (port === "" || first === void 0) return null;
+        const count = num3(event, "count");
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: first,
+          text: pick2(seq, 43, [
+            `Shore leave at ${port}: ${count} of us loose on the dock. We will be back before the roster sends a search party.`,
+            `${port} from the dockside: loud, bright, and selling everything. ${count} ashore. Behaving. Mostly.`
+          ])
+        };
+      }
+      case "harbour_news": {
+        const port = str3(event, "port");
+        if (port === "") return null;
+        const kind = str3(event, "kind");
+        if (kind === "berthing") {
+          return {
+            kind: "post",
+            seq,
+            tick,
+            author: null,
+            text: `Harbour news at ${port}: the ${str3(event, "type")} ${str3(event, "ship")} lies berthed here.`
+          };
+        }
+        if (kind === "recent") {
+          const ago = num3(event, "daysAgo");
+          return {
+            kind: "post",
+            seq,
+            tick,
+            author: null,
+            text: `Harbour news at ${port}: the ${str3(event, "type")} ${str3(event, "ship")} made port here ${ago} ${ago === 1 ? "day" : "days"} since and has sailed.`
+          };
+        }
+        const lines = CONFIG.stores.port.rumourLines;
+        const template = lines[num3(event, "variant") % lines.length] ?? lines[0] ?? "";
+        if (template === "") return null;
         return {
           kind: "post",
           seq,
           tick,
           author: null,
-          text: `${by !== "" ? names.person(by) : "The crew"} brings the ${(def?.name ?? "duty").toLowerCase()} back up to standard.`
+          text: template.replaceAll("{port}", port).replaceAll("{faction}", str3(event, "faction"))
+        };
+      }
+      case "port_incident": {
+        const port = str3(event, "port");
+        if (port === "") return null;
+        const lines = CONFIG.stores.port.incidentLines;
+        const template = lines[num3(event, "variant") % lines.length] ?? lines[0] ?? "";
+        if (template === "") return null;
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: null,
+          text: template.replaceAll("{port}", port)
+        };
+      }
+      case "stores_low": {
+        const label = STORE_LABELS[str3(event, "store")] ?? str3(event, "store");
+        const days = Math.round(num3(event, "days"));
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: null,
+          text: pick2(seq, 89, [
+            `Stores watch: roughly ${days} days of ${label} left. The quartermaster has started looking at ports the way the rest of us look at weather.`,
+            `Stores watch: ${label} at roughly ${days} days. Nobody is panicking. The quartermaster is tidying, which is worse.`,
+            `Counted twice: about ${days} days of ${label}. The next port call just got an agenda.`
+          ])
+        };
+      }
+      case "stores_critical": {
+        const label = STORE_LABELS[str3(event, "store")] ?? str3(event, "store");
+        const days = Math.round(num3(event, "days"));
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: null,
+          text: pick2(seq, 89, [
+            `Stores critical: roughly ${days} days of ${label} left. Next port is not a suggestion anymore.`,
+            `Stores critical: ${label} at roughly ${days} days. The council has the numbers; the numbers have the council's attention.`,
+            `This is the quartermaster's serious voice: ${label}, about ${days} days. Plan accordingly.`
+          ])
+        };
+      }
+      case "stores_discrepancy": {
+        const by = str3(event, "by");
+        if (by === "") {
+          return {
+            kind: "post",
+            seq,
+            tick,
+            author: null,
+            text: "The stores count does not tally with the stores. Counting again, slower."
+          };
+        }
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: by,
+          text: pick2(seq, 47, [
+            "Counted the stores twice. The stores disagree with the stores. Counting a third time, out loud.",
+            "Somewhere between the manifest and the shelves there is a gap with good manners: it has not introduced itself yet."
+          ])
+        };
+      }
+      case "theft": {
+        if (event.data.witnessed !== true) return null;
+        const witness = str3(event, "witness");
+        const thief = str3(event, "thief");
+        if (witness === "" || thief === "") return null;
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: witness,
+          text: pick2(seq, 53, [
+            `Saw it myself: ${names.firstName(thief)}, in the stores, helping themselves. The council can have the rest of the story.`,
+            `Posting this so it is not just my word in a corridor: ${names.firstName(thief)} took from the stores. I was there.`
+          ])
+        };
+      }
+      case "repair_assist": {
+        const systemName2 = str3(event, "systemName");
+        if (systemName2 === "") return null;
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: null,
+          text: `Dock crews at ${str3(event, "port")} lent their hands to the ${systemName2}. Port manners, port prices.`
+        };
+      }
+      case "commendation": {
+        const member = str3(event, "member");
+        if (member === "") return null;
+        const systemId = str3(event, "system");
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: member,
+          text: systemId !== "" ? pick2(seq, 59, [
+            `Commended, for the ${names.system(systemId)}. Framing the citation next to the toolbox.`,
+            `The council commended the ${names.system(systemId)} work. Blushing in writing, once.`
+          ]) : pick2(seq, 59, [
+            "Commended by the council. Blushing in writing, once.",
+            "A commendation. The citation goes on the bulkhead, next to the scorch marks."
+          ])
+        };
+      }
+      case "leisure_exercise": {
+        if (actor === void 0) return null;
+        if (hash01(seq, 61) >= 0.5) return null;
+        const withId = str3(event, "with");
+        const post = {
+          kind: "post",
+          seq,
+          tick,
+          author: actor,
+          text: withId !== "" ? pick2(seq, 67, [
+            `Gym with ${names.firstName(withId)}. The ship moves; we stay hard to move.`,
+            `Sparred the boredom off with ${names.firstName(withId)}. It lost on points.`
+          ]) : pick2(seq, 67, [
+            "Gym. The machines do not gossip, which is half their charm.",
+            "Put in the quiet work. The bulkheads witnessed everything and said nothing."
+          ])
+        };
+        return post;
+      }
+      case "leisure_read": {
+        if (actor === void 0) return null;
+        if (hash01(seq, 71) >= 0.12) return null;
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: actor,
+          text: pick2(seq, 73, [
+            "Reading, off watch. The book's crew has worse problems than ours, which is comforting.",
+            "A quiet hour and a borrowed book. Returning both in better condition."
+          ])
         };
       }
       case "council_sentence": {
@@ -11379,6 +11664,18 @@
   var FeedBuilder = class {
     bonds = /* @__PURE__ */ new Map();
     grudges = /* @__PURE__ */ new Map();
+    /** Last turning point for each pair, keyed "a|b" with a < b:
+     *  bond, grudge, or broken. Later posts between the same two
+     *  people answer it: a bond after a grudge reads differently
+     *  from a bond out of nowhere. */
+    pairHistory = /* @__PURE__ */ new Map();
+    /** System ids that have failed at least once this run. */
+    failedSystems = /* @__PURE__ */ new Set();
+    /** Table-game wins per person, for streak callouts. */
+    gameWins = /* @__PURE__ */ new Map();
+    pairKey(a, b) {
+      return a < b ? `${a}|${b}` : `${b}|${a}`;
+    }
     link(map, from, to) {
       const set = map.get(from) ?? /* @__PURE__ */ new Set();
       set.add(to);
@@ -11410,12 +11707,21 @@
           this.unlink(this.bonds, withId, actor);
           break;
         }
+        case "system_failed": {
+          const system = str3(event, "system");
+          if (system !== "") this.failedSystems.add(system);
+          break;
+        }
         case "death": {
           if (actor === void 0) break;
           this.bonds.delete(actor);
           this.grudges.delete(actor);
           for (const set of this.bonds.values()) set.delete(actor);
           for (const set of this.grudges.values()) set.delete(actor);
+          for (const key2 of [...this.pairHistory.keys()]) {
+            const [a, b] = key2.split("|");
+            if (a === actor || b === actor) this.pairHistory.delete(key2);
+          }
           break;
         }
         default:
@@ -11424,15 +11730,50 @@
     }
     /** One event in, one decorated feed item (or null) out. */
     push(event, names) {
+      const actor0 = event.actors[0];
+      const other0 = str3(event, "with") || str3(event, "target") || void 0;
+      const prevPair = actor0 !== void 0 && other0 !== void 0 ? this.pairHistory.get(this.pairKey(actor0, other0)) : void 0;
+      if (actor0 !== void 0 && other0 !== void 0 && (event.type === "bond_formed" || event.type === "grudge_formed" || event.type === "trust_broken")) {
+        this.pairHistory.set(
+          this.pairKey(actor0, other0),
+          event.type === "bond_formed" ? "bond" : event.type === "grudge_formed" ? "grudge" : "broken"
+        );
+      }
       this.track(event);
       const item = feedItemFor(event, names);
-      if (item === null || item.kind !== "post" || item.author === null) {
+      if (item === null || item.kind !== "post") {
+        return item;
+      }
+      if (event.type === "system_repaired" && item.author !== null) {
+        const systemId = str3(event, "system");
+        if (systemId !== "" && this.failedSystems.has(systemId)) {
+          item.text = pick2(event.seq, 167, REPAIR_AGAIN).replaceAll(
+            "{system}",
+            names.system(systemId)
+          );
+        }
+      }
+      if (item.author === null) {
         return item;
       }
       if (event.type === "council_testimony" || event.type === "accusation") {
         return item;
       }
       const author = item.author;
+      if (event.type === "bond_formed" && prevPair !== void 0 && prevPair !== "bond") {
+        item.text += " " + pick2(event.seq, 163, CALLBACK_REPAIRED);
+      }
+      if ((event.type === "grudge_formed" || event.type === "trust_broken") && prevPair === "bond") {
+        item.text += " " + pick2(event.seq, 163, CALLBACK_FALLEN);
+      }
+      if (event.type === "leisure_game") {
+        const winner = str3(event, "winner");
+        const wins = (this.gameWins.get(winner) ?? 0) + 1;
+        this.gameWins.set(winner, wins);
+        if (winner === author && wins >= 3) {
+          item.text += ` That is win number ${wins} at the table. The others have noticed.`;
+        }
+      }
       if (event.type === "grudge_formed") {
         const target = str3(event, "target");
         const defenders = [...this.bonds.get(target) ?? []].filter((id) => id !== author).sort();
@@ -11448,6 +11789,36 @@
       const warm = [...this.bonds.get(author) ?? []].filter((id) => id !== subject).sort().slice(0, 3);
       if (warm.length > 0 && hash01(event.seq, 131) < 0.7) {
         item.reactions = warm;
+      }
+      if (event.type === "bond_formed" && hash01(event.seq, 173) < 0.3) {
+        const holders = [...this.grudges.entries()].filter(([, set]) => set.has(author)).map(([holder]) => holder).filter((id) => id !== author && id !== subject).sort();
+        const first = holders[0];
+        if (first !== void 0) {
+          item.replies = [
+            ...item.replies ?? [],
+            { author: first, text: pick2(event.seq, 179, REPLIES_DRY) }
+          ];
+        }
+      }
+      if (item.replies !== void 0 && item.replies.length === 1 && hash01(event.seq, 149) < 0.35) {
+        const heard = /* @__PURE__ */ new Set([author, item.replies[0]?.author]);
+        let second;
+        if (event.type === "gossip" && subject !== "") {
+          const friend = [...this.bonds.get(subject) ?? []].filter((id) => !heard.has(id)).sort()[0];
+          if (friend !== void 0) {
+            second = { author: friend, text: pick2(event.seq, 151, DEFENCE) };
+          }
+        }
+        if (second === void 0) {
+          const friend = [...this.bonds.get(author) ?? []].filter((id) => !heard.has(id) && id !== subject).sort()[0];
+          if (friend !== void 0) {
+            second = {
+              author: friend,
+              text: pick2(event.seq, 151, REPLIES_AGREE)
+            };
+          }
+        }
+        if (second !== void 0) item.replies = [...item.replies, second];
       }
       return item;
     }

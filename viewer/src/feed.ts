@@ -9,6 +9,7 @@
 // deterministic as the run and no engine stream is ever drawn.
 
 import type { SimEvent } from "../../src/log/events.ts";
+import { CONFIG } from "../../src/scenario/config.ts";
 import { dutyDef } from "../../src/world/duties.ts";
 import {
   chatterText,
@@ -78,6 +79,53 @@ const REPLIES_PROTEST = [
   "The log will sort this out.",
   "Bold words from someone who eats my cooking.",
 ] as const;
+
+const REPLIES_DRY = [
+  "Some of us remember the whole story.",
+  "Posted with great confidence, as always.",
+  "The rest of the ship was there too, you know.",
+  "Keeping this one for the memoirs.",
+] as const;
+
+const REPLIES_EXCUSE = [
+  "I was mid-repair. The ship comes first, apparently.",
+  "Rest is a duty too. Ask the roster.",
+  "Rain check. A real one, not a corridor one.",
+  "My hands were full. My conscience is clear.",
+] as const;
+
+const SNUBBED = [
+  "Walked up, said hello, got the back of a schedule. Noted, with love.",
+  "Some conversations need an appointment now. Fine. Booking never.",
+  "A nod would have cost nothing. Just putting that in the minutes.",
+] as const;
+
+const CALLBACK_REPAIRED = [
+  "After everything, this.",
+  "Took the long way round, this one.",
+  "Water under the hull, then.",
+  "Nobody frame this. It will not last a week. (It might.)",
+] as const;
+
+const CALLBACK_FALLEN = [
+  "We used to eat together. Used to.",
+  "There was a time this post would have read the other way.",
+  "The mess seating chart feels this, even if nobody says it.",
+] as const;
+
+const REPAIR_AGAIN = [
+  "Fixed. Again. The {system} and I are on familiar terms now.",
+  "The {system} hums again. It knows the way to my toolbox by heart.",
+  "{system}: restored, encore performance. I am taking a bow nobody asked for.",
+] as const;
+
+const STORE_LABELS: Record<string, string> = {
+  food: "food",
+  water: "water",
+  parts: "spare parts",
+  medicine: "medicine",
+  fuel: "fuel",
+};
 
 function maybeReply(
   event: SimEvent,
@@ -419,12 +467,272 @@ export function feedItemFor(event: SimEvent, names: FeedNames): FeedItem | null 
     case "duty_restored": {
       const by = str(event, "by");
       const def = dutyDef(str(event, "duty"));
+      const dutyName = (def?.name ?? "duty").toLowerCase();
+      if (by === "") {
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: null,
+          text: `The crew brings the ${dutyName} back up to standard.`,
+        };
+      }
+      return {
+        kind: "post",
+        seq,
+        tick,
+        author: by,
+        text: pick(seq, 31, [
+          `${def?.name ?? "The duty"}: back up to standard. It was not the standard fairy.`,
+          `${dutyName}, handled. You may all breathe the good air again.`,
+          `For the record: the ${dutyName} did not restore itself either.`,
+        ]),
+      };
+    }
+    case "socialize_refused": {
+      const withId = str(event, "with");
+      if (actor === undefined) return null;
+      // Snubs are constant ship weather (measured: tens of
+      // thousands in a two-year run). Only the occasional one
+      // is feed matter, or the feed becomes a snub ledger.
+      if (hash01(seq, 83) >= 0.06) return null;
+      const post: FeedPost = {
+        kind: "post",
+        seq,
+        tick,
+        author: actor,
+        text: pick(seq, 37, SNUBBED),
+      };
+      if (withId !== "") {
+        const reply = maybeReply(event, withId, REPLIES_EXCUSE);
+        if (reply !== undefined) post.replies = [reply];
+      }
+      return post;
+    }
+    case "level_up": {
+      const person = str(event, "person");
+      if (person === "") return null;
+      const task = str(event, "task");
+      const level = num(event, "level");
+      return {
+        kind: "post",
+        seq,
+        tick,
+        author: person,
+        text: pick(seq, 41, [
+          `${task === "" ? "The work" : task[0]?.toUpperCase() + task.slice(1)}: level ${level}. The work teaches, if you let it.`,
+          `Level ${level}, earned the slow way. No ceremony. This is the ceremony.`,
+          `Turns out repetition is a teacher. Level ${level}. She charges nothing and forgives less.`,
+        ]),
+      };
+    }
+    case "shore_leave": {
+      const port = str(event, "port");
+      const members = Array.isArray(event.data.members)
+        ? event.data.members.filter(
+            (m): m is string => typeof m === "string",
+          )
+        : [];
+      const first = members[0];
+      if (port === "" || first === undefined) return null;
+      const count = num(event, "count");
+      return {
+        kind: "post",
+        seq,
+        tick,
+        author: first,
+        text: pick(seq, 43, [
+          `Shore leave at ${port}: ${count} of us loose on the dock. We will be back before the roster sends a search party.`,
+          `${port} from the dockside: loud, bright, and selling everything. ${count} ashore. Behaving. Mostly.`,
+        ]),
+      };
+    }
+    case "harbour_news": {
+      const port = str(event, "port");
+      if (port === "") return null;
+      const kind = str(event, "kind");
+      if (kind === "berthing") {
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: null,
+          text: `Harbour news at ${port}: the ${str(event, "type")} ${str(event, "ship")} lies berthed here.`,
+        };
+      }
+      if (kind === "recent") {
+        const ago = num(event, "daysAgo");
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: null,
+          text: `Harbour news at ${port}: the ${str(event, "type")} ${str(event, "ship")} made port here ${ago} ${ago === 1 ? "day" : "days"} since and has sailed.`,
+        };
+      }
+      const lines = CONFIG.stores.port.rumourLines;
+      const template =
+        lines[num(event, "variant") % lines.length] ?? lines[0] ?? "";
+      if (template === "") return null;
       return {
         kind: "post",
         seq,
         tick,
         author: null,
-        text: `${by !== "" ? names.person(by) : "The crew"} brings the ${(def?.name ?? "duty").toLowerCase()} back up to standard.`,
+        text: template
+          .replaceAll("{port}", port)
+          .replaceAll("{faction}", str(event, "faction")),
+      };
+    }
+    case "port_incident": {
+      const port = str(event, "port");
+      if (port === "") return null;
+      const lines = CONFIG.stores.port.incidentLines;
+      const template =
+        lines[num(event, "variant") % lines.length] ?? lines[0] ?? "";
+      if (template === "") return null;
+      return {
+        kind: "post",
+        seq,
+        tick,
+        author: null,
+        text: template.replaceAll("{port}", port),
+      };
+    }
+    case "stores_low": {
+      const label = STORE_LABELS[str(event, "store")] ?? str(event, "store");
+      const days = Math.round(num(event, "days"));
+      return {
+        kind: "post",
+        seq,
+        tick,
+        author: null,
+        text: pick(seq, 89, [
+          `Stores watch: roughly ${days} days of ${label} left. The quartermaster has started looking at ports the way the rest of us look at weather.`,
+          `Stores watch: ${label} at roughly ${days} days. Nobody is panicking. The quartermaster is tidying, which is worse.`,
+          `Counted twice: about ${days} days of ${label}. The next port call just got an agenda.`,
+        ]),
+      };
+    }
+    case "stores_critical": {
+      const label = STORE_LABELS[str(event, "store")] ?? str(event, "store");
+      const days = Math.round(num(event, "days"));
+      return {
+        kind: "post",
+        seq,
+        tick,
+        author: null,
+        text: pick(seq, 89, [
+          `Stores critical: roughly ${days} days of ${label} left. Next port is not a suggestion anymore.`,
+          `Stores critical: ${label} at roughly ${days} days. The council has the numbers; the numbers have the council's attention.`,
+          `This is the quartermaster's serious voice: ${label}, about ${days} days. Plan accordingly.`,
+        ]),
+      };
+    }
+    case "stores_discrepancy": {
+      const by = str(event, "by");
+      if (by === "") {
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: null,
+          text: "The stores count does not tally with the stores. Counting again, slower.",
+        };
+      }
+      return {
+        kind: "post",
+        seq,
+        tick,
+        author: by,
+        text: pick(seq, 47, [
+          "Counted the stores twice. The stores disagree with the stores. Counting a third time, out loud.",
+          "Somewhere between the manifest and the shelves there is a gap with good manners: it has not introduced itself yet.",
+        ]),
+      };
+    }
+    case "theft": {
+      if (event.data.witnessed !== true) return null;
+      const witness = str(event, "witness");
+      const thief = str(event, "thief");
+      if (witness === "" || thief === "") return null;
+      return {
+        kind: "post",
+        seq,
+        tick,
+        author: witness,
+        text: pick(seq, 53, [
+          `Saw it myself: ${names.firstName(thief)}, in the stores, helping themselves. The council can have the rest of the story.`,
+          `Posting this so it is not just my word in a corridor: ${names.firstName(thief)} took from the stores. I was there.`,
+        ]),
+      };
+    }
+    case "repair_assist": {
+      const systemName = str(event, "systemName");
+      if (systemName === "") return null;
+      return {
+        kind: "post",
+        seq,
+        tick,
+        author: null,
+        text: `Dock crews at ${str(event, "port")} lent their hands to the ${systemName}. Port manners, port prices.`,
+      };
+    }
+    case "commendation": {
+      const member = str(event, "member");
+      if (member === "") return null;
+      const systemId = str(event, "system");
+      return {
+        kind: "post",
+        seq,
+        tick,
+        author: member,
+        text:
+          systemId !== ""
+            ? pick(seq, 59, [
+                `Commended, for the ${names.system(systemId)}. Framing the citation next to the toolbox.`,
+                `The council commended the ${names.system(systemId)} work. Blushing in writing, once.`,
+              ])
+            : pick(seq, 59, [
+                "Commended by the council. Blushing in writing, once.",
+                "A commendation. The citation goes on the bulkhead, next to the scorch marks.",
+              ]),
+      };
+    }
+    case "leisure_exercise": {
+      if (actor === undefined) return null;
+      if (hash01(seq, 61) >= 0.5) return null;
+      const withId = str(event, "with");
+      const post: FeedPost = {
+        kind: "post",
+        seq,
+        tick,
+        author: actor,
+        text:
+          withId !== ""
+            ? pick(seq, 67, [
+                `Gym with ${names.firstName(withId)}. The ship moves; we stay hard to move.`,
+                `Sparred the boredom off with ${names.firstName(withId)}. It lost on points.`,
+              ])
+            : pick(seq, 67, [
+                "Gym. The machines do not gossip, which is half their charm.",
+                "Put in the quiet work. The bulkheads witnessed everything and said nothing.",
+              ]),
+      };
+      return post;
+    }
+    case "leisure_read": {
+      if (actor === undefined) return null;
+      if (hash01(seq, 71) >= 0.12) return null;
+      return {
+        kind: "post",
+        seq,
+        tick,
+        author: actor,
+        text: pick(seq, 73, [
+          "Reading, off watch. The book's crew has worse problems than ours, which is comforting.",
+          "A quiet hour and a borrowed book. Returning both in better condition.",
+        ]),
       };
     }
     case "council_sentence": {
@@ -702,6 +1010,19 @@ const DEFENCE = [
 export class FeedBuilder {
   private readonly bonds = new Map<string, Set<string>>();
   private readonly grudges = new Map<string, Set<string>>();
+  /** Last turning point for each pair, keyed "a|b" with a < b:
+   *  bond, grudge, or broken. Later posts between the same two
+   *  people answer it: a bond after a grudge reads differently
+   *  from a bond out of nowhere. */
+  private readonly pairHistory = new Map<string, string>();
+  /** System ids that have failed at least once this run. */
+  private readonly failedSystems = new Set<string>();
+  /** Table-game wins per person, for streak callouts. */
+  private readonly gameWins = new Map<string, number>();
+
+  private pairKey(a: string, b: string): string {
+    return a < b ? `${a}|${b}` : `${b}|${a}`;
+  }
 
   private link(
     map: Map<string, Set<string>>,
@@ -740,12 +1061,21 @@ export class FeedBuilder {
         this.unlink(this.bonds, withId, actor);
         break;
       }
+      case "system_failed": {
+        const system = str(event, "system");
+        if (system !== "") this.failedSystems.add(system);
+        break;
+      }
       case "death": {
         if (actor === undefined) break;
         this.bonds.delete(actor);
         this.grudges.delete(actor);
         for (const set of this.bonds.values()) set.delete(actor);
         for (const set of this.grudges.values()) set.delete(actor);
+        for (const key of [...this.pairHistory.keys()]) {
+          const [a, b] = key.split("|");
+          if (a === actor || b === actor) this.pairHistory.delete(key);
+        }
         break;
       }
       default:
@@ -755,9 +1085,49 @@ export class FeedBuilder {
 
   /** One event in, one decorated feed item (or null) out. */
   push(event: SimEvent, names: FeedNames): FeedItem | null {
+    // Pair history is read for callbacks before this event
+    // updates it, then updated for whatever comes later.
+    const actor0 = event.actors[0];
+    const other0 =
+      str(event, "with") || str(event, "target") || undefined;
+    const prevPair =
+      actor0 !== undefined && other0 !== undefined
+        ? this.pairHistory.get(this.pairKey(actor0, other0))
+        : undefined;
+    if (
+      actor0 !== undefined &&
+      other0 !== undefined &&
+      (event.type === "bond_formed" ||
+        event.type === "grudge_formed" ||
+        event.type === "trust_broken")
+    ) {
+      this.pairHistory.set(
+        this.pairKey(actor0, other0),
+        event.type === "bond_formed"
+          ? "bond"
+          : event.type === "grudge_formed"
+            ? "grudge"
+            : "broken",
+      );
+    }
     this.track(event);
     const item = feedItemFor(event, names);
-    if (item === null || item.kind !== "post" || item.author === null) {
+    if (item === null || item.kind !== "post") {
+      return item;
+    }
+    // A repair of a system that has failed before is a reunion,
+    // not an introduction, in the repairer's own voice. Ship
+    // posts keep the plain line: the ship has no toolbox.
+    if (event.type === "system_repaired" && item.author !== null) {
+      const systemId = str(event, "system");
+      if (systemId !== "" && this.failedSystems.has(systemId)) {
+        item.text = pick(event.seq, 167, REPAIR_AGAIN).replaceAll(
+          "{system}",
+          names.system(systemId),
+        );
+      }
+    }
+    if (item.author === null) {
       return item;
     }
     // A trial is solemn: testimony and accusations carry no reactions.
@@ -765,6 +1135,24 @@ export class FeedBuilder {
       return item;
     }
     const author = item.author;
+    // Callbacks: this post answers the pair's last turning point.
+    if (event.type === "bond_formed" && prevPair !== undefined && prevPair !== "bond") {
+      item.text += " " + pick(event.seq, 163, CALLBACK_REPAIRED);
+    }
+    if (
+      (event.type === "grudge_formed" || event.type === "trust_broken") &&
+      prevPair === "bond"
+    ) {
+      item.text += " " + pick(event.seq, 163, CALLBACK_FALLEN);
+    }
+    if (event.type === "leisure_game") {
+      const winner = str(event, "winner");
+      const wins = (this.gameWins.get(winner) ?? 0) + 1;
+      this.gameWins.set(winner, wins);
+      if (winner === author && wins >= 3) {
+        item.text += ` That is win number ${wins} at the table. The others have noticed.`;
+      }
+    }
     // A friend of the grudge's target answers the cold post.
     if (event.type === "grudge_formed") {
       const target = str(event, "target");
@@ -788,6 +1176,54 @@ export class FeedBuilder {
       .slice(0, 3);
     if (warm.length > 0 && hash01(event.seq, 131) < 0.7) {
       item.reactions = warm;
+    }
+    // A bond announcement can draw one dry voice: someone who
+    // holds a grudge against the author, watching the parade.
+    if (event.type === "bond_formed" && hash01(event.seq, 173) < 0.3) {
+      const holders = [...this.grudges.entries()]
+        .filter(([, set]) => set.has(author))
+        .map(([holder]) => holder)
+        .filter((id) => id !== author && id !== subject)
+        .sort();
+      const first = holders[0];
+      if (first !== undefined) {
+        item.replies = [
+          ...(item.replies ?? []),
+          { author: first, text: pick(event.seq, 179, REPLIES_DRY) },
+        ];
+      }
+    }
+    // Reply chains: when a post already drew one answer, a
+    // second voice sometimes joins, the subject's friend in
+    // protest or the author's friend in agreement, never
+    // repeating a voice already in the thread.
+    if (
+      item.replies !== undefined &&
+      item.replies.length === 1 &&
+      hash01(event.seq, 149) < 0.35
+    ) {
+      const heard = new Set([author, item.replies[0]?.author]);
+      let second: { author: string; text: string } | undefined;
+      if (event.type === "gossip" && subject !== "") {
+        const friend = [...(this.bonds.get(subject) ?? [])]
+          .filter((id) => !heard.has(id))
+          .sort()[0];
+        if (friend !== undefined) {
+          second = { author: friend, text: pick(event.seq, 151, DEFENCE) };
+        }
+      }
+      if (second === undefined) {
+        const friend = [...(this.bonds.get(author) ?? [])]
+          .filter((id) => !heard.has(id) && id !== subject)
+          .sort()[0];
+        if (friend !== undefined) {
+          second = {
+            author: friend,
+            text: pick(event.seq, 151, REPLIES_AGREE),
+          };
+        }
+      }
+      if (second !== undefined) item.replies = [...item.replies, second];
     }
     return item;
   }

@@ -21,6 +21,7 @@ import {
 } from "../../src/log/chronicle.ts";
 import type { SimEvent } from "../../src/log/events.ts";
 import { chatterText } from "../../src/perception/speech.ts";
+import { relationshipLabel } from "../../src/perception/labels.ts";
 import { CONFIG } from "../../src/scenario/config.ts";
 import { DUTY_DEFS } from "../../src/world/duties.ts";
 import { bandOf } from "../../src/world/factions.ts";
@@ -1498,11 +1499,34 @@ function buildDossier(member: CrewMember): void {
     .slice(0, 5);
   personDossierEl.appendChild(dossierLabel("Closest aboard"));
   for (const other of others) {
+    const label = relationshipLabel(member, other, run.crew);
     personDossierEl.appendChild(
       dossierRow(
         other.name,
         `bond ${pct(member.beliefs.bond[other.id] ?? 0)}, ` +
-          `trust ${signedPct(member.beliefs.trust[other.id] ?? 0)}`,
+          `trust ${signedPct(member.beliefs.trust[other.id] ?? 0)}` +
+          (label !== "acquaintance" ? ` · ${label}` : ""),
+      ),
+    );
+  }
+
+  // The coldest reading aboard, in the holder's own word,
+  // when it has cooled past a shrug.
+  let cooling: (typeof run.crew)[number] | undefined;
+  let coolingTrust = -0.2;
+  for (const other of run.crew) {
+    if (other === member) continue;
+    const trust = member.beliefs.trust[other.id] ?? 0;
+    if (trust <= coolingTrust) {
+      coolingTrust = trust;
+      cooling = other;
+    }
+  }
+  if (cooling !== undefined) {
+    personDossierEl.appendChild(
+      dossierRow(
+        "Cooling",
+        `${cooling.name} (${relationshipLabel(member, cooling, run.crew)})`,
       ),
     );
   }

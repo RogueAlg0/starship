@@ -4352,161 +4352,6 @@
     return Math.round(value * 1e3) / 1e3;
   }
 
-  // src/world/factions.ts
-  function bandOf(standing) {
-    const f = CONFIG.factions;
-    if (standing < f.coldLine) return "cold";
-    if (standing >= f.honouredLine) return "honoured";
-    if (standing >= f.warmLine) return "warm";
-    return "unregarded";
-  }
-  function createFactionStanding(sector) {
-    const byId2 = {};
-    const band = {};
-    for (const f of sector.factions) {
-      byId2[f.id] = 0;
-      band[f.id] = bandOf(0);
-    }
-    return { byId: byId2, band, eventCursor: 0 };
-  }
-  function stepFactionStanding(w, standing, sector) {
-    const f = CONFIG.factions;
-    const events = w.events.events;
-    while (standing.eventCursor < events.length) {
-      const ev = events[standing.eventCursor];
-      standing.eventCursor++;
-      if (ev.type !== "port_call" && ev.type !== "arrival") continue;
-      const portIndex = ev.data["portIndex"];
-      if (typeof portIndex !== "number") continue;
-      const port = sector.portAt(portIndex);
-      if (port.faction === null) continue;
-      const faction = sector.factionAt(port.faction);
-      let gain = f.arrivalGain;
-      const stayDays = ev.data["stayDays"];
-      if (ev.type === "port_call" && typeof stayDays === "number" && stayDays >= f.stayBonusDays) {
-        gain += faction.temperament === "greedy" ? f.stayBonus * 1.5 : f.stayBonus;
-      }
-      if (faction.temperament === "insular") gain *= 0.6;
-      const next = Math.max(
-        -1,
-        Math.min(1, (standing.byId[faction.id] ?? 0) + gain)
-      );
-      standing.byId[faction.id] = next;
-      const band = bandOf(next);
-      if (band !== standing.band[faction.id]) {
-        standing.band[faction.id] = band;
-        w.emit("faction_standing", [], {
-          faction: faction.id,
-          name: faction.name,
-          kind: faction.kind,
-          temperament: faction.temperament,
-          band,
-          standing: r3(next)
-        });
-      }
-    }
-  }
-  function checkFactionState(sector, standing) {
-    const problems = [];
-    for (const f of sector.factions) {
-      const v = standing.byId[f.id];
-      if (v === void 0) {
-        problems.push(`faction ${f.id} has no standing entry`);
-      } else if (v < -1 || v > 1) {
-        problems.push(`faction ${f.id} standing ${v} outside [-1, 1]`);
-      }
-      if (standing.band[f.id] !== bandOf(v ?? 0)) {
-        problems.push(
-          `faction ${f.id} band ${standing.band[f.id]} disagrees with its standing`
-        );
-      }
-    }
-    return problems;
-  }
-
-  // src/decision/decisions.ts
-  var UtilitySource = class {
-    records = [];
-    noise;
-    constructor(noise) {
-      this.noise = noise;
-    }
-    choose(agentId, candidates, context) {
-      if (candidates.length === 0) {
-        throw new Error(`UtilitySource: no candidates for agent ${agentId}`);
-      }
-      const scores = candidates.map(
-        (c) => c.base * (c.urgency ?? 1) + (this.noise !== void 0 ? this.noise() * 0.01 : 0)
-      );
-      let best = 0;
-      for (let i = 1; i < scores.length; i++) {
-        if (scores[i] > scores[best]) best = i;
-      }
-      this.records.push({
-        tick: context.tick,
-        agentId,
-        candidateCount: candidates.length,
-        chosen: best,
-        chosenKey: candidates[best].key,
-        keys: candidates.map((c) => c.key),
-        scores
-      });
-      return best;
-    }
-  };
-
-  // src/engine/engine.ts
-  var World = class {
-    tick = 0;
-    config;
-    rng;
-    events;
-    decisions;
-    constructor(config, decisions, events) {
-      this.config = config;
-      this.decisions = decisions;
-      this.events = events ?? new EventLog();
-      this.rng = new StreamRegistry(config.seed);
-    }
-    emit(type, actors, data) {
-      return this.events.emit(this.tick, type, actors, data);
-    }
-  };
-  var Engine = class {
-    world;
-    systems = [];
-    invariants = [];
-    constructor(world) {
-      this.world = world;
-    }
-    addSystem(system) {
-      this.systems.push(system);
-      return this;
-    }
-    addInvariant(name, check) {
-      this.invariants.push({ name, check });
-      return this;
-    }
-    step() {
-      for (const system of this.systems) system.step(this.world);
-      if (this.world.config.checkInvariants !== false) {
-        for (const invariant of this.invariants) {
-          try {
-            invariant.check(this.world);
-          } catch (error) {
-            throw new Error(
-              `invariant "${invariant.name}" violated at tick ${this.world.tick}: ` + (error instanceof Error ? error.message : String(error))
-            );
-          }
-        }
-      }
-      this.world.tick++;
-    }
-    run(ticks) {
-      for (let i = 0; i < ticks; i++) this.step();
-    }
-  };
-
   // src/world/systems.ts
   function clamp01(value) {
     return value < 0 ? 0 : value > 1 ? 1 : value;
@@ -4808,6 +4653,199 @@
       }
     }
   }
+
+  // src/perception/labels.ts
+  var TRUST_HIGH = 0.5;
+  var TRUST_WARM = 0.2;
+  var TRUST_RIVAL = -0.3;
+  var BOND_COLLAPSED = 0.25;
+  function isTopTrust(holder, other, peers) {
+    const mine = trustOf(holder.beliefs, other.id);
+    let above = 0;
+    for (const peer of peers) {
+      if (peer === holder || peer === other) continue;
+      if (trustOf(holder.beliefs, peer.id) > mine) above++;
+    }
+    return above < 2;
+  }
+  function relationshipLabel(holder, other, peers = [holder, other]) {
+    const beliefs = holder.beliefs;
+    if (beliefs.grudges.includes(other.id)) return "feud";
+    const bond = bondOf(beliefs, other.id);
+    const trust = trustOf(beliefs, other.id);
+    const backBond = bondOf(other.beliefs, holder.id);
+    const backTrust = trustOf(other.beliefs, holder.id);
+    const wasBonded = (beliefs.milestones[`${other.id}:bond`] ?? "0") !== "0";
+    if (wasBonded && (bond <= BOND_COLLAPSED || trust <= TRUST_RIVAL)) {
+      return "estranged";
+    }
+    const cfg = CONFIG.relationships;
+    if (bond >= cfg.bondMilestoneHigh && backBond >= cfg.bondMilestoneHigh && trust >= TRUST_HIGH && backTrust >= TRUST_HIGH && isTopTrust(holder, other, peers) && isTopTrust(other, holder, peers)) {
+      return "confidant";
+    }
+    if (bond >= cfg.bondMilestone && trust >= TRUST_WARM && backTrust >= TRUST_WARM) {
+      return "friend";
+    }
+    if (trust <= TRUST_RIVAL && backTrust <= TRUST_RIVAL && !other.beliefs.grudges.includes(holder.id)) {
+      return "rival";
+    }
+    return "acquaintance";
+  }
+
+  // src/world/factions.ts
+  function bandOf(standing) {
+    const f = CONFIG.factions;
+    if (standing < f.coldLine) return "cold";
+    if (standing >= f.honouredLine) return "honoured";
+    if (standing >= f.warmLine) return "warm";
+    return "unregarded";
+  }
+  function createFactionStanding(sector) {
+    const byId2 = {};
+    const band = {};
+    for (const f of sector.factions) {
+      byId2[f.id] = 0;
+      band[f.id] = bandOf(0);
+    }
+    return { byId: byId2, band, eventCursor: 0 };
+  }
+  function stepFactionStanding(w, standing, sector) {
+    const f = CONFIG.factions;
+    const events = w.events.events;
+    while (standing.eventCursor < events.length) {
+      const ev = events[standing.eventCursor];
+      standing.eventCursor++;
+      if (ev.type !== "port_call" && ev.type !== "arrival") continue;
+      const portIndex = ev.data["portIndex"];
+      if (typeof portIndex !== "number") continue;
+      const port = sector.portAt(portIndex);
+      if (port.faction === null) continue;
+      const faction = sector.factionAt(port.faction);
+      let gain = f.arrivalGain;
+      const stayDays = ev.data["stayDays"];
+      if (ev.type === "port_call" && typeof stayDays === "number" && stayDays >= f.stayBonusDays) {
+        gain += faction.temperament === "greedy" ? f.stayBonus * 1.5 : f.stayBonus;
+      }
+      if (faction.temperament === "insular") gain *= 0.6;
+      const next = Math.max(
+        -1,
+        Math.min(1, (standing.byId[faction.id] ?? 0) + gain)
+      );
+      standing.byId[faction.id] = next;
+      const band = bandOf(next);
+      if (band !== standing.band[faction.id]) {
+        standing.band[faction.id] = band;
+        w.emit("faction_standing", [], {
+          faction: faction.id,
+          name: faction.name,
+          kind: faction.kind,
+          temperament: faction.temperament,
+          band,
+          standing: r3(next)
+        });
+      }
+    }
+  }
+  function checkFactionState(sector, standing) {
+    const problems = [];
+    for (const f of sector.factions) {
+      const v = standing.byId[f.id];
+      if (v === void 0) {
+        problems.push(`faction ${f.id} has no standing entry`);
+      } else if (v < -1 || v > 1) {
+        problems.push(`faction ${f.id} standing ${v} outside [-1, 1]`);
+      }
+      if (standing.band[f.id] !== bandOf(v ?? 0)) {
+        problems.push(
+          `faction ${f.id} band ${standing.band[f.id]} disagrees with its standing`
+        );
+      }
+    }
+    return problems;
+  }
+
+  // src/decision/decisions.ts
+  var UtilitySource = class {
+    records = [];
+    noise;
+    constructor(noise) {
+      this.noise = noise;
+    }
+    choose(agentId, candidates, context) {
+      if (candidates.length === 0) {
+        throw new Error(`UtilitySource: no candidates for agent ${agentId}`);
+      }
+      const scores = candidates.map(
+        (c) => c.base * (c.urgency ?? 1) + (this.noise !== void 0 ? this.noise() * 0.01 : 0)
+      );
+      let best = 0;
+      for (let i = 1; i < scores.length; i++) {
+        if (scores[i] > scores[best]) best = i;
+      }
+      this.records.push({
+        tick: context.tick,
+        agentId,
+        candidateCount: candidates.length,
+        chosen: best,
+        chosenKey: candidates[best].key,
+        keys: candidates.map((c) => c.key),
+        scores
+      });
+      return best;
+    }
+  };
+
+  // src/engine/engine.ts
+  var World = class {
+    tick = 0;
+    config;
+    rng;
+    events;
+    decisions;
+    constructor(config, decisions, events) {
+      this.config = config;
+      this.decisions = decisions;
+      this.events = events ?? new EventLog();
+      this.rng = new StreamRegistry(config.seed);
+    }
+    emit(type, actors, data) {
+      return this.events.emit(this.tick, type, actors, data);
+    }
+  };
+  var Engine = class {
+    world;
+    systems = [];
+    invariants = [];
+    constructor(world) {
+      this.world = world;
+    }
+    addSystem(system) {
+      this.systems.push(system);
+      return this;
+    }
+    addInvariant(name, check) {
+      this.invariants.push({ name, check });
+      return this;
+    }
+    step() {
+      for (const system of this.systems) system.step(this.world);
+      if (this.world.config.checkInvariants !== false) {
+        for (const invariant of this.invariants) {
+          try {
+            invariant.check(this.world);
+          } catch (error) {
+            throw new Error(
+              `invariant "${invariant.name}" violated at tick ${this.world.tick}: ` + (error instanceof Error ? error.message : String(error))
+            );
+          }
+        }
+      }
+      this.world.tick++;
+    }
+    run(ticks) {
+      for (let i = 0; i < ticks; i++) this.step();
+    }
+  };
 
   // src/entities/routine.ts
   function pickNightWatchRoles(rng) {
@@ -11661,13 +11699,17 @@
     "They have people on this ship. Remember that.",
     "Careful. That one is spoken for."
   ];
-  var FeedBuilder = class {
+  var FeedBuilder = class _FeedBuilder {
+    /** Turning points kept per pair in the ledger. */
+    static LEDGER_CAP = 6;
     bonds = /* @__PURE__ */ new Map();
     grudges = /* @__PURE__ */ new Map();
-    /** Last turning point for each pair, keyed "a|b" with a < b:
-     *  bond, grudge, or broken. Later posts between the same two
-     *  people answer it: a bond after a grudge reads differently
-     *  from a bond out of nowhere. */
+    /** The last few turning points for each pair, keyed "a|b"
+     *  with a < b, oldest first, capped at LEDGER_CAP. Kinds:
+     *  bond, grudge, broken (the relational turns the callbacks
+     *  answer), snub, accused. Later posts between the same two
+     *  people answer the last relational turn: a bond after a
+     *  grudge reads differently from a bond out of nowhere. */
     pairHistory = /* @__PURE__ */ new Map();
     /** System ids that have failed at least once this run. */
     failedSystems = /* @__PURE__ */ new Set();
@@ -11732,12 +11774,32 @@
     push(event, names) {
       const actor0 = event.actors[0];
       const other0 = str3(event, "with") || str3(event, "target") || void 0;
-      const prevPair = actor0 !== void 0 && other0 !== void 0 ? this.pairHistory.get(this.pairKey(actor0, other0)) : void 0;
-      if (actor0 !== void 0 && other0 !== void 0 && (event.type === "bond_formed" || event.type === "grudge_formed" || event.type === "trust_broken")) {
-        this.pairHistory.set(
-          this.pairKey(actor0, other0),
-          event.type === "bond_formed" ? "bond" : event.type === "grudge_formed" ? "grudge" : "broken"
-        );
+      const ledgerKey = actor0 !== void 0 && other0 !== void 0 ? this.pairKey(actor0, other0) : void 0;
+      const entries = ledgerKey !== void 0 ? this.pairHistory.get(ledgerKey) ?? [] : [];
+      let prevPair;
+      for (let i = entries.length - 1; i >= 0; i--) {
+        const kind = entries[i]?.kind;
+        if (kind === "bond" || kind === "grudge" || kind === "broken") {
+          prevPair = kind;
+          break;
+        }
+      }
+      if (ledgerKey !== void 0 && actor0 !== void 0 && other0 !== void 0) {
+        const kind = event.type === "bond_formed" ? "bond" : event.type === "grudge_formed" ? "grudge" : event.type === "trust_broken" ? "broken" : event.type === "socialize_refused" ? "snub" : event.type === "accusation" ? "accused" : void 0;
+        if (kind !== void 0) {
+          const next = [
+            ...entries,
+            {
+              kind,
+              from: kind === "snub" ? other0 : actor0,
+              to: kind === "snub" ? actor0 : other0
+            }
+          ];
+          this.pairHistory.set(
+            ledgerKey,
+            next.slice(-_FeedBuilder.LEDGER_CAP)
+          );
+        }
       }
       this.track(event);
       const item = feedItemFor(event, names);
@@ -18897,10 +18959,29 @@
     ).slice(0, 5);
     personDossierEl.appendChild(dossierLabel("Closest aboard"));
     for (const other of others) {
+      const label = relationshipLabel(member, other, run.crew);
       personDossierEl.appendChild(
         dossierRow(
           other.name,
-          `bond ${pct(member.beliefs.bond[other.id] ?? 0)}, trust ${signedPct(member.beliefs.trust[other.id] ?? 0)}`
+          `bond ${pct(member.beliefs.bond[other.id] ?? 0)}, trust ${signedPct(member.beliefs.trust[other.id] ?? 0)}` + (label !== "acquaintance" ? ` \xB7 ${label}` : "")
+        )
+      );
+    }
+    let cooling;
+    let coolingTrust = -0.2;
+    for (const other of run.crew) {
+      if (other === member) continue;
+      const trust = member.beliefs.trust[other.id] ?? 0;
+      if (trust <= coolingTrust) {
+        coolingTrust = trust;
+        cooling = other;
+      }
+    }
+    if (cooling !== void 0) {
+      personDossierEl.appendChild(
+        dossierRow(
+          "Cooling",
+          `${cooling.name} (${relationshipLabel(member, cooling, run.crew)})`
         )
       );
     }

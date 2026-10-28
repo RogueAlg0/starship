@@ -1008,13 +1008,21 @@ const DEFENCE = [
  * Deaths clear a name from every set.
  */
 export class FeedBuilder {
+  /** Turning points kept per pair in the ledger. */
+  private static readonly LEDGER_CAP = 6;
+
   private readonly bonds = new Map<string, Set<string>>();
   private readonly grudges = new Map<string, Set<string>>();
-  /** Last turning point for each pair, keyed "a|b" with a < b:
-   *  bond, grudge, or broken. Later posts between the same two
-   *  people answer it: a bond after a grudge reads differently
-   *  from a bond out of nowhere. */
-  private readonly pairHistory = new Map<string, string>();
+  /** The last few turning points for each pair, keyed "a|b"
+   *  with a < b, oldest first, capped at LEDGER_CAP. Kinds:
+   *  bond, grudge, broken (the relational turns the callbacks
+   *  answer), snub, accused. Later posts between the same two
+   *  people answer the last relational turn: a bond after a
+   *  grudge reads differently from a bond out of nowhere. */
+  private readonly pairHistory = new Map<
+    string,
+    Array<{ kind: string; from: string; to: string }>
+  >();
   /** System ids that have failed at least once this run. */
   private readonly failedSystems = new Set<string>();
   /** Table-game wins per person, for streak callouts. */
@@ -1090,25 +1098,52 @@ export class FeedBuilder {
     const actor0 = event.actors[0];
     const other0 =
       str(event, "with") || str(event, "target") || undefined;
-    const prevPair =
+    const ledgerKey =
       actor0 !== undefined && other0 !== undefined
-        ? this.pairHistory.get(this.pairKey(actor0, other0))
+        ? this.pairKey(actor0, other0)
         : undefined;
-    if (
-      actor0 !== undefined &&
-      other0 !== undefined &&
-      (event.type === "bond_formed" ||
-        event.type === "grudge_formed" ||
-        event.type === "trust_broken")
-    ) {
-      this.pairHistory.set(
-        this.pairKey(actor0, other0),
+    const entries =
+      ledgerKey !== undefined
+        ? (this.pairHistory.get(ledgerKey) ?? [])
+        : [];
+    // The last relational turn (bond, grudge, broken) is what
+    // callbacks answer; snubs and accusations sit in the
+    // ledger without resetting it.
+    let prevPair: string | undefined;
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const kind = entries[i]?.kind;
+      if (kind === "bond" || kind === "grudge" || kind === "broken") {
+        prevPair = kind;
+        break;
+      }
+    }
+    if (ledgerKey !== undefined && actor0 !== undefined && other0 !== undefined) {
+      const kind =
         event.type === "bond_formed"
           ? "bond"
           : event.type === "grudge_formed"
             ? "grudge"
-            : "broken",
-      );
+            : event.type === "trust_broken"
+              ? "broken"
+              : event.type === "socialize_refused"
+                ? "snub"
+                : event.type === "accusation"
+                  ? "accused"
+                  : undefined;
+      if (kind !== undefined) {
+        const next = [
+          ...entries,
+          {
+            kind,
+            from: kind === "snub" ? other0 : actor0,
+            to: kind === "snub" ? actor0 : other0,
+          },
+        ];
+        this.pairHistory.set(
+          ledgerKey,
+          next.slice(-FeedBuilder.LEDGER_CAP),
+        );
+      }
     }
     this.track(event);
     const item = feedItemFor(event, names);

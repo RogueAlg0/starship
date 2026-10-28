@@ -507,6 +507,98 @@ export function feedItemFor(event: SimEvent, names: FeedNames): FeedItem | null 
       if (text === undefined) return null;
       return { kind: "post", seq, tick, author: null, text };
     }
+    case "sector_campaign": {
+      const voice = str(event, "voice");
+      return {
+        kind: "post",
+        seq,
+        tick,
+        author: null,
+        text:
+          `Harbour news: the ${str(event, "name")} are making a push at ${str(event, "port")}. Their ships are suddenly everywhere on that run.` +
+          (voice !== ""
+            ? ` ${voice} calls it "a long-overdue correction."`
+            : ""),
+      };
+    }
+    case "sector_contest_started": {
+      const port = str(event, "port");
+      const kind = str(event, "kind");
+      const chal = str(event, "challengerName");
+      const inc = str(event, "incumbentName");
+      const voice = str(event, "voice");
+      const feud = event.data["feud"] === true
+        ? " There is old history between these two, and the harbour knows it."
+        : "";
+      return {
+        kind: "post",
+        seq,
+        tick,
+        author: null,
+        text:
+          (inc === ""
+            ? `Harbour news at ${port}: the ${chal} bid openly for the free port. An ${kind} will settle it.`
+            : `Harbour news at ${port}: the ${chal} have challenged the ${inc} for the port. An ${kind} will settle it, day by day.`) +
+          feud +
+          (voice !== ""
+            ? ` ${voice} speaks for the challengers: "The port will decide, and we like its mood."`
+            : ""),
+      };
+    }
+    case "sector_contest_day": {
+      if (event.data["witnessed"] !== true) return null;
+      const port = str(event, "port");
+      return {
+        kind: "post",
+        seq,
+        tick,
+        author: null,
+        text: `From the dockside at ${port}: the ${str(event, "kind")} stands ${num(event, "scoreIncumbent")}–${num(event, "scoreChallenger")} after day ${num(event, "day")}. The harbour is keeping score on a wall.`,
+      };
+    }
+    case "sector_contest_resolved": {
+      const port = str(event, "port");
+      const flipped = event.data["flipped"] === true;
+      return {
+        kind: "post",
+        seq,
+        tick,
+        author: null,
+        text: flipped
+          ? `Harbour news at ${port}: the ${str(event, "kind")} is over, ${num(event, "scoreWinner")}–${num(event, "scoreLoser")}. The ${str(event, "winnerName")} take the port. New flag over the harbour office by morning.`
+          : `Harbour news at ${port}: the ${str(event, "kind")} is over, ${num(event, "scoreWinner")}–${num(event, "scoreLoser")}. The ${str(event, "winnerName")} hold the port against the ${str(event, "loserName")}.`,
+      };
+    }
+    case "sector_condition": {
+      const port = str(event, "port");
+      const state = str(event, "state");
+      const phase = str(event, "phase");
+      const text =
+        phase === "pending"
+          ? `Harbour news at ${port}: a ${state} is coming. Prices are already moving on the rumour.`
+          : phase === "active"
+            ? `Harbour news at ${port}: the ${state} is on. The harbour feels it in every queue and manifest.`
+            : `Harbour news at ${port}: the ${state} has cleared. The harbour breathes again.`;
+      return { kind: "post", seq, tick, author: null, text };
+    }
+    case "sector_relief": {
+      return {
+        kind: "post",
+        seq,
+        tick,
+        author: null,
+        text: `Our call at ${str(event, "port")} counted as relief there. A hungry port remembers who showed up.`,
+      };
+    }
+    case "sector_collapse": {
+      return {
+        kind: "post",
+        seq,
+        tick,
+        author: null,
+        text: `Harbour news at ${str(event, "port")}: the ${str(event, "name")} are finished there. Their flag came down and the port answers to nobody now.`,
+      };
+    }
     case "resupply": {
       const port = str(event, "port");
       const manifest = Array.isArray(event.data.manifest)

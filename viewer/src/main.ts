@@ -1935,6 +1935,35 @@ function renderPortCard(): void {
       ? " The charter ended here; the ship lies in port, and sails on."
       : ` The charter ends here, ${oneDecimal(voyage.daysOutAt(run.tick))} days out of ${oneDecimal(voyage.legDays)}.`;
   }
+  const sx = run.sectorState;
+  const shareRow = sx.shares[port.index];
+  if (shareRow !== undefined) {
+    const ranked = sector.factions
+      .map((f, i) => ({ name: f.name, v: shareRow[i] ?? 0 }))
+      .sort((a, b) => b.v - a.v);
+    const top = ranked
+      .slice(0, 3)
+      .map((r) => `${r.name} ${Math.round(r.v)}`)
+      .join(" · ");
+    bio += ` Influence: ${top}.`;
+    const cond = sx.conditions[port.index] ?? null;
+    if (cond !== null && cond.phase === "pending") {
+      bio += ` A ${cond.state} is coming.`;
+    } else if (cond !== null && cond.phase === "active") {
+      bio += ` The port is in ${cond.state} (${cond.daysLeft} ${cond.daysLeft === 1 ? "day" : "days"} left).`;
+    }
+    const contest = sx.contests.find((c) => c.portIndex === port.index);
+    if (contest !== undefined) {
+      const chalName = sector.factionAt(contest.challenger).name;
+      const incName =
+        contest.incumbent >= 0
+          ? sector.factionAt(contest.incumbent).name
+          : "the free port";
+      bio +=
+        ` An ${contest.kind} is being fought here: ${incName} ` +
+        `${contest.scoreIncumbent}–${contest.scoreChallenger} ${chalName}, day ${contest.days}.`;
+    }
+  }
   portBioEl.textContent = bio;
 }
 
@@ -3068,7 +3097,8 @@ function updateFactionsList(): void {
   const sector = run.galaxy.sector;
   const rows = sector.factions.map((f) => {
     const v = run.standing.byId[f.id] ?? 0;
-    return `${f.id}:${Math.round(v * 1000)}`;
+    const holds = sector.ports.filter((p) => p.faction === f.index).length;
+    return `${f.id}:${Math.round(v * 1000)}:${holds}`;
   });
   const sig = rows.join("|");
   if (sig === factionsSig) return;
@@ -3079,9 +3109,12 @@ function updateFactionsList(): void {
     const band = bandOf(v);
     const row = document.createElement("div");
     row.className = "seat-row";
+    const holds = sector.ports.filter((p) => p.faction === f.index).length;
     const name = document.createElement("span");
     name.className = "seat-name";
-    name.textContent = `${f.name} · ${f.kind}, ${f.temperament}`;
+    name.textContent =
+      `${f.name} · ${f.kind}, ${f.temperament} · holds ${holds} ` +
+      (holds === 1 ? "port" : "ports");
     const bar = document.createElement("div");
     bar.className = "sbar";
     const fill = document.createElement("div");

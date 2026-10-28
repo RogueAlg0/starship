@@ -217,6 +217,77 @@ class Renderer implements ChronicleRenderer {
         );
         break;
       }
+      case "sector_campaign": {
+        line(
+          `${ts} — Word from the sector: the ${str(data, "name")} are making a push at ${str(data, "port")}.`,
+          false,
+        );
+        break;
+      }
+      case "sector_contest_started": {
+        const kind = str(data, "kind");
+        const port = str(data, "port");
+        const chal = str(data, "challengerName");
+        const inc = str(data, "incumbentName");
+        line(
+          inc === ""
+            ? `${ts} — At ${port}, the ${chal} bid openly for the free port: an ${kind} will settle it.`
+            : `${ts} — At ${port}, the ${chal} challenge the ${inc}: an ${kind} for control of the port.` +
+                (data["feud"] === true
+                  ? " An old grudge stands behind it."
+                  : ""),
+          true,
+        );
+        break;
+      }
+      case "sector_contest_day": {
+        line(
+          `${ts} — ${str(data, "port")} ${str(data, "kind")}, day ${num(data, "day")}: ` +
+            `${str(data, "incumbentName") === "" ? "the port" : str(data, "incumbentName")} ${num(data, "scoreIncumbent")}–${num(data, "scoreChallenger")} ${str(data, "challengerName")}.`,
+          false,
+        );
+        break;
+      }
+      case "sector_contest_resolved": {
+        const flipped = data["flipped"] === true;
+        line(
+          `${ts} — The ${str(data, "kind")} at ${str(data, "port")} ends ` +
+            `${num(data, "scoreWinner")}–${num(data, "scoreLoser")}: ` +
+            (flipped
+              ? `the ${str(data, "winnerName")} take the port from the ${str(data, "loserName")}.`
+              : `the ${str(data, "winnerName")} hold the port against the ${str(data, "loserName")}.`),
+          true,
+        );
+        break;
+      }
+      case "sector_condition": {
+        const port = str(data, "port");
+        const state = str(data, "state");
+        const phase = str(data, "phase");
+        line(
+          phase === "pending"
+            ? `${ts} — Word from ${port}: a ${state} is coming. The harbour is bracing.`
+            : phase === "active"
+              ? `${ts} — ${port} is in ${state}.`
+              : `${ts} — ${port} clears its ${state}.`,
+          false,
+        );
+        break;
+      }
+      case "sector_relief": {
+        line(
+          `${ts} — The ${this.shipName} lies at ${str(data, "port")}, and her call is relief: the shortage there eases a day sooner.`,
+          false,
+        );
+        break;
+      }
+      case "sector_collapse": {
+        line(
+          `${ts} — At ${str(data, "port")}, the ${str(data, "name")} are bled white; their flag comes down and the port answers to nobody.`,
+          true,
+        );
+        break;
+      }
       case "resupply": {
         const words: Record<string, string> = {
           food: "food",

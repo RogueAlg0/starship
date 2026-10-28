@@ -1778,7 +1778,57 @@
       stayBonusDays: 2,
       coldLine: -0.3,
       warmLine: 0.15,
-      honouredLine: 0.5
+      honouredLine: 0.5,
+      /**
+       * The sector itself, step 2: the factions play their own
+       * game at the ports, daily, whether or not the witnessed
+       * ship is watching. Influence is a share of a port's trade
+       * and voice, always summing to 100 across the factions.
+       * Control changes hands through contests, never by drift
+       * alone; drift only brings a challenger close enough to
+       * force one. All numbers are points of share per day
+       * unless named otherwise.
+       */
+      sector: {
+        /** Effort spread converted to share movement per day. */
+        driftRate: 1.7,
+        /**
+         * Daily pull of a port's shares toward their natural
+         * distribution (the port's character, set at creation).
+         * Without it, incumbency compounds and every port ends
+         * at 100 for somebody; with it, ports stay plural and
+         * challengers stay alive near their natural strength.
+         */
+        reversion: 0.012,
+        /** A challenger must hold at least this share to force a contest. */
+        contestFloor: 22,
+        /** ...and stand within this many points of the controller. */
+        contestGap: 5,
+        /** Under an active unrest the gap widens: the port is volatile. */
+        unrestGap: 7,
+        /** First to this many days takes the contest. */
+        contestWinDays: 4,
+        /** No contest runs longer than this; the higher score holds. */
+        contestMaxDays: 7,
+        /** Quiet days at a port after a contest resolves. */
+        contestCooldownDays: 10,
+        /** A controller under this share with no contest loses the port. */
+        collapseLine: 10,
+        /** A challenger taking a free port must reach this share. */
+        freePortLine: 45,
+        /** Daily chance a port ignites a condition, before context. */
+        conditionChance: 0.012,
+        /** Added ignition chance when the controller is weak. */
+        weakControllerBonus: 0.02,
+        /** Days a condition spends announced before it bites. */
+        conditionPendingDays: 1,
+        /** Active days per condition kind. */
+        boomDays: 3,
+        shortageDays: 3,
+        unrestDays: 2,
+        /** Quiet days at a port after a condition ends. */
+        conditionCooldownDays: 5
+      }
     },
     /**
      * The galaxy, step 2: traffic. Other ships cross the sector on
@@ -3425,6 +3475,63 @@
           const band = str2(data, "band");
           line(
             `${ts} \u2014 Word from the wider world: the ${str2(data, "name")} now hold the ${this.shipName} in ${phrases[band] ?? band}.`,
+            true
+          );
+          break;
+        }
+        case "sector_campaign": {
+          line(
+            `${ts} \u2014 Word from the sector: the ${str2(data, "name")} are making a push at ${str2(data, "port")}.`,
+            false
+          );
+          break;
+        }
+        case "sector_contest_started": {
+          const kind = str2(data, "kind");
+          const port = str2(data, "port");
+          const chal = str2(data, "challengerName");
+          const inc = str2(data, "incumbentName");
+          line(
+            inc === "" ? `${ts} \u2014 At ${port}, the ${chal} bid openly for the free port: an ${kind} will settle it.` : `${ts} \u2014 At ${port}, the ${chal} challenge the ${inc}: an ${kind} for control of the port.` + (data["feud"] === true ? " An old grudge stands behind it." : ""),
+            true
+          );
+          break;
+        }
+        case "sector_contest_day": {
+          line(
+            `${ts} \u2014 ${str2(data, "port")} ${str2(data, "kind")}, day ${num2(data, "day")}: ${str2(data, "incumbentName") === "" ? "the port" : str2(data, "incumbentName")} ${num2(data, "scoreIncumbent")}\u2013${num2(data, "scoreChallenger")} ${str2(data, "challengerName")}.`,
+            false
+          );
+          break;
+        }
+        case "sector_contest_resolved": {
+          const flipped = data["flipped"] === true;
+          line(
+            `${ts} \u2014 The ${str2(data, "kind")} at ${str2(data, "port")} ends ${num2(data, "scoreWinner")}\u2013${num2(data, "scoreLoser")}: ` + (flipped ? `the ${str2(data, "winnerName")} take the port from the ${str2(data, "loserName")}.` : `the ${str2(data, "winnerName")} hold the port against the ${str2(data, "loserName")}.`),
+            true
+          );
+          break;
+        }
+        case "sector_condition": {
+          const port = str2(data, "port");
+          const state = str2(data, "state");
+          const phase = str2(data, "phase");
+          line(
+            phase === "pending" ? `${ts} \u2014 Word from ${port}: a ${state} is coming. The harbour is bracing.` : phase === "active" ? `${ts} \u2014 ${port} is in ${state}.` : `${ts} \u2014 ${port} clears its ${state}.`,
+            false
+          );
+          break;
+        }
+        case "sector_relief": {
+          line(
+            `${ts} \u2014 The ${this.shipName} lies at ${str2(data, "port")}, and her call is relief: the shortage there eases a day sooner.`,
+            false
+          );
+          break;
+        }
+        case "sector_collapse": {
+          line(
+            `${ts} \u2014 At ${str2(data, "port")}, the ${str2(data, "name")} are bled white; their flag comes down and the port answers to nobody.`,
             true
           );
           break;
@@ -10413,6 +10520,515 @@
     }
   }
 
+  // src/world/sector.ts
+  var VOICE_FIRST = [
+    "Mara",
+    "Odo",
+    "Selin",
+    "Vera",
+    "Tomas",
+    "Ines",
+    "Rurik",
+    "Alba",
+    "Casper",
+    "Noor",
+    "Ilya",
+    "Petra"
+  ];
+  var VOICE_LAST = [
+    "Vane",
+    "Okafor",
+    "Lindqvist",
+    "Marsh",
+    "Ibarra",
+    "Kowalski",
+    "Fen",
+    "Adeyemi",
+    "Roth",
+    "Sillanpaa",
+    "Vega",
+    "Moreau"
+  ];
+  function hashWeights(seedText, count) {
+    const out = [];
+    for (let i = 0; i < count; i++) {
+      out.push(1 + nameHash(`${seedText}:${i}`) % 9);
+    }
+    return out;
+  }
+  function normalize(shares) {
+    for (let i = 0; i < shares.length; i++) {
+      if (shares[i] < 0) shares[i] = 0;
+    }
+    const total = shares.reduce((a, b) => a + b, 0);
+    if (total <= 0) {
+      const each = 100 / shares.length;
+      for (let i = 0; i < shares.length; i++) shares[i] = each;
+      return;
+    }
+    for (let i = 0; i < shares.length; i++) shares[i] = shares[i] / total * 100;
+  }
+  function createSectorState(sector) {
+    const factionCount = sector.factions.length;
+    const shares = [];
+    for (const port of sector.ports) {
+      const weights = hashWeights(`shares:${port.name}`, factionCount);
+      const row = new Array(factionCount).fill(0);
+      if (port.faction !== null) {
+        const control = 56 + nameHash(port.name) % 16;
+        const rest = 100 - control;
+        const restTotal = weights.reduce(
+          (a, b, i) => i === port.faction ? a : a + b,
+          0
+        );
+        for (let f = 0; f < factionCount; f++) {
+          row[f] = f === port.faction ? control : weights[f] / restTotal * rest;
+        }
+      } else {
+        const total = weights.reduce((a, b) => a + b, 0);
+        for (let f = 0; f < factionCount; f++) {
+          row[f] = weights[f] / total * 100;
+        }
+        const top = Math.max(...row);
+        if (top > 44) {
+          const over = top - 44;
+          const topIdx = row.indexOf(top);
+          row[topIdx] = 44;
+          const others = factionCount - 1;
+          for (let f = 0; f < factionCount; f++) {
+            if (f !== topIdx) row[f] = row[f] + over / others;
+          }
+        }
+      }
+      normalize(row);
+      shares.push(row);
+    }
+    const rivals = [];
+    for (const faction of sector.factions) {
+      const home = sector.portAt(faction.homePort);
+      let best = -1;
+      let bestDist = Number.POSITIVE_INFINITY;
+      for (const other of sector.factions) {
+        if (other.index === faction.index) continue;
+        const p = sector.portAt(other.homePort);
+        const d = (p.x - home.x) ** 2 + (p.y - home.y) ** 2;
+        if (d < bestDist || d === bestDist && other.index < best) {
+          bestDist = d;
+          best = other.index;
+        }
+      }
+      rivals.push(best);
+    }
+    const voices = sector.factions.map((faction) => {
+      const h = nameHash(`${faction.name}:voice`);
+      const first = VOICE_FIRST[h % VOICE_FIRST.length];
+      const last = VOICE_LAST[(h >>> 5) % VOICE_LAST.length];
+      return `${first} ${last}`;
+    });
+    return {
+      shares,
+      naturalShares: shares.map((row) => [...row]),
+      campaigns: sector.factions.map(() => null),
+      conditions: sector.ports.map(() => null),
+      contests: [],
+      contestReadyDay: sector.ports.map(() => 0),
+      rivals,
+      voices,
+      lastDay: -1,
+      eventCursor: 0,
+      shipPort: null
+    };
+  }
+  function contestKindFor(incumbentKind, challengerKind, incumbentTemperament, challengerTemperament) {
+    if (incumbentKind !== null && incumbentKind === challengerKind) {
+      return "election";
+    }
+    if (incumbentTemperament === "martial" || challengerTemperament === "martial" || incumbentKind === "order" || challengerKind === "order") {
+      return "blockade";
+    }
+    if (incumbentTemperament === "greedy" || challengerTemperament === "greedy" || challengerKind === "cartel" || challengerKind === "company" || challengerKind === "syndicate" || incumbentKind === "cartel" || incumbentKind === "company" || incumbentKind === "syndicate") {
+      return "embargo";
+    }
+    return "election";
+  }
+  function contestWeight(kind, factionKind, temperament, isIncumbent) {
+    let weight = 1;
+    if (kind === "blockade") {
+      if (temperament === "martial") weight *= 1.3;
+      if (factionKind === "order") weight *= 1.15;
+    } else if (kind === "embargo") {
+      if (temperament === "greedy") weight *= 1.3;
+      if (factionKind === "cartel" || factionKind === "company" || factionKind === "syndicate") {
+        weight *= 1.15;
+      }
+    } else {
+      if (isIncumbent) weight *= 1.1;
+      if (temperament === "proud" || temperament === "pious") weight *= 1.15;
+    }
+    if (temperament === "weary") weight *= 0.9;
+    return weight;
+  }
+  function topChallenger(row, controller) {
+    let index = -1;
+    let share = -1;
+    for (let f = 0; f < row.length; f++) {
+      if (f === controller) continue;
+      if (row[f] > share) {
+        share = row[f];
+        index = f;
+      }
+    }
+    return { index, share };
+  }
+  function stepSector(w, state, sector) {
+    const events = w.events.events;
+    while (state.eventCursor < events.length) {
+      const ev = events[state.eventCursor];
+      state.eventCursor++;
+      if (ev.type === "arrival" || ev.type === "port_call") {
+        const p = ev.data["portIndex"];
+        if (typeof p === "number") state.shipPort = p;
+      } else if (ev.type === "departure") {
+        state.shipPort = null;
+      }
+    }
+    const day = Math.floor(w.tick / CONFIG.time.ticksPerDay);
+    if (day <= state.lastDay) return;
+    state.lastDay = day;
+    const cfg = CONFIG.factions.sector;
+    const rng = w.rng.get("sector");
+    for (const faction of sector.factions) {
+      const live = state.campaigns[faction.index] ?? null;
+      if (live !== null) {
+        live.daysLeft -= 1;
+        if (live.daysLeft <= 0) state.campaigns[faction.index] = null;
+        continue;
+      }
+      if (rng.next() >= 0.08) continue;
+      const contestedPorts = new Set(state.contests.map((c) => c.portIndex));
+      const usable = (p) => !contestedPorts.has(p.index) && p.index !== faction.homePort;
+      const rival = state.rivals[faction.index] ?? -1;
+      const tier1 = sector.ports.filter(
+        (p) => usable(p) && p.faction === rival
+      );
+      const tier2 = sector.ports.filter((p) => {
+        if (!usable(p) || p.faction !== null) return false;
+        const row = state.shares[p.index];
+        return topChallenger(row, null).index === faction.index;
+      });
+      const tier3 = sector.ports.filter(
+        (p) => usable(p) && p.faction !== faction.index
+      );
+      const tier = tier1.length > 0 ? tier1 : tier2.length > 0 ? tier2 : tier3;
+      if (tier.length === 0) continue;
+      let target = tier[0];
+      if (tier === tier3) {
+        let bestShare = -1;
+        for (const p of tier3) {
+          const share = state.shares[p.index]?.[faction.index] ?? 0;
+          if (share > bestShare) {
+            bestShare = share;
+            target = p;
+          }
+        }
+      } else {
+        target = tier[rng.int(tier.length)];
+      }
+      state.campaigns[faction.index] = {
+        portIndex: target.index,
+        daysLeft: 24 + rng.int(14)
+      };
+      w.emit("sector_campaign", [], {
+        faction: faction.id,
+        name: faction.name,
+        portIndex: target.index,
+        port: target.name,
+        voice: state.voices[faction.index] ?? "",
+        witnessed: state.shipPort === target.index
+      });
+    }
+    for (const port of sector.ports) {
+      const row = state.shares[port.index];
+      const contest = state.contests.find((c) => c.portIndex === port.index);
+      const condition = state.conditions[port.index] ?? null;
+      if (condition !== null) {
+        if (condition.state === "shortage" && condition.phase === "active" && state.shipPort === port.index) {
+          condition.daysLeft -= 1;
+          w.emit("sector_relief", [], {
+            portIndex: port.index,
+            port: port.name
+          });
+        }
+        condition.daysLeft -= 1;
+        if (condition.daysLeft <= 0) {
+          if (condition.phase === "pending") {
+            condition.phase = "active";
+            condition.daysLeft = condition.state === "boom" ? cfg.boomDays : condition.state === "shortage" ? cfg.shortageDays : cfg.unrestDays;
+            w.emit("sector_condition", [], {
+              portIndex: port.index,
+              port: port.name,
+              state: condition.state,
+              phase: "active",
+              witnessed: state.shipPort === port.index
+            });
+          } else if (condition.phase === "active") {
+            condition.phase = "cooldown";
+            condition.daysLeft = cfg.conditionCooldownDays;
+            w.emit("sector_condition", [], {
+              portIndex: port.index,
+              port: port.name,
+              state: condition.state,
+              phase: "ended",
+              witnessed: state.shipPort === port.index
+            });
+          } else {
+            state.conditions[port.index] = null;
+          }
+        }
+      }
+      if (contest !== void 0) {
+        scoreContestDay(w, state, sector, contest);
+        continue;
+      }
+      const controller = port.faction;
+      const challengerBefore = topChallenger(row, controller);
+      const efforts = [];
+      let effortTotal = 0;
+      for (const faction of sector.factions) {
+        let effort = 1;
+        if (faction.homePort === port.index) effort += 0.7;
+        if (controller === faction.index) effort += 0.3;
+        if (controller !== faction.index && (row[faction.index] ?? 0) < 10) {
+          effort += 0.3;
+        }
+        const campaign = state.campaigns[faction.index] ?? null;
+        if (campaign !== null) {
+          effort += campaign.portIndex === port.index ? 0.9 : -0.15;
+        }
+        if (state.rivals[faction.index] !== void 0 && (row[state.rivals[faction.index]] ?? 0) >= 20) {
+          effort += 0.25;
+        }
+        if (faction.temperament === "greedy" && controller !== faction.index) {
+          effort += 0.15;
+        }
+        if (faction.temperament === "insular" && faction.homePort !== port.index) {
+          effort -= 0.2;
+        }
+        if (faction.temperament === "martial") effort += 0.1;
+        if (faction.temperament === "weary") effort -= 0.1;
+        if (condition !== null && condition.phase === "active") {
+          if (condition.state === "boom" && controller === faction.index) {
+            effort *= 1.3;
+          } else if (condition.state === "shortage" && controller === faction.index) {
+            effort *= 0.6;
+          } else if (condition.state === "unrest" && challengerBefore.index === faction.index) {
+            effort *= 1.3;
+          }
+        }
+        if (state.shipPort === port.index && controller === faction.index) {
+          effort += 0.2;
+        }
+        effort *= 0.45 + rng.next() * 1.1;
+        efforts.push(effort);
+        effortTotal += effort;
+      }
+      const mean = effortTotal / sector.factions.length;
+      const natural = state.naturalShares[port.index];
+      for (let f = 0; f < row.length; f++) {
+        row[f] = row[f] + (efforts[f] - mean) * cfg.driftRate + ((natural[f] ?? 0) - row[f]) * cfg.reversion;
+      }
+      normalize(row);
+      if (controller !== null && (row[controller] ?? 0) < cfg.collapseLine && day >= (state.contestReadyDay[port.index] ?? 0)) {
+        const fallen = sector.factionAt(controller);
+        port.faction = null;
+        w.emit("sector_collapse", [], {
+          portIndex: port.index,
+          port: port.name,
+          faction: fallen.id,
+          name: fallen.name,
+          witnessed: state.shipPort === port.index
+        });
+        state.contestReadyDay[port.index] = day + cfg.contestCooldownDays;
+        continue;
+      }
+      if (day >= (state.contestReadyDay[port.index] ?? 0)) {
+        const gap = condition !== null && condition.phase === "active" && condition.state === "unrest" ? cfg.unrestGap : cfg.contestGap;
+        const challenger = topChallenger(row, controller);
+        if (controller === null) {
+          if (challenger.index >= 0 && challenger.share >= cfg.freePortLine) {
+            startContest(w, state, sector, port.index, -1, challenger.index);
+          }
+        } else if (challenger.index >= 0 && challenger.share >= cfg.contestFloor && challenger.share >= (row[controller] ?? 0) - gap) {
+          startContest(w, state, sector, port.index, controller, challenger.index);
+        }
+      }
+      if (state.conditions[port.index] === null) {
+        const controllerShare = controller === null ? 0 : row[controller] ?? 0;
+        const chance = cfg.conditionChance + (controller !== null && controllerShare < 30 ? cfg.weakControllerBonus : 0);
+        if (rng.next() < chance) {
+          let next;
+          const top = topChallenger(row, controller);
+          const contested = controller !== null && top.index >= 0 && controllerShare - top.share < 12;
+          if (controller !== null && controllerShare < 30 || contested && rng.next() < 0.5) {
+            next = "unrest";
+          } else {
+            next = rng.next() < 0.5 ? "boom" : "shortage";
+          }
+          state.conditions[port.index] = {
+            state: next,
+            phase: "pending",
+            daysLeft: cfg.conditionPendingDays
+          };
+          w.emit("sector_condition", [], {
+            portIndex: port.index,
+            port: port.name,
+            state: next,
+            phase: "pending",
+            witnessed: state.shipPort === port.index
+          });
+        }
+      }
+    }
+  }
+  function startContest(w, state, sector, portIndex, incumbent, challenger) {
+    const port = sector.portAt(portIndex);
+    const chal = sector.factionAt(challenger);
+    const inc = incumbent >= 0 ? sector.factionAt(incumbent) : null;
+    const kind = contestKindFor(
+      inc?.kind ?? null,
+      chal.kind,
+      inc?.temperament ?? null,
+      chal.temperament
+    );
+    state.contests.push({
+      portIndex,
+      incumbent,
+      challenger,
+      kind,
+      scoreIncumbent: 0,
+      scoreChallenger: 0,
+      days: 0
+    });
+    w.emit("sector_contest_started", [], {
+      portIndex,
+      port: port.name,
+      kind,
+      incumbent: inc?.id ?? "",
+      incumbentName: inc?.name ?? "",
+      challenger: chal.id,
+      challengerName: chal.name,
+      feud: inc !== null && (state.rivals[challenger] === incumbent || state.rivals[incumbent] === challenger),
+      voice: state.voices[challenger] ?? "",
+      incumbentVoice: inc !== null ? state.voices[incumbent] ?? "" : "",
+      witnessed: state.shipPort === portIndex
+    });
+  }
+  function scoreContestDay(w, state, sector, contest) {
+    const cfg = CONFIG.factions.sector;
+    const rng = w.rng.get("sector");
+    const port = sector.portAt(contest.portIndex);
+    const chal = sector.factionAt(contest.challenger);
+    const inc = contest.incumbent >= 0 ? sector.factionAt(contest.incumbent) : null;
+    const chalWeight = contestWeight(contest.kind, chal.kind, chal.temperament, false) * (0.7 + rng.next() * 0.6);
+    const incWeight = (inc === null ? 0.85 : contestWeight(contest.kind, inc.kind, inc.temperament, true)) * (0.7 + rng.next() * 0.6);
+    contest.days += 1;
+    if (chalWeight > incWeight) {
+      contest.scoreChallenger += 1;
+    } else {
+      contest.scoreIncumbent += 1;
+    }
+    w.emit("sector_contest_day", [], {
+      portIndex: contest.portIndex,
+      port: port.name,
+      kind: contest.kind,
+      day: contest.days,
+      scoreIncumbent: contest.scoreIncumbent,
+      scoreChallenger: contest.scoreChallenger,
+      incumbentName: inc?.name ?? "",
+      challengerName: chal.name,
+      witnessed: state.shipPort === contest.portIndex
+    });
+    const chalWon = contest.scoreChallenger >= cfg.contestWinDays;
+    const incWon = contest.scoreIncumbent >= cfg.contestWinDays;
+    const spent = contest.days >= cfg.contestMaxDays;
+    if (!chalWon && !incWon && !spent) return;
+    const challengerTakes = chalWon || spent && contest.scoreChallenger > contest.scoreIncumbent;
+    const row = state.shares[contest.portIndex];
+    let flipped = false;
+    if (challengerTakes) {
+      if (contest.incumbent >= 0) {
+        const move = Math.min(6, row[contest.incumbent] ?? 6);
+        row[contest.incumbent] = (row[contest.incumbent] ?? 0) - move;
+        row[contest.challenger] = (row[contest.challenger] ?? 0) + move;
+      }
+      port.faction = contest.challenger;
+      flipped = contest.incumbent !== contest.challenger;
+    } else if (contest.incumbent >= 0) {
+      const move = Math.min(5, row[contest.challenger] ?? 5);
+      row[contest.challenger] = (row[contest.challenger] ?? 0) - move;
+      row[contest.incumbent] = (row[contest.incumbent] ?? 0) + move;
+    }
+    normalize(row);
+    state.contests = state.contests.filter((c) => c !== contest);
+    state.contestReadyDay[contest.portIndex] = Math.floor(w.tick / CONFIG.time.ticksPerDay) + cfg.contestCooldownDays;
+    w.emit("sector_contest_resolved", [], {
+      portIndex: contest.portIndex,
+      port: port.name,
+      kind: contest.kind,
+      flipped,
+      winner: challengerTakes ? chal.id : inc?.id ?? "",
+      winnerName: challengerTakes ? chal.name : inc?.name ?? "the port itself",
+      loser: challengerTakes ? inc?.id ?? "" : chal.id,
+      loserName: challengerTakes ? inc?.name ?? "the free port" : chal.name,
+      scoreWinner: challengerTakes ? contest.scoreChallenger : contest.scoreIncumbent,
+      scoreLoser: challengerTakes ? contest.scoreIncumbent : contest.scoreChallenger,
+      voice: state.voices[contest.challenger] ?? "",
+      witnessed: state.shipPort === contest.portIndex
+    });
+  }
+  function checkSectorState(sector, state) {
+    const problems = [];
+    if (state.shares.length !== sector.ports.length) {
+      problems.push("sector shares do not cover every port");
+    }
+    for (const port of sector.ports) {
+      const row = state.shares[port.index];
+      if (row === void 0 || row.length !== sector.factions.length) {
+        problems.push(`port ${port.name} influence row is malformed`);
+        continue;
+      }
+      const total = row.reduce((a, b) => a + b, 0);
+      if (Math.abs(total - 100) > 0.75) {
+        problems.push(`port ${port.name} influence sums to ${r3(total)}`);
+      }
+      for (const share of row) {
+        if (share < 0 || share > 100) {
+          problems.push(`port ${port.name} holds a share outside [0, 100]`);
+        }
+      }
+    }
+    const seenPorts = /* @__PURE__ */ new Set();
+    for (const contest of state.contests) {
+      if (seenPorts.has(contest.portIndex)) {
+        problems.push("two contests live at one port");
+      }
+      seenPorts.add(contest.portIndex);
+      if (contest.scoreChallenger < 0 || contest.scoreIncumbent < 0) {
+        problems.push("a contest score went negative");
+      }
+    }
+    if (state.rivals.length !== sector.factions.length) {
+      problems.push("rivals do not cover every faction");
+    }
+    if (state.campaigns.length !== sector.factions.length) {
+      problems.push("campaigns do not cover every faction");
+    }
+    if (state.voices.length !== sector.factions.length) {
+      problems.push("voices do not cover every faction");
+    }
+    return problems;
+  }
+
   // src/world/weather.ts
   var Weather = class {
     /** Index into CONFIG.weather.states. */
@@ -10472,6 +11088,7 @@
     const health = createHealthState();
     const council = createCouncil(crew);
     const standing = createFactionStanding(sector);
+    const sectorState = createSectorState(sector);
     ship.councilPublic = { cmoFilled: true, emergencyUntil: -1, acting: {} };
     const weather = new Weather();
     const ctx = {
@@ -10534,7 +11151,10 @@
     });
     engine.addSystem({
       name: "factions",
-      step: (w) => stepFactionStanding(w, standing, sector)
+      step: (w) => {
+        stepFactionStanding(w, standing, sector);
+        stepSector(w, sectorState, sector);
+      }
     });
     engine.addInvariant("crew state in range", () => checkCrewState(crew, ship));
     engine.addInvariant("ship state in range", () => checkShipState(ship));
@@ -10563,6 +11183,10 @@
       "faction standing in range",
       () => checkFactionState(sector, standing)
     );
+    engine.addInvariant(
+      "sector influence in range",
+      () => checkSectorState(sector, sectorState)
+    );
     let started = false;
     const start = () => {
       if (started) return;
@@ -10586,6 +11210,7 @@
       health,
       council,
       standing,
+      sectorState,
       get decisions() {
         return decisions instanceof UtilitySource ? decisions.records : [];
       },
@@ -10611,6 +11236,7 @@
       health: built.health,
       council: built.council,
       standing: built.standing,
+      sectorState: built.sectorState,
       get decisions() {
         return built.decisions;
       },
@@ -11382,6 +12008,78 @@
         const text = texts[band];
         if (text === void 0) return null;
         return { kind: "post", seq, tick, author: null, text };
+      }
+      case "sector_campaign": {
+        const voice = str3(event, "voice");
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: null,
+          text: `Harbour news: the ${str3(event, "name")} are making a push at ${str3(event, "port")}. Their ships are suddenly everywhere on that run.` + (voice !== "" ? ` ${voice} calls it "a long-overdue correction."` : "")
+        };
+      }
+      case "sector_contest_started": {
+        const port = str3(event, "port");
+        const kind = str3(event, "kind");
+        const chal = str3(event, "challengerName");
+        const inc = str3(event, "incumbentName");
+        const voice = str3(event, "voice");
+        const feud = event.data["feud"] === true ? " There is old history between these two, and the harbour knows it." : "";
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: null,
+          text: (inc === "" ? `Harbour news at ${port}: the ${chal} bid openly for the free port. An ${kind} will settle it.` : `Harbour news at ${port}: the ${chal} have challenged the ${inc} for the port. An ${kind} will settle it, day by day.`) + feud + (voice !== "" ? ` ${voice} speaks for the challengers: "The port will decide, and we like its mood."` : "")
+        };
+      }
+      case "sector_contest_day": {
+        if (event.data["witnessed"] !== true) return null;
+        const port = str3(event, "port");
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: null,
+          text: `From the dockside at ${port}: the ${str3(event, "kind")} stands ${num3(event, "scoreIncumbent")}\u2013${num3(event, "scoreChallenger")} after day ${num3(event, "day")}. The harbour is keeping score on a wall.`
+        };
+      }
+      case "sector_contest_resolved": {
+        const port = str3(event, "port");
+        const flipped = event.data["flipped"] === true;
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: null,
+          text: flipped ? `Harbour news at ${port}: the ${str3(event, "kind")} is over, ${num3(event, "scoreWinner")}\u2013${num3(event, "scoreLoser")}. The ${str3(event, "winnerName")} take the port. New flag over the harbour office by morning.` : `Harbour news at ${port}: the ${str3(event, "kind")} is over, ${num3(event, "scoreWinner")}\u2013${num3(event, "scoreLoser")}. The ${str3(event, "winnerName")} hold the port against the ${str3(event, "loserName")}.`
+        };
+      }
+      case "sector_condition": {
+        const port = str3(event, "port");
+        const state = str3(event, "state");
+        const phase = str3(event, "phase");
+        const text = phase === "pending" ? `Harbour news at ${port}: a ${state} is coming. Prices are already moving on the rumour.` : phase === "active" ? `Harbour news at ${port}: the ${state} is on. The harbour feels it in every queue and manifest.` : `Harbour news at ${port}: the ${state} has cleared. The harbour breathes again.`;
+        return { kind: "post", seq, tick, author: null, text };
+      }
+      case "sector_relief": {
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: null,
+          text: `Our call at ${str3(event, "port")} counted as relief there. A hungry port remembers who showed up.`
+        };
+      }
+      case "sector_collapse": {
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: null,
+          text: `Harbour news at ${str3(event, "port")}: the ${str3(event, "name")} are finished there. Their flag came down and the port answers to nobody now.`
+        };
       }
       case "resupply": {
         const port = str3(event, "port");
@@ -19526,6 +20224,25 @@
     } else if (port.index === voyage.destination) {
       bio += voyage.inPortAt(run.tick) ? " The charter ended here; the ship lies in port, and sails on." : ` The charter ends here, ${oneDecimal2(voyage.daysOutAt(run.tick))} days out of ${oneDecimal2(voyage.legDays)}.`;
     }
+    const sx = run.sectorState;
+    const shareRow = sx.shares[port.index];
+    if (shareRow !== void 0) {
+      const ranked = sector.factions.map((f, i) => ({ name: f.name, v: shareRow[i] ?? 0 })).sort((a, b) => b.v - a.v);
+      const top = ranked.slice(0, 3).map((r) => `${r.name} ${Math.round(r.v)}`).join(" \xB7 ");
+      bio += ` Influence: ${top}.`;
+      const cond = sx.conditions[port.index] ?? null;
+      if (cond !== null && cond.phase === "pending") {
+        bio += ` A ${cond.state} is coming.`;
+      } else if (cond !== null && cond.phase === "active") {
+        bio += ` The port is in ${cond.state} (${cond.daysLeft} ${cond.daysLeft === 1 ? "day" : "days"} left).`;
+      }
+      const contest = sx.contests.find((c) => c.portIndex === port.index);
+      if (contest !== void 0) {
+        const chalName = sector.factionAt(contest.challenger).name;
+        const incName = contest.incumbent >= 0 ? sector.factionAt(contest.incumbent).name : "the free port";
+        bio += ` An ${contest.kind} is being fought here: ${incName} ${contest.scoreIncumbent}\u2013${contest.scoreChallenger} ${chalName}, day ${contest.days}.`;
+      }
+    }
     portBioEl.textContent = bio;
   }
   var trafficCard = must("traffic-card");
@@ -20445,7 +21162,8 @@
     const sector = run.galaxy.sector;
     const rows = sector.factions.map((f) => {
       const v = run.standing.byId[f.id] ?? 0;
-      return `${f.id}:${Math.round(v * 1e3)}`;
+      const holds = sector.ports.filter((p) => p.faction === f.index).length;
+      return `${f.id}:${Math.round(v * 1e3)}:${holds}`;
     });
     const sig = rows.join("|");
     if (sig === factionsSig) return;
@@ -20456,9 +21174,10 @@
       const band = bandOf(v);
       const row = document.createElement("div");
       row.className = "seat-row";
+      const holds = sector.ports.filter((p) => p.faction === f.index).length;
       const name = document.createElement("span");
       name.className = "seat-name";
-      name.textContent = `${f.name} \xB7 ${f.kind}, ${f.temperament}`;
+      name.textContent = `${f.name} \xB7 ${f.kind}, ${f.temperament} \xB7 holds ${holds} ` + (holds === 1 ? "port" : "ports");
       const bar = document.createElement("div");
       bar.className = "sbar";
       const fill2 = document.createElement("div");

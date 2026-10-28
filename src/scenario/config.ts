@@ -851,6 +851,56 @@ export const CONFIG = {
     coldLine: -0.3,
     warmLine: 0.15,
     honouredLine: 0.5,
+    /**
+     * The sector itself, step 2: the factions play their own
+     * game at the ports, daily, whether or not the witnessed
+     * ship is watching. Influence is a share of a port's trade
+     * and voice, always summing to 100 across the factions.
+     * Control changes hands through contests, never by drift
+     * alone; drift only brings a challenger close enough to
+     * force one. All numbers are points of share per day
+     * unless named otherwise.
+     */
+    sector: {
+      /** Effort spread converted to share movement per day. */
+      driftRate: 1.7,
+      /**
+       * Daily pull of a port's shares toward their natural
+       * distribution (the port's character, set at creation).
+       * Without it, incumbency compounds and every port ends
+       * at 100 for somebody; with it, ports stay plural and
+       * challengers stay alive near their natural strength.
+       */
+      reversion: 0.012,
+      /** A challenger must hold at least this share to force a contest. */
+      contestFloor: 22,
+      /** ...and stand within this many points of the controller. */
+      contestGap: 5,
+      /** Under an active unrest the gap widens: the port is volatile. */
+      unrestGap: 7,
+      /** First to this many days takes the contest. */
+      contestWinDays: 4,
+      /** No contest runs longer than this; the higher score holds. */
+      contestMaxDays: 7,
+      /** Quiet days at a port after a contest resolves. */
+      contestCooldownDays: 10,
+      /** A controller under this share with no contest loses the port. */
+      collapseLine: 10,
+      /** A challenger taking a free port must reach this share. */
+      freePortLine: 45,
+      /** Daily chance a port ignites a condition, before context. */
+      conditionChance: 0.012,
+      /** Added ignition chance when the controller is weak. */
+      weakControllerBonus: 0.02,
+      /** Days a condition spends announced before it bites. */
+      conditionPendingDays: 1,
+      /** Active days per condition kind. */
+      boomDays: 3,
+      shortageDays: 3,
+      unrestDays: 2,
+      /** Quiet days at a port after a condition ends. */
+      conditionCooldownDays: 5,
+    },
   },
 
   /**

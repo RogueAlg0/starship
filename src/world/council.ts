@@ -1946,6 +1946,11 @@ function runCourseSitting(
       ),
       motion: null,
       carried: false,
+      basis: "fallback",
+      backers: [],
+      aggregateTotal: null,
+      runnerUp: null,
+      runnerUpTotal: null,
       noCouncil: true,
       candidates: candidates.map((c) => ({
         port: sector.portAt(c.index).name,
@@ -1981,6 +1986,15 @@ function runCourseSitting(
   againstCount = result.againstCount;
   strength = result.strength;
   carried = forCount > againstCount;
+  // The aggregate standings behind a refusal, kept so the
+  // decision can say why the fallback port won: every non-motion
+  // candidate's combined table price and the captain's own price
+  // for it (the tie-break), in chart order.
+  let aggregate: Array<{
+    index: number;
+    total: number;
+    captainPrice: number;
+  }> = [];
   if (!carried) {
     // The motion falls: the course is the port the whole table's
     // prices favour in aggregate — every voter's arithmetic,
@@ -2005,6 +2019,7 @@ function runCourseSitting(
       }
       const captainPrice =
         captainRow !== undefined ? (captainRow[at] as number) : 0;
+      aggregate.push({ index: cand.index, total, captainPrice });
       if (
         total > bestTotal ||
         (total === bestTotal && captainPrice > bestCaptainPrice)
@@ -2048,6 +2063,58 @@ function runCourseSitting(
   const chosenPort = sector.portAt(chosen);
   const proposerId = motion.proposerId ?? null;
   const captainNow = captainId(state);
+
+  // Why this port, in the table's own arithmetic, so the record
+  // can say it plainly: the basis of the decision, and the
+  // officers whose prices most favoured the chosen port, each
+  // with the clause their seat speaks for it. On a refusal the
+  // runner-up standing is kept too, so the margin shows.
+  const basis = carried ? "motion" : "aggregate";
+  let runnerUp: { index: number; total: number } | null = null;
+  let winnerTotal: number | null = null;
+  if (!carried && aggregate.length > 0) {
+    const standings = [...aggregate].sort(
+      (a, b) =>
+        b.total - a.total ||
+        b.captainPrice - a.captainPrice ||
+        candidateIndexes.indexOf(a.index) - candidateIndexes.indexOf(b.index),
+    );
+    const winner = standings.find((s) => s.index === chosen);
+    if (winner !== undefined) winnerTotal = winner.total;
+    const rest = standings.filter((s) => s.index !== chosen);
+    if (rest.length > 0) {
+      const top = rest[0] as { index: number; total: number };
+      runnerUp = { index: top.index, total: top.total };
+    }
+  }
+  const chosenAt = candidateIndexes.indexOf(chosen);
+  const chosenCand = candidates[chosenAt] as CourseCandidate;
+  const seatByMember = new Map(
+    frame.sitting.map((s) => [s.member.id, s.seatKey] as const),
+  );
+  const backers = votes
+    .filter((v) => v.member !== captainNow)
+    .map((v) => {
+      const member = byId(crew, v.member);
+      const seat = seatByMember.get(v.member) ?? "";
+      return {
+        member: v.member,
+        seat,
+        price: prices.get(v.member)?.[chosenAt] ?? 0,
+        clause:
+          member !== undefined
+            ? courseClause(seat, member, chosenCand, snap, chosenPort.name)
+            : "",
+      };
+    })
+    .sort((a, b) => b.price - a.price)
+    .slice(0, 3)
+    .map(({ member, seat, price, clause }) => ({
+      member,
+      seat,
+      price: r3(price),
+      clause,
+    }));
   w.emit(
     "course_decided",
     [
@@ -2068,6 +2135,12 @@ function runCourseSitting(
       motion: sector.portAt(motionPort).name,
       motionIndex: motionPort,
       carried,
+      basis,
+      backers,
+      aggregateTotal: winnerTotal !== null ? r3(winnerTotal) : null,
+      runnerUp:
+        runnerUp !== null ? sector.portAt(runnerUp.index).name : null,
+      runnerUpTotal: runnerUp !== null ? r3(runnerUp.total) : null,
       noCouncil: false,
       candidates: candidates.map((c) => ({
         port: sector.portAt(c.index).name,
@@ -2093,6 +2166,10 @@ function runCourseSitting(
     votes,
     strength: r3(strength),
     consequence: `course set for ${chosenPort.name}`,
+    coursePort: chosenPort.name,
+    courseMotion: sector.portAt(motionPort).name,
+    courseBasis: basis,
+    courseBackers: backers,
     chair: frame.chairId,
     legitimacy: r3(state.legitimacy),
   });

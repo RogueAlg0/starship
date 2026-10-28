@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { StreamRegistry } from "../src/engine/rng.ts";
+import { renderChronicle } from "../src/log/chronicle.ts";
 import { CONFIG } from "../src/scenario/config.ts";
 import { createRun, type RunContext } from "../src/sim.ts";
 import { generateSector, Voyage } from "../src/world/galaxy.ts";
@@ -179,6 +180,79 @@ describe("the sitting", () => {
       starving.galaxy.voyage.destination,
     );
   }, 60_000);
+});
+
+describe("the why line", () => {
+  /** First sittings across seeds, skipping any seed whose first
+   *  stay holds no sitting in the helper's window. */
+  function* firstSittings(): Generator<{ run: RunContext; decided: SimEvent }> {
+    for (let seed = 1; seed <= 60; seed++) {
+      const run = createRun({ seed });
+      try {
+        yield { run, decided: firstSitting(run) };
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  it("a carried motion records the motion basis and its backers", () => {
+    let carried: SimEvent | undefined;
+    for (const { decided } of firstSittings()) {
+      if (decided.data.carried === true) {
+        carried = decided;
+        break;
+      }
+    }
+    if (carried === undefined) throw new Error("no carried motion in the scan");
+    expect(carried.data.basis).toBe("motion");
+    expect(carried.data.port).toBe(carried.data.motion);
+    expect(Array.isArray(carried.data.backers)).toBe(true);
+  }, 180_000);
+
+  it("a refused motion records why the fallback port won, and the chronicle says it", () => {
+    let refused: SimEvent | undefined;
+    let refusedRun: RunContext | undefined;
+    for (const { run, decided } of firstSittings()) {
+      if (
+        decided.data.carried === false &&
+        decided.data.noCouncil !== true
+      ) {
+        refused = decided;
+        refusedRun = run;
+        break;
+      }
+    }
+    if (refused === undefined || refusedRun === undefined) {
+      throw new Error("no refused course motion found in the seed scan");
+    }
+    // The decision carries its own explanation: the aggregate
+    // basis, the winning margin over the runner-up, and the
+    // officers whose prices most favoured the chosen port.
+    expect(refused.data.basis).toBe("aggregate");
+    expect(refused.data.port).not.toBe(refused.data.motion);
+    const backers = refused.data.backers as Array<{
+      member: string;
+      clause: string;
+    }>;
+    expect(backers.length).toBeGreaterThan(0);
+    expect(backers.length).toBeLessThanOrEqual(3);
+    for (const backer of backers) {
+      expect(backer.member).not.toBe("");
+      expect(backer.clause).not.toBe("");
+    }
+    expect(typeof refused.data.runnerUp).toBe("string");
+    expect(refused.data.runnerUp).not.toBe(refused.data.port);
+    expect(refused.data.aggregateTotal as number).toBeGreaterThanOrEqual(
+      refused.data.runnerUpTotal as number,
+    );
+    // And the chronicle prints the why line for the watcher.
+    const chronicle = renderChronicle(refusedRun.world.events.events);
+    expect(chronicle).toContain(
+      "Why this port: the table's combined prices",
+    );
+    expect(chronicle).toContain(`sails for ${refused.data.port as string}`);
+  }, 180_000);
 });
 
 describe("the fleet, decided leg by leg", () => {

@@ -606,6 +606,37 @@ export function feedItemFor(event: SimEvent, names: FeedNames): FeedItem | null 
           event.data.convicted === true
             ? `${subjectName} is commended.`
             : "The commendation is refused.";
+      } else if (kind === "course") {
+        // A course poll must say where the ship is going and,
+        // on a refusal, why that port: the finding carries the
+        // decision's basis and its strongest backers.
+        question = "The council votes on the captain's course.";
+        const coursePort = str(event, "coursePort");
+        const backers = Array.isArray(event.data.courseBackers)
+          ? event.data.courseBackers
+          : [];
+        const backerText = backers
+          .slice(0, 2)
+          .map((entry) => {
+            if (typeof entry !== "object" || entry === null) return "";
+            const clause = (entry as Record<string, unknown>).clause;
+            return typeof clause === "string" ? clause : "";
+          })
+          .filter((clause) => clause !== "")
+          .join("; ");
+        if (event.data.convicted === true) {
+          outcome =
+            coursePort !== ""
+              ? `The motion carries. Course set for ${coursePort}.`
+              : "The motion carries.";
+        } else {
+          outcome =
+            "The motion is refused." +
+            (coursePort !== ""
+              ? ` The table's combined prices set the course for ${coursePort}`
+              : "") +
+            (backerText !== "" ? `: ${backerText}.` : ".");
+        }
       } else {
         const phrases: Record<string, string> = {
           rationing: "the rationing proposal",

@@ -574,19 +574,40 @@ class Renderer implements ChronicleRenderer {
           })
           .join("; ");
         const carried = data.carried === true;
-        line(
+        let text =
           `${ts} — The course from ${from} is set. ` +
-            (proposer !== ""
-              ? `${person(proposer)} lays the chart: ${chartText}. `
-              : `The chart: ${chartText}. `) +
-            `The captain tables ${str(data, "motion")}. ` +
-            (leaningText !== "" ? `${leaningText}. ` : "") +
-            (carried
-              ? `The vote carries the captain's course, ${num(data, "forCount")} to ${num(data, "againstCount")}: `
-              : `The vote refuses the captain's course, ${num(data, "againstCount")} to ${num(data, "forCount")}: `) +
-            `the ${this.shipName} sails for ${port}, ${oneDecimal(num(data, "legDays"))} days out.`,
-          true,
-        );
+          (proposer !== ""
+            ? `${person(proposer)} lays the chart: ${chartText}. `
+            : `The chart: ${chartText}. `) +
+          `The captain tables ${str(data, "motion")}. ` +
+          (leaningText !== "" ? `${leaningText}. ` : "") +
+          (carried
+            ? `The vote carries the captain's course, ${num(data, "forCount")} to ${num(data, "againstCount")}: `
+            : `The vote refuses the captain's course, ${num(data, "againstCount")} to ${num(data, "forCount")}: `) +
+          `the ${this.shipName} sails for ${port}, ${oneDecimal(num(data, "legDays"))} days out.`;
+        if (str(data, "basis") === "aggregate") {
+          // A refusal hands the course to the table's combined
+          // prices; say why the winning port won, with the
+          // margin and the strongest support behind it.
+          const backers = Array.isArray(data.backers) ? data.backers : [];
+          const backerText = backers
+            .map((entry) => {
+              const b = asRecord(entry);
+              return `${person(str(b, "member"))} — ${str(b, "clause")}`;
+            })
+            .join("; ");
+          const runnerUp = str(data, "runnerUp");
+          text +=
+            ` Why this port: the table's combined prices put ${port} ahead` +
+            (runnerUp !== ""
+              ? ` of ${runnerUp} (${num(data, "aggregateTotal").toFixed(2)} to ${num(data, "runnerUpTotal").toFixed(2)})`
+              : "") +
+            (backerText !== ""
+              ? `, with the strongest support from ${backerText}`
+              : "") +
+            `.`;
+        }
+        line(text, true);
         break;
       }
       case "council_testimony": {

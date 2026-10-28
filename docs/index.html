@@ -3712,10 +3712,17 @@
             return `${person(str2(l, "member"))} backs ${str2(l, "port")} \u2014 ${str2(l, "clause")}`;
           }).join("; ");
           const carried = data.carried === true;
-          line(
-            `${ts} \u2014 The course from ${from} is set. ` + (proposer !== "" ? `${person(proposer)} lays the chart: ${chartText}. ` : `The chart: ${chartText}. `) + `The captain tables ${str2(data, "motion")}. ` + (leaningText !== "" ? `${leaningText}. ` : "") + (carried ? `The vote carries the captain's course, ${num2(data, "forCount")} to ${num2(data, "againstCount")}: ` : `The vote refuses the captain's course, ${num2(data, "againstCount")} to ${num2(data, "forCount")}: `) + `the ${this.shipName} sails for ${port}, ${oneDecimal(num2(data, "legDays"))} days out.`,
-            true
-          );
+          let text = `${ts} \u2014 The course from ${from} is set. ` + (proposer !== "" ? `${person(proposer)} lays the chart: ${chartText}. ` : `The chart: ${chartText}. `) + `The captain tables ${str2(data, "motion")}. ` + (leaningText !== "" ? `${leaningText}. ` : "") + (carried ? `The vote carries the captain's course, ${num2(data, "forCount")} to ${num2(data, "againstCount")}: ` : `The vote refuses the captain's course, ${num2(data, "againstCount")} to ${num2(data, "forCount")}: `) + `the ${this.shipName} sails for ${port}, ${oneDecimal(num2(data, "legDays"))} days out.`;
+          if (str2(data, "basis") === "aggregate") {
+            const backers = Array.isArray(data.backers) ? data.backers : [];
+            const backerText = backers.map((entry) => {
+              const b = asRecord(entry);
+              return `${person(str2(b, "member"))} \u2014 ${str2(b, "clause")}`;
+            }).join("; ");
+            const runnerUp = str2(data, "runnerUp");
+            text += ` Why this port: the table's combined prices put ${port} ahead` + (runnerUp !== "" ? ` of ${runnerUp} (${num2(data, "aggregateTotal").toFixed(2)} to ${num2(data, "runnerUpTotal").toFixed(2)})` : "") + (backerText !== "" ? `, with the strongest support from ${backerText}` : "") + `.`;
+          }
+          line(text, true);
           break;
         }
         case "council_testimony": {
@@ -9270,6 +9277,11 @@
         ),
         motion: null,
         carried: false,
+        basis: "fallback",
+        backers: [],
+        aggregateTotal: null,
+        runnerUp: null,
+        runnerUpTotal: null,
         noCouncil: true,
         candidates: candidates.map((c) => ({
           port: sector.portAt(c.index).name,
@@ -9304,6 +9316,7 @@
     againstCount = result.againstCount;
     strength = result.strength;
     carried = forCount > againstCount;
+    let aggregate = [];
     if (!carried) {
       const captainRow = captainId(state) !== null ? prices.get(captainId(state)) : void 0;
       const tableIds = votes.filter((v) => v.member !== captainId(state)).map((v) => v.member);
@@ -9318,6 +9331,7 @@
           total += prices.get(id)?.[at] ?? 0;
         }
         const captainPrice = captainRow !== void 0 ? captainRow[at] : 0;
+        aggregate.push({ index: cand.index, total, captainPrice });
         if (total > bestTotal || total === bestTotal && captainPrice > bestCaptainPrice) {
           bestTotal = total;
           bestCaptainPrice = captainPrice;
@@ -9353,6 +9367,41 @@
     const chosenPort = sector.portAt(chosen);
     const proposerId = motion.proposerId ?? null;
     const captainNow = captainId(state);
+    const basis = carried ? "motion" : "aggregate";
+    let runnerUp = null;
+    let winnerTotal = null;
+    if (!carried && aggregate.length > 0) {
+      const standings = [...aggregate].sort(
+        (a, b) => b.total - a.total || b.captainPrice - a.captainPrice || candidateIndexes.indexOf(a.index) - candidateIndexes.indexOf(b.index)
+      );
+      const winner = standings.find((s) => s.index === chosen);
+      if (winner !== void 0) winnerTotal = winner.total;
+      const rest = standings.filter((s) => s.index !== chosen);
+      if (rest.length > 0) {
+        const top = rest[0];
+        runnerUp = { index: top.index, total: top.total };
+      }
+    }
+    const chosenAt = candidateIndexes.indexOf(chosen);
+    const chosenCand = candidates[chosenAt];
+    const seatByMember = new Map(
+      frame2.sitting.map((s) => [s.member.id, s.seatKey])
+    );
+    const backers = votes.filter((v) => v.member !== captainNow).map((v) => {
+      const member = byId(crew, v.member);
+      const seat = seatByMember.get(v.member) ?? "";
+      return {
+        member: v.member,
+        seat,
+        price: prices.get(v.member)?.[chosenAt] ?? 0,
+        clause: member !== void 0 ? courseClause(seat, member, chosenCand, snap, chosenPort.name) : ""
+      };
+    }).sort((a, b) => b.price - a.price).slice(0, 3).map(({ member, seat, price, clause }) => ({
+      member,
+      seat,
+      price: r3(price),
+      clause
+    }));
     w.emit(
       "course_decided",
       [
@@ -9372,6 +9421,11 @@
         motion: sector.portAt(motionPort).name,
         motionIndex: motionPort,
         carried,
+        basis,
+        backers,
+        aggregateTotal: winnerTotal !== null ? r3(winnerTotal) : null,
+        runnerUp: runnerUp !== null ? sector.portAt(runnerUp.index).name : null,
+        runnerUpTotal: runnerUp !== null ? r3(runnerUp.total) : null,
         noCouncil: false,
         candidates: candidates.map((c) => ({
           port: sector.portAt(c.index).name,
@@ -9397,6 +9451,10 @@
       votes,
       strength: r3(strength),
       consequence: `course set for ${chosenPort.name}`,
+      coursePort: chosenPort.name,
+      courseMotion: sector.portAt(motionPort).name,
+      courseBasis: basis,
+      courseBackers: backers,
       chair: frame2.chairId,
       legitimacy: r3(state.legitimacy)
     });
@@ -11259,6 +11317,20 @@
           const subjectName = subject !== "" ? names.person(subject) : "the member";
           question = `Commend ${subjectName}?`;
           outcome = event.data.convicted === true ? `${subjectName} is commended.` : "The commendation is refused.";
+        } else if (kind === "course") {
+          question = "The council votes on the captain's course.";
+          const coursePort = str3(event, "coursePort");
+          const backers = Array.isArray(event.data.courseBackers) ? event.data.courseBackers : [];
+          const backerText = backers.slice(0, 2).map((entry) => {
+            if (typeof entry !== "object" || entry === null) return "";
+            const clause = entry.clause;
+            return typeof clause === "string" ? clause : "";
+          }).filter((clause) => clause !== "").join("; ");
+          if (event.data.convicted === true) {
+            outcome = coursePort !== "" ? `The motion carries. Course set for ${coursePort}.` : "The motion carries.";
+          } else {
+            outcome = "The motion is refused." + (coursePort !== "" ? ` The table's combined prices set the course for ${coursePort}` : "") + (backerText !== "" ? `: ${backerText}.` : ".");
+          }
         } else {
           const phrases = {
             rationing: "the rationing proposal",

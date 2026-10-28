@@ -199,16 +199,16 @@ export const PROPS: Record<string, SpriteDef> = {
     ],
     pal: { m: METAL, G: "#8fe388" },
   },
-  // Mess table with place settings.
+  // Mess table with place settings and a warm centrepiece.
   table: {
     rows: [
       "tttttt",
       "tpttpt",
-      "tttttt",
+      "ttlltt",
       "tttttt",
       ".t..t.",
     ],
-    pal: { t: "#6e5136", p: "#cfd8e6" },
+    pal: { t: "#6e5136", p: "#cfd8e6", l: "#e8a33d" },
   },
   // A small chair, seen from above-ish: seat and back.
   stool: {
@@ -225,17 +225,18 @@ export const PROPS: Record<string, SpriteDef> = {
     ],
     pal: { s: "#8b98ac", l: "#e8c98a", b: METAL_D },
   },
-  // Bunk bed: two levels, pillow at the head.
+  // Bunk bed: two levels, pillow at the head, a folded blanket
+  // stripe across each level so the levels read apart at deck scale.
   bunk: {
     rows: [
       "fppf",
       "fbbf",
-      "fbbf",
+      "fBBf",
       "fppf",
       "fbbf",
       "ffff",
     ],
-    pal: { f: "#46536b", p: "#d9dee8", b: "#5d7ea6" },
+    pal: { f: "#46536b", p: "#e6ebf2", b: "#5d7ea6", B: "#48698d" },
   },
   // A locker: tall door, vent slits.
   locker: {
@@ -252,13 +253,13 @@ export const PROPS: Record<string, SpriteDef> = {
     ],
     pal: { f: "#4c4237", g: "#3f9e4d", s: "#79c94f" },
   },
-  // A cargo crate: planks and a stencil band.
+  // A cargo crate: planks, corner braces and a stencil band.
   crate: {
     rows: [
+      "kcck",
       "cccc",
       "ckkc",
-      "cccc",
-      "cccc",
+      "kcck",
     ],
     pal: { c: "#8a6b3f", k: "#5f4825" },
   },
@@ -347,23 +348,42 @@ interface FloorSpec {
 }
 
 const FLOORS: Record<string, FloorSpec> = {
-  bridge: { base: "#232d3f", alt: "#263248", edge: "#1a2231" },
-  engineering: { base: "#2b3038", alt: "#272c33", edge: "#1e2229" },
-  medbay: { base: "#aebfd0", alt: "#a3b4c7", edge: "#93a7bb", checker: true },
-  mess: { base: "#4a3b2c", alt: "#54422f", edge: "#3a2e22", checker: true },
-  quarters: { base: "#33364f", alt: "#363a54", edge: null },
-  hydroponics: { base: "#2e3a26", alt: "#323e29", edge: "#232c1d" },
-  cargo: { base: "#3d4148", alt: "#393d44", edge: "#2e3238" },
-  airlock: { base: "#434a55", alt: "#3f4650", edge: "#31363f" },
-  lab: { base: "#8e9cae", alt: "#8796a8", edge: "#78879b", checker: true },
-  gym: { base: "#2c3140", alt: "#2f3444", edge: "#232733" },
+  bridge: { base: "#2e3d59", alt: "#33455f", edge: "#22304a" },
+  engineering: { base: "#3a3f45", alt: "#353a40", edge: "#2a2e33" },
+  medbay: { base: "#bccfdd", alt: "#b0c2d4", edge: "#9db1c5", checker: true },
+  mess: { base: "#5a4430", alt: "#624a33", edge: "#46351f", checker: true },
+  quarters: { base: "#453550", alt: "#4a3a58", edge: "#382c46" },
+  hydroponics: { base: "#35472a", alt: "#394c2d", edge: "#28351f" },
+  cargo: { base: "#494c46", alt: "#43463f", edge: "#353832" },
+  airlock: { base: "#4d545e", alt: "#484f59", edge: "#383e47" },
+  lab: { base: "#97a7ba", alt: "#8e9eb2", edge: "#7e8ea3", checker: true },
+  gym: { base: "#333d4f", alt: "#374155", edge: "#29303e" },
 };
 
 const DEFAULT_FLOOR: FloorSpec = {
-  base: "#2a3242",
-  alt: "#2d3648",
-  edge: "#212938",
+  base: "#333d4f",
+  alt: "#364154",
+  edge: "#28303e",
 };
+
+/** A room kind's accent colour: the plate tick and small trims. */
+const ROOM_ACCENTS: Record<string, string> = {
+  bridge: "#57a8e8",
+  engineering: "#e8a33d",
+  medbay: "#7fd4a8",
+  mess: "#e8c98a",
+  quarters: "#b48ec7",
+  hydroponics: "#79c94f",
+  cargo: "#c9a86a",
+  airlock: "#c9a227",
+  lab: "#7fd4c1",
+  gym: "#d87f6a",
+};
+
+/** The accent colour for a room kind, or a neutral steel. */
+export function roomAccent(kind: string): string {
+  return ROOM_ACCENTS[kind] ?? "#8fa6c4";
+}
 
 /** The colour of one floor tile, set by the room kind and its hash. */
 export function floorTile(
@@ -386,10 +406,10 @@ export function floorEdge(kind: string): string | null {
 
 /** Corridor plating: metal plates with a hash-worn tone. */
 export function corridorTile(seedKey: number, gx: number, gy: number): string {
-  return hash01(seedKey, gx * 131 + gy * 197) < 0.5 ? "#252e3d" : "#232b39";
+  return hash01(seedKey, gx * 131 + gy * 197) < 0.5 ? "#2c3547" : "#2a3244";
 }
 
 /** Structure (unroomed interior) plating: darker than corridor. */
 export function structureTile(seedKey: number, gx: number, gy: number): string {
-  return hash01(seedKey, gx * 131 + gy * 197) < 0.5 ? "#171d29" : "#151a24";
+  return hash01(seedKey, gx * 131 + gy * 197) < 0.5 ? "#141926" : "#12161f";
 }

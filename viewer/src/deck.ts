@@ -53,6 +53,7 @@ import {
   corridorTile,
   floorEdge,
   floorTile,
+  roomAccent,
   propCanvas,
   propSize,
   structureTile,
@@ -910,7 +911,11 @@ export function buildShipLayout(ship: Ship): ShipLayout {
 
 // ------------------------------------------------------- static render
 
-function renderStatic(layout: DeckLayout, ship: Ship): HTMLCanvasElement {
+function renderStatic(
+  layout: DeckLayout,
+  ship: Ship,
+  bare = false,
+): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = layout.widthPx;
   canvas.height = layout.heightPx;
@@ -922,7 +927,11 @@ function renderStatic(layout: DeckLayout, ship: Ship): HTMLCanvasElement {
   // is drawn under this canvas every frame, and this layer stays
   // transparent beyond the hull so the sky shows through.
 
-  // Hull silhouette.
+  // Hull silhouette. In the cutaway the two decks share one hull,
+  // painted once beneath both (renderCutawayHull); a bare deck
+  // paints only its interior, and the shared hull shows through
+  // the margins and the band between the plans.
+  if (!bare) {
   const hullTop = (OY - 1) * TILE_PX;
   const hullBottom = (OY + DECK_H + 1) * TILE_PX;
   const sternX = (OX - 1) * TILE_PX;
@@ -964,6 +973,7 @@ function renderStatic(layout: DeckLayout, ship: Ship): HTMLCanvasElement {
   ctx.font = "bold 7px monospace";
   ctx.textAlign = "left";
   ctx.fillText(ship.name.toUpperCase(), sternX + 14, hullTop + 11);
+  }
 
   // Structure and corridor base.
   for (let ty = 0; ty < DECK_H; ty++) {
@@ -976,6 +986,15 @@ function renderStatic(layout: DeckLayout, ship: Ship): HTMLCanvasElement {
       } else if (layout.walkable[ty * deckW + tx] !== 1) {
         ctx.fillStyle = structureTile(seedKey, tx, ty);
         ctx.fillRect(px, py, TILE_PX, TILE_PX);
+        // Truss ticks in the frame: unroomed structure reads as
+        // bracing, not as blank fill.
+        if (hash01(seedKey, tx * 57 + ty * 91) > 0.55) {
+          ctx.fillStyle = "#1e2735";
+          const flip = hash01(seedKey, tx * 13 + ty * 29) < 0.5;
+          for (let s = 0; s < TILE_PX; s += 2) {
+            ctx.fillRect(px + s, py + (flip ? s : TILE_PX - 1 - s), 1, 1);
+          }
+        }
       }
     }
   }
@@ -1070,6 +1089,30 @@ function renderStatic(layout: DeckLayout, ship: Ship): HTMLCanvasElement {
         }
       }
     }
+    // Baked light pool and inner shadow: the room reads as a lit
+    // volume, not a flat patch. Static layer only; the day/night
+    // tint still rides over it per frame.
+    {
+      const ix = (rect.x + 1 + OX) * TILE_PX;
+      const iy = (rect.y + 1 + OY) * TILE_PX;
+      const iw = (rect.w - 2) * TILE_PX;
+      const ih = (rect.h - 2) * TILE_PX;
+      const grad = ctx.createRadialGradient(
+        ix + iw / 2,
+        iy + ih / 2,
+        2,
+        ix + iw / 2,
+        iy + ih / 2,
+        Math.max(iw, ih) / 1.35,
+      );
+      grad.addColorStop(0, "rgba(255,232,190,0.07)");
+      grad.addColorStop(1, "rgba(255,232,190,0)");
+      ctx.fillStyle = grad;
+      ctx.fillRect(ix, iy, iw, ih);
+      ctx.strokeStyle = "rgba(0,0,0,0.16)";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(ix + 1, iy + 1, iw - 2, ih - 2);
+    }
     // Airlock hazard stripes inside the outer wall.
     if (rect.kind === "airlock") {
       for (let ty = rect.y + 1; ty < rect.y + rect.h - 1; ty++) {
@@ -1117,6 +1160,8 @@ function renderStatic(layout: DeckLayout, ship: Ship): HTMLCanvasElement {
     ctx.fillStyle = "#d7e2f0";
     ctx.textAlign = "center";
     ctx.fillText(label, wx + ww / 2, wy + 6);
+    ctx.fillStyle = roomAccent(rect.kind);
+    ctx.fillRect(plateX, wy - 2, 3, 11);
     // Props: floor decals first, then furniture.
     for (const pass of [true, false]) {
       for (const prop of room.props) {
@@ -1143,6 +1188,118 @@ function renderStatic(layout: DeckLayout, ship: Ship): HTMLCanvasElement {
     ctx.fillStyle = "#8fa6c4";
     ctx.fillRect(sillX + 3, sillY + 1, 1, TILE_PX - 2);
   }
+  return canvas;
+}
+
+/**
+ * The one hull the cutaway's two decks share: an angular plated
+ * silhouette spanning both plans and the structural band between
+ * them. The band is dressed as the ship's spine (keel beams,
+ * ribs, tanks, and the lift shafts piercing it), the engine block
+ * sits at the stern on the hull's own midline, and seeded
+ * fittings break the top edge. Painted once; the bare deck plans
+ * blit over it, their margins transparent, so the two plans read
+ * as floors of one vessel instead of two capsules.
+ */
+function renderCutawayHull(
+  shipLayout: ShipLayout,
+  ship: Ship,
+  gapY: number,
+): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = shipLayout.widthPx;
+  canvas.height = shipLayout.heightPx + gapY;
+  const ctx = canvas.getContext("2d");
+  if (ctx === null) return canvas;
+  const plan = shipLayout.decks[0] as DeckLayout;
+  const { seedKey, deckW } = plan;
+  const top = (OY - 1) * TILE_PX;
+  const bottom = gapY + (OY + DECK_H + 1) * TILE_PX;
+  const midY = (top + bottom) / 2;
+  const sternX = (OX - 1) * TILE_PX;
+  const bowStartX = (OX + deckW) * TILE_PX;
+  const bowTipX = (OX + deckW + 7) * TILE_PX;
+  // Silhouette: straight runs and angled facets, no capsule curve.
+  ctx.beginPath();
+  ctx.moveTo(sternX + 6, top);
+  ctx.lineTo(bowStartX - 30, top);
+  ctx.lineTo(bowTipX - 16, top + (midY - top) * 0.36);
+  ctx.lineTo(bowTipX, midY);
+  ctx.lineTo(bowTipX - 16, bottom - (bottom - midY) * 0.36);
+  ctx.lineTo(bowStartX - 30, bottom);
+  ctx.lineTo(sternX + 6, bottom);
+  ctx.quadraticCurveTo(sternX - 8, midY, sternX + 6, top);
+  ctx.closePath();
+  ctx.fillStyle = "#272f3f";
+  ctx.fill();
+  ctx.strokeStyle = "#46536b";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  // Plating seams on the top and bottom bands.
+  ctx.strokeStyle = "#1d2534";
+  for (let i = 0; i < 12; i++) {
+    const x =
+      sternX + 16 + hash01(seedKey, i * 5 + 21) * (bowStartX - sternX - 40);
+    ctx.beginPath();
+    ctx.moveTo(x, top + 2);
+    ctx.lineTo(x, top + 13);
+    ctx.moveTo(x, bottom - 13);
+    ctx.lineTo(x, bottom - 2);
+    ctx.stroke();
+  }
+  // Fittings breaking the top edge: a mast, a dome, a dish block.
+  ctx.fillStyle = "#39465c";
+  const mastX = sternX + (bowStartX - sternX) * 0.3;
+  ctx.fillRect(mastX, top - 6, 2, 6);
+  ctx.fillStyle = "#e8a33d";
+  ctx.fillRect(mastX, top - 7, 2, 1);
+  ctx.fillStyle = "#39465c";
+  const domeX = sternX + (bowStartX - sternX) * 0.52;
+  ctx.beginPath();
+  ctx.arc(domeX, top, 5, Math.PI, 0);
+  ctx.fill();
+  const dishX = sternX + (bowStartX - sternX) * 0.72;
+  ctx.fillRect(dishX, top - 4, 8, 4);
+  ctx.fillStyle = "#55678a";
+  ctx.fillRect(dishX + 1, top - 6, 6, 2);
+  // The spine band between the decks: keel beams, ribs, tanks,
+  // and the lift shafts piercing through.
+  const bandTop = (OY + DECK_H + 1) * TILE_PX;
+  const bandBottom = gapY + (OY - 1) * TILE_PX;
+  const bandMid = (bandTop + bandBottom) / 2;
+  ctx.fillStyle = "#20293a";
+  ctx.fillRect(sternX + 10, bandMid - 3, bowStartX - sternX - 44, 2);
+  ctx.fillRect(sternX + 10, bandMid + 2, bowStartX - sternX - 44, 2);
+  ctx.fillStyle = "#1d2534";
+  for (let x = sternX + 18; x < bowStartX - 40; x += 18) {
+    ctx.fillRect(x, bandTop + 2, 1, bandBottom - bandTop - 4);
+  }
+  const tank = propCanvas("tank");
+  for (let i = 0; i < 5; i++) {
+    const tx =
+      sternX + 26 + hash01(seedKey, i * 7 + 3) * (bowStartX - sternX - 90);
+    ctx.drawImage(tank, tx, bandMid - 3);
+  }
+  for (const lift of plan.lifts) {
+    const lx = (lift.x + OX) * TILE_PX;
+    ctx.fillStyle = "#141b28";
+    ctx.fillRect(lx, bandTop, TILE_PX * 2, bandBottom - bandTop);
+    ctx.fillStyle = "#39465c";
+    ctx.fillRect(lx, bandTop, 2, bandBottom - bandTop);
+    ctx.fillRect(lx + TILE_PX * 2 - 2, bandTop, 2, bandBottom - bandTop);
+  }
+  // Engine block at the stern, on the hull's own midline.
+  ctx.fillStyle = "#39465c";
+  ctx.fillRect((OX - 4) * TILE_PX, midY - 20, TILE_PX * 3 + 4, 40);
+  ctx.fillStyle = "#232c3d";
+  for (const dy of [-14, -4, 6]) {
+    ctx.fillRect((OX - 4) * TILE_PX, midY + dy, 3, 7);
+  }
+  // The ship's name on the dorsal plating.
+  ctx.fillStyle = "#8fa6c4";
+  ctx.font = "bold 7px monospace";
+  ctx.textAlign = "left";
+  ctx.fillText(ship.name.toUpperCase(), sternX + 64, top + 11);
   return canvas;
 }
 
@@ -1278,6 +1435,8 @@ export class DeckView {
   private readonly ship: Ship;
   readonly shipLayout: ShipLayout;
   private readonly statics: [HTMLCanvasElement, HTMLCanvasElement];
+  /** The shared hull painted beneath both bare decks (cutaway). */
+  private readonly hullCanvas: HTMLCanvasElement;
   private readonly backdrop: SpaceBackdrop;
   /** The ship's accumulated scars, one layer per deck. */
   private readonly wears: [WearLayer, WearLayer];
@@ -1351,9 +1510,14 @@ export class DeckView {
       (this.shipLayout.decks[0] as DeckLayout).heightPx + CUTAWAY_GAP_PX;
     this.applySize();
     this.statics = [
-      renderStatic(this.shipLayout.decks[0], ship),
-      renderStatic(this.shipLayout.decks[1], ship),
+      renderStatic(this.shipLayout.decks[0], ship, true),
+      renderStatic(this.shipLayout.decks[1], ship, true),
     ];
+    this.hullCanvas = renderCutawayHull(
+      this.shipLayout,
+      ship,
+      this.cutawayGapY,
+    );
     this.backdrop = new SpaceBackdrop(
       this.shipLayout.seedKey,
       this.shipLayout.widthPx,
@@ -1362,23 +1526,21 @@ export class DeckView {
     // Hull exterior geometry for the wear layer, in the same pixels
     // renderStatic paints: the engine block at the stern, its three
     // exhaust slots, and the hull's top and bottom edges.
-    const midY = (OY + DECK_H / 2) * TILE_PX;
+    // In the cutaway the decks are bare and share one hull, so
+    // the deck wear layers keep their hull-band grime but the
+    // engine block is parked offscreen: its soot belongs to the
+    // shared hull, not to either plan.
     const wearGeom: WearGeom = {
       tile: TILE_PX,
       ox: OX,
       oy: OY,
       engineBlock: {
         x: (OX - 4) * TILE_PX,
-        y: midY - 18,
+        y: -999,
         w: TILE_PX * 3 + 4,
         h: 36,
       },
-      exhaustSlots: [-13, -4, 5].map((dy) => ({
-        x: (OX - 4) * TILE_PX,
-        y: midY + dy,
-        w: 3,
-        h: 6,
-      })),
+      exhaustSlots: [],
       hullTop: (OY - 1) * TILE_PX,
       hullBottom: (OY + DECK_H + 1) * TILE_PX,
       sternX: (OX - 1) * TILE_PX,
@@ -2943,11 +3105,26 @@ export class DeckView {
     // in the other deck's pass. The light is the ship's, shared.
     const light = lightAt(opts.dayMinutes);
     if (opts.showBubbles !== false) this.bubbles.update(now, crew);
+    // One hull under both decks, painted before the plans.
+    ctx.drawImage(this.hullCanvas, 0, 0);
     for (let d = 0; d < 2; d++) {
       ctx.save();
       if (d === 1) ctx.translate(0, this.cutawayGapY);
       this.drawDeck(ctx, d, crew, opts, now, dt, light);
       ctx.restore();
+    }
+    // The structural gap takes the ship's light too.
+    if (light.dark > 0.004) {
+      const cr = Math.round(8 + (43 - 8) * light.warm);
+      const cg = Math.round(14 + (26 - 14) * light.warm);
+      const cb = Math.round(36 + (9 - 36) * light.warm);
+      ctx.fillStyle = `rgba(${cr},${cg},${cb},${light.dark.toFixed(3)})`;
+      ctx.fillRect(
+        0,
+        this.shipLayout.heightPx,
+        this.shipLayout.widthPx,
+        CUTAWAY_GAP_PX,
+      );
     }
 
 

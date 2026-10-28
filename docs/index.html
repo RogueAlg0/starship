@@ -9997,16 +9997,16 @@
       ],
       pal: { m: METAL, G: "#8fe388" }
     },
-    // Mess table with place settings.
+    // Mess table with place settings and a warm centrepiece.
     table: {
       rows: [
         "tttttt",
         "tpttpt",
-        "tttttt",
+        "ttlltt",
         "tttttt",
         ".t..t."
       ],
-      pal: { t: "#6e5136", p: "#cfd8e6" }
+      pal: { t: "#6e5136", p: "#cfd8e6", l: "#e8a33d" }
     },
     // A small chair, seen from above-ish: seat and back.
     stool: {
@@ -10023,17 +10023,18 @@
       ],
       pal: { s: "#8b98ac", l: "#e8c98a", b: METAL_D }
     },
-    // Bunk bed: two levels, pillow at the head.
+    // Bunk bed: two levels, pillow at the head, a folded blanket
+    // stripe across each level so the levels read apart at deck scale.
     bunk: {
       rows: [
         "fppf",
         "fbbf",
-        "fbbf",
+        "fBBf",
         "fppf",
         "fbbf",
         "ffff"
       ],
-      pal: { f: "#46536b", p: "#d9dee8", b: "#5d7ea6" }
+      pal: { f: "#46536b", p: "#e6ebf2", b: "#5d7ea6", B: "#48698d" }
     },
     // A locker: tall door, vent slits.
     locker: {
@@ -10050,13 +10051,13 @@
       ],
       pal: { f: "#4c4237", g: "#3f9e4d", s: "#79c94f" }
     },
-    // A cargo crate: planks and a stencil band.
+    // A cargo crate: planks, corner braces and a stencil band.
     crate: {
       rows: [
+        "kcck",
         "cccc",
         "ckkc",
-        "cccc",
-        "cccc"
+        "kcck"
       ],
       pal: { c: "#8a6b3f", k: "#5f4825" }
     },
@@ -10133,22 +10134,37 @@
     }
   };
   var FLOORS = {
-    bridge: { base: "#232d3f", alt: "#263248", edge: "#1a2231" },
-    engineering: { base: "#2b3038", alt: "#272c33", edge: "#1e2229" },
-    medbay: { base: "#aebfd0", alt: "#a3b4c7", edge: "#93a7bb", checker: true },
-    mess: { base: "#4a3b2c", alt: "#54422f", edge: "#3a2e22", checker: true },
-    quarters: { base: "#33364f", alt: "#363a54", edge: null },
-    hydroponics: { base: "#2e3a26", alt: "#323e29", edge: "#232c1d" },
-    cargo: { base: "#3d4148", alt: "#393d44", edge: "#2e3238" },
-    airlock: { base: "#434a55", alt: "#3f4650", edge: "#31363f" },
-    lab: { base: "#8e9cae", alt: "#8796a8", edge: "#78879b", checker: true },
-    gym: { base: "#2c3140", alt: "#2f3444", edge: "#232733" }
+    bridge: { base: "#2e3d59", alt: "#33455f", edge: "#22304a" },
+    engineering: { base: "#3a3f45", alt: "#353a40", edge: "#2a2e33" },
+    medbay: { base: "#bccfdd", alt: "#b0c2d4", edge: "#9db1c5", checker: true },
+    mess: { base: "#5a4430", alt: "#624a33", edge: "#46351f", checker: true },
+    quarters: { base: "#453550", alt: "#4a3a58", edge: "#382c46" },
+    hydroponics: { base: "#35472a", alt: "#394c2d", edge: "#28351f" },
+    cargo: { base: "#494c46", alt: "#43463f", edge: "#353832" },
+    airlock: { base: "#4d545e", alt: "#484f59", edge: "#383e47" },
+    lab: { base: "#97a7ba", alt: "#8e9eb2", edge: "#7e8ea3", checker: true },
+    gym: { base: "#333d4f", alt: "#374155", edge: "#29303e" }
   };
   var DEFAULT_FLOOR = {
-    base: "#2a3242",
-    alt: "#2d3648",
-    edge: "#212938"
+    base: "#333d4f",
+    alt: "#364154",
+    edge: "#28303e"
   };
+  var ROOM_ACCENTS = {
+    bridge: "#57a8e8",
+    engineering: "#e8a33d",
+    medbay: "#7fd4a8",
+    mess: "#e8c98a",
+    quarters: "#b48ec7",
+    hydroponics: "#79c94f",
+    cargo: "#c9a86a",
+    airlock: "#c9a227",
+    lab: "#7fd4c1",
+    gym: "#d87f6a"
+  };
+  function roomAccent(kind) {
+    return ROOM_ACCENTS[kind] ?? "#8fa6c4";
+  }
   function floorTile(kind, seedKey, gx, gy) {
     const spec = FLOORS[kind] ?? DEFAULT_FLOOR;
     if (spec.checker === true) {
@@ -10160,10 +10176,10 @@
     return (FLOORS[kind] ?? DEFAULT_FLOOR).edge;
   }
   function corridorTile(seedKey, gx, gy) {
-    return hash01(seedKey, gx * 131 + gy * 197) < 0.5 ? "#252e3d" : "#232b39";
+    return hash01(seedKey, gx * 131 + gy * 197) < 0.5 ? "#2c3547" : "#2a3244";
   }
   function structureTile(seedKey, gx, gy) {
-    return hash01(seedKey, gx * 131 + gy * 197) < 0.5 ? "#171d29" : "#151a24";
+    return hash01(seedKey, gx * 131 + gy * 197) < 0.5 ? "#141926" : "#12161f";
   }
 
   // viewer/src/alerts.ts
@@ -13632,51 +13648,53 @@
       lifts
     };
   }
-  function renderStatic(layout, ship) {
+  function renderStatic(layout, ship, bare = false) {
     const canvas = document.createElement("canvas");
     canvas.width = layout.widthPx;
     canvas.height = layout.heightPx;
     const ctx = canvas.getContext("2d");
     if (ctx === null) return canvas;
     const { seedKey, deckW } = layout;
-    const hullTop = (OY - 1) * TILE_PX;
-    const hullBottom = (OY + DECK_H + 1) * TILE_PX;
-    const sternX = (OX - 1) * TILE_PX;
-    const bowStartX = (OX + deckW) * TILE_PX;
-    const bowTipX = (OX + deckW + 7) * TILE_PX;
-    const midY = (hullTop + hullBottom) / 2;
-    ctx.beginPath();
-    ctx.moveTo(sternX + 10, hullTop);
-    ctx.lineTo(bowStartX - 10, hullTop);
-    ctx.quadraticCurveTo(bowTipX, midY, bowStartX - 10, hullBottom);
-    ctx.lineTo(sternX + 10, hullBottom);
-    ctx.quadraticCurveTo(sternX - 8, midY, sternX + 10, hullTop);
-    ctx.closePath();
-    ctx.fillStyle = "#272f3f";
-    ctx.fill();
-    ctx.strokeStyle = "#46536b";
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.strokeStyle = "#1d2534";
-    for (let i = 0; i < 12; i++) {
-      const x = sternX + 16 + hash01(seedKey, i * 5 + 21) * (bowStartX - sternX - 40);
+    if (!bare) {
+      const hullTop = (OY - 1) * TILE_PX;
+      const hullBottom = (OY + DECK_H + 1) * TILE_PX;
+      const sternX = (OX - 1) * TILE_PX;
+      const bowStartX = (OX + deckW) * TILE_PX;
+      const bowTipX = (OX + deckW + 7) * TILE_PX;
+      const midY = (hullTop + hullBottom) / 2;
       ctx.beginPath();
-      ctx.moveTo(x, hullTop + 2);
-      ctx.lineTo(x, hullTop + 13);
-      ctx.moveTo(x, hullBottom - 13);
-      ctx.lineTo(x, hullBottom - 2);
+      ctx.moveTo(sternX + 10, hullTop);
+      ctx.lineTo(bowStartX - 10, hullTop);
+      ctx.quadraticCurveTo(bowTipX, midY, bowStartX - 10, hullBottom);
+      ctx.lineTo(sternX + 10, hullBottom);
+      ctx.quadraticCurveTo(sternX - 8, midY, sternX + 10, hullTop);
+      ctx.closePath();
+      ctx.fillStyle = "#272f3f";
+      ctx.fill();
+      ctx.strokeStyle = "#46536b";
+      ctx.lineWidth = 1;
       ctx.stroke();
+      ctx.strokeStyle = "#1d2534";
+      for (let i = 0; i < 12; i++) {
+        const x = sternX + 16 + hash01(seedKey, i * 5 + 21) * (bowStartX - sternX - 40);
+        ctx.beginPath();
+        ctx.moveTo(x, hullTop + 2);
+        ctx.lineTo(x, hullTop + 13);
+        ctx.moveTo(x, hullBottom - 13);
+        ctx.lineTo(x, hullBottom - 2);
+        ctx.stroke();
+      }
+      ctx.fillStyle = "#39465c";
+      ctx.fillRect((OX - 4) * TILE_PX, midY - 18, TILE_PX * 3 + 4, 36);
+      ctx.fillStyle = "#232c3d";
+      for (const dy of [-13, -4, 5]) {
+        ctx.fillRect((OX - 4) * TILE_PX, midY + dy, 3, 6);
+      }
+      ctx.fillStyle = "#8fa6c4";
+      ctx.font = "bold 7px monospace";
+      ctx.textAlign = "left";
+      ctx.fillText(ship.name.toUpperCase(), sternX + 14, hullTop + 11);
     }
-    ctx.fillStyle = "#39465c";
-    ctx.fillRect((OX - 4) * TILE_PX, midY - 18, TILE_PX * 3 + 4, 36);
-    ctx.fillStyle = "#232c3d";
-    for (const dy of [-13, -4, 5]) {
-      ctx.fillRect((OX - 4) * TILE_PX, midY + dy, 3, 6);
-    }
-    ctx.fillStyle = "#8fa6c4";
-    ctx.font = "bold 7px monospace";
-    ctx.textAlign = "left";
-    ctx.fillText(ship.name.toUpperCase(), sternX + 14, hullTop + 11);
     for (let ty = 0; ty < DECK_H; ty++) {
       for (let tx = 0; tx < deckW; tx++) {
         const px = (tx + OX) * TILE_PX;
@@ -13687,6 +13705,13 @@
         } else if (layout.walkable[ty * deckW + tx] !== 1) {
           ctx.fillStyle = structureTile(seedKey, tx, ty);
           ctx.fillRect(px, py, TILE_PX, TILE_PX);
+          if (hash01(seedKey, tx * 57 + ty * 91) > 0.55) {
+            ctx.fillStyle = "#1e2735";
+            const flip = hash01(seedKey, tx * 13 + ty * 29) < 0.5;
+            for (let s = 0; s < TILE_PX; s += 2) {
+              ctx.fillRect(px + s, py + (flip ? s : TILE_PX - 1 - s), 1, 1);
+            }
+          }
         }
       }
     }
@@ -13766,6 +13791,27 @@
           }
         }
       }
+      {
+        const ix = (rect.x + 1 + OX) * TILE_PX;
+        const iy = (rect.y + 1 + OY) * TILE_PX;
+        const iw = (rect.w - 2) * TILE_PX;
+        const ih = (rect.h - 2) * TILE_PX;
+        const grad = ctx.createRadialGradient(
+          ix + iw / 2,
+          iy + ih / 2,
+          2,
+          ix + iw / 2,
+          iy + ih / 2,
+          Math.max(iw, ih) / 1.35
+        );
+        grad.addColorStop(0, "rgba(255,232,190,0.07)");
+        grad.addColorStop(1, "rgba(255,232,190,0)");
+        ctx.fillStyle = grad;
+        ctx.fillRect(ix, iy, iw, ih);
+        ctx.strokeStyle = "rgba(0,0,0,0.16)";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(ix + 1, iy + 1, iw - 2, ih - 2);
+      }
       if (rect.kind === "airlock") {
         for (let ty = rect.y + 1; ty < rect.y + rect.h - 1; ty++) {
           const px = (rect.x + rect.w - 2 + OX) * TILE_PX;
@@ -13806,6 +13852,8 @@
       ctx.fillStyle = "#d7e2f0";
       ctx.textAlign = "center";
       ctx.fillText(label, wx + ww / 2, wy + 6);
+      ctx.fillStyle = roomAccent(rect.kind);
+      ctx.fillRect(plateX, wy - 2, 3, 11);
       for (const pass of [true, false]) {
         for (const prop of room.props) {
           if (prop.under !== pass) continue;
@@ -13830,6 +13878,94 @@
     }
     return canvas;
   }
+  function renderCutawayHull(shipLayout, ship, gapY) {
+    const canvas = document.createElement("canvas");
+    canvas.width = shipLayout.widthPx;
+    canvas.height = shipLayout.heightPx + gapY;
+    const ctx = canvas.getContext("2d");
+    if (ctx === null) return canvas;
+    const plan = shipLayout.decks[0];
+    const { seedKey, deckW } = plan;
+    const top = (OY - 1) * TILE_PX;
+    const bottom = gapY + (OY + DECK_H + 1) * TILE_PX;
+    const midY = (top + bottom) / 2;
+    const sternX = (OX - 1) * TILE_PX;
+    const bowStartX = (OX + deckW) * TILE_PX;
+    const bowTipX = (OX + deckW + 7) * TILE_PX;
+    ctx.beginPath();
+    ctx.moveTo(sternX + 6, top);
+    ctx.lineTo(bowStartX - 30, top);
+    ctx.lineTo(bowTipX - 16, top + (midY - top) * 0.36);
+    ctx.lineTo(bowTipX, midY);
+    ctx.lineTo(bowTipX - 16, bottom - (bottom - midY) * 0.36);
+    ctx.lineTo(bowStartX - 30, bottom);
+    ctx.lineTo(sternX + 6, bottom);
+    ctx.quadraticCurveTo(sternX - 8, midY, sternX + 6, top);
+    ctx.closePath();
+    ctx.fillStyle = "#272f3f";
+    ctx.fill();
+    ctx.strokeStyle = "#46536b";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.strokeStyle = "#1d2534";
+    for (let i = 0; i < 12; i++) {
+      const x = sternX + 16 + hash01(seedKey, i * 5 + 21) * (bowStartX - sternX - 40);
+      ctx.beginPath();
+      ctx.moveTo(x, top + 2);
+      ctx.lineTo(x, top + 13);
+      ctx.moveTo(x, bottom - 13);
+      ctx.lineTo(x, bottom - 2);
+      ctx.stroke();
+    }
+    ctx.fillStyle = "#39465c";
+    const mastX = sternX + (bowStartX - sternX) * 0.3;
+    ctx.fillRect(mastX, top - 6, 2, 6);
+    ctx.fillStyle = "#e8a33d";
+    ctx.fillRect(mastX, top - 7, 2, 1);
+    ctx.fillStyle = "#39465c";
+    const domeX = sternX + (bowStartX - sternX) * 0.52;
+    ctx.beginPath();
+    ctx.arc(domeX, top, 5, Math.PI, 0);
+    ctx.fill();
+    const dishX = sternX + (bowStartX - sternX) * 0.72;
+    ctx.fillRect(dishX, top - 4, 8, 4);
+    ctx.fillStyle = "#55678a";
+    ctx.fillRect(dishX + 1, top - 6, 6, 2);
+    const bandTop = (OY + DECK_H + 1) * TILE_PX;
+    const bandBottom = gapY + (OY - 1) * TILE_PX;
+    const bandMid = (bandTop + bandBottom) / 2;
+    ctx.fillStyle = "#20293a";
+    ctx.fillRect(sternX + 10, bandMid - 3, bowStartX - sternX - 44, 2);
+    ctx.fillRect(sternX + 10, bandMid + 2, bowStartX - sternX - 44, 2);
+    ctx.fillStyle = "#1d2534";
+    for (let x = sternX + 18; x < bowStartX - 40; x += 18) {
+      ctx.fillRect(x, bandTop + 2, 1, bandBottom - bandTop - 4);
+    }
+    const tank = propCanvas("tank");
+    for (let i = 0; i < 5; i++) {
+      const tx = sternX + 26 + hash01(seedKey, i * 7 + 3) * (bowStartX - sternX - 90);
+      ctx.drawImage(tank, tx, bandMid - 3);
+    }
+    for (const lift of plan.lifts) {
+      const lx = (lift.x + OX) * TILE_PX;
+      ctx.fillStyle = "#141b28";
+      ctx.fillRect(lx, bandTop, TILE_PX * 2, bandBottom - bandTop);
+      ctx.fillStyle = "#39465c";
+      ctx.fillRect(lx, bandTop, 2, bandBottom - bandTop);
+      ctx.fillRect(lx + TILE_PX * 2 - 2, bandTop, 2, bandBottom - bandTop);
+    }
+    ctx.fillStyle = "#39465c";
+    ctx.fillRect((OX - 4) * TILE_PX, midY - 20, TILE_PX * 3 + 4, 40);
+    ctx.fillStyle = "#232c3d";
+    for (const dy of [-14, -4, 6]) {
+      ctx.fillRect((OX - 4) * TILE_PX, midY + dy, 3, 7);
+    }
+    ctx.fillStyle = "#8fa6c4";
+    ctx.font = "bold 7px monospace";
+    ctx.textAlign = "left";
+    ctx.fillText(ship.name.toUpperCase(), sternX + 64, top + 11);
+    return canvas;
+  }
   var DAMAGE_COLOURS2 = ["#ffd76a", "#ffb35c", "#ff7847"];
   var WELD_COLOURS = ["#eaf6ff", "#bfe0ff", "#7fb2ff"];
   var MAX_PARTICLES = 200;
@@ -13837,6 +13973,8 @@
     ship;
     shipLayout;
     statics;
+    /** The shared hull painted beneath both bare decks (cutaway). */
+    hullCanvas;
     backdrop;
     /** The ship's accumulated scars, one layer per deck. */
     wears;
@@ -13893,31 +14031,30 @@
       this.cutawayGapY = this.shipLayout.decks[0].heightPx + CUTAWAY_GAP_PX;
       this.applySize();
       this.statics = [
-        renderStatic(this.shipLayout.decks[0], ship),
-        renderStatic(this.shipLayout.decks[1], ship)
+        renderStatic(this.shipLayout.decks[0], ship, true),
+        renderStatic(this.shipLayout.decks[1], ship, true)
       ];
+      this.hullCanvas = renderCutawayHull(
+        this.shipLayout,
+        ship,
+        this.cutawayGapY
+      );
       this.backdrop = new SpaceBackdrop(
         this.shipLayout.seedKey,
         this.shipLayout.widthPx,
         this.shipLayout.heightPx + this.cutawayGapY
       );
-      const midY = (OY + DECK_H / 2) * TILE_PX;
       const wearGeom = {
         tile: TILE_PX,
         ox: OX,
         oy: OY,
         engineBlock: {
           x: (OX - 4) * TILE_PX,
-          y: midY - 18,
+          y: -999,
           w: TILE_PX * 3 + 4,
           h: 36
         },
-        exhaustSlots: [-13, -4, 5].map((dy) => ({
-          x: (OX - 4) * TILE_PX,
-          y: midY + dy,
-          w: 3,
-          h: 6
-        })),
+        exhaustSlots: [],
         hullTop: (OY - 1) * TILE_PX,
         hullBottom: (OY + DECK_H + 1) * TILE_PX,
         sternX: (OX - 1) * TILE_PX
@@ -15142,11 +15279,24 @@
       }
       const light = lightAt(opts.dayMinutes);
       if (opts.showBubbles !== false) this.bubbles.update(now, crew);
+      ctx.drawImage(this.hullCanvas, 0, 0);
       for (let d = 0; d < 2; d++) {
         ctx.save();
         if (d === 1) ctx.translate(0, this.cutawayGapY);
         this.drawDeck(ctx, d, crew, opts, now, dt, light);
         ctx.restore();
+      }
+      if (light.dark > 4e-3) {
+        const cr = Math.round(8 + (43 - 8) * light.warm);
+        const cg = Math.round(14 + (26 - 14) * light.warm);
+        const cb = Math.round(36 + (9 - 36) * light.warm);
+        ctx.fillStyle = `rgba(${cr},${cg},${cb},${light.dark.toFixed(3)})`;
+        ctx.fillRect(
+          0,
+          this.shipLayout.heightPx,
+          this.shipLayout.widthPx,
+          CUTAWAY_GAP_PX
+        );
       }
       ctx.restore();
     }

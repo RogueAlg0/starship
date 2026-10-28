@@ -1778,3 +1778,32 @@ frame and tap, which deck's shake the scene takes, telegraph
 priority), but it switches nothing visible by itself anymore.
 Single-deck presentation is retired from the renderer, not parked
 behind a flag.
+
+## One hull, and an interior polish pass (Oct 28, 2026)
+
+The maintainer's verdict on the shipped cutaway: the decks still
+looked silly, two tube designs. He named a ship-life sim whose
+ship design he likes (a side-view cross-section: one trussed
+structure of framed modules, nothing capsule-smooth); the repo
+names no games, per his ruling the same night, so the study stays
+in the session notes and only its lessons land here.
+
+The cutaway now paints ONE angular hull beneath both decks
+(renderCutawayHull in viewer/src/deck.ts): faceted bow, plating
+seams, seeded top-edge fittings (a mast, a dome, a dish block),
+an engine block at the stern on the hull's own midline, and the
+band between the decks dressed as a spine: keel beams, ribs,
+tanks, and the lift shafts piercing it. The per-deck silhouettes
+are gone (renderStatic paints bare interiors), and the deck wear
+layers keep their hull-band grime with the engine soot parked
+offscreen, since the engine belongs to the shared hull now.
+
+The interior lift rides along: the floor palette is separated by
+kind and brightened (bridge slate, quarters plum, mess warm
+wood, medbay pale, cargo olive), the structure darkened with
+truss ticks so unroomed space reads as bracing, a baked light
+pool and inner shadow per room, a plate accent tick in the room
+kind's colour, and small prop redraws (bunk blanket stripe,
+crate braces, a mess table centrepiece). Verified by night and
+day screenshots before shipping; the crew animation and staging
+systems are untouched.

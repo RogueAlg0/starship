@@ -1435,6 +1435,78 @@ repairs changes which ships have stories.
   Deferred with their arrival chains; the ledger shape must not
   assume a role, so the answer can be yes later without surgery.
 
+## PORTFALL: the mess card game (built Oct 28, 2026)
+
+The game the crew plays in the mess, and the collection it
+grows into. It exists to give the mess a past: a deck a
+person has built, a record the mess remembers, and cards
+that carry where they came from.
+
+### Slice 1: decks and duels
+
+Every crew member holds a derived twelve-card deck, dealt
+from the run seed and the member id, so the deck never
+needs storing and never shifts a generated world. Suits are
+leaf, coin, helm, and forge; powers run 2 to 7. Two effects
+sit on fixed powers: Anchor on a 4, Surge on a 3. A duel is
+five runs plus sudden death, played in free time on the
+"cards" stream, and the winner is the higher run total.
+Duels post to Scuttlebutt's Cards lane with a match strip,
+and the chronicle records the result. The crew card shows
+the record and the deck.
+
+### Slice 2: packets, trading, and the league
+
+Slice 2 adds the first persistent card state. Once per port
+stay, on its own "portfall" stream, a packet opens for two
+to four regulars: crew aboard with at least one league
+match, falling back to all aboard when fewer than two
+regulars exist. Packet size follows the live sector
+condition at the port: shortage two cards, boom four,
+otherwise three; an active unrest may swallow the packet
+whole, half the time. Suit weights bend toward the
+controlling faction's kind and temperament and toward the
+port's character, so a cartel port does not deal like a
+shrine port. Every pulled card carries provenance: origin
+port and name, controlling faction at acquisition, a stamp
+of the port's name, the tick and a global acquisition
+order, and the list of prior crew holders.
+
+The fielded twelve draws on the whole holding: starter
+deck plus pulled cards, strongest first, ties by
+acquisition order with starter cards first. With no pulls
+the fielded deck is exactly the starter deck. Starter
+cards are never stored in a collection.
+
+Trading runs in the same once-per-stay phase, at most two
+swaps a stay. The law is relationship-priced: no self
+trade, no second trade between the same pair in one stay,
+any grudge or feud either way refuses, confidants are
+exempt, and otherwise mutual trust must reach 0.2 both
+ways. Each side gives a spare card, a pulled card outside
+the fielded twelve when one exists, else their weakest
+pulled card; the giver joins the card's prior holders.
+Packets and trades never touch suspicion.
+
+The league books every duel: three points for a win, one
+for a draw, none for a loss. Standing sorts by points,
+then wins, then draws, then roster order. The crew card's
+PORTFALL tab shows record, league rank and points,
+collection size with pulls counted, the fielded deck, and
+the most recent stamped pulls. Packet posts name the
+port, the best pull, and the stamp; trade posts print
+only when a swapped card carries an effect or power 6 or
+better, so the feed carries provenance, not every swap.
+
+### What slice 2 deliberately does not do
+
+No Port Cup yet; the league is a table, not a tournament.
+No deck building by choice; fielding is a rule, not a
+decision, because the game is witnessed, not played. No
+new suspicion inflow anywhere in the packet or trade
+paths; the accusation economy is a separate thread with
+its own tuning gate.
+
 ## Version zero slice
 
 One ship. Twelve crew. Needs and relationships. One incident generator:

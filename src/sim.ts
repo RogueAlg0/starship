@@ -63,6 +63,12 @@ import {
   type SectorState,
 } from "./world/sector.ts";
 import {
+  checkPortfallState,
+  createPortfallState,
+  stepPortfall,
+  type PortfallState,
+} from "./world/portfall.ts";
+import {
   checkHealthState,
   createHealthState,
   stepHealth,
@@ -90,6 +96,8 @@ export interface BuiltWorld {
   standing: FactionStanding;
   /** The sector game: influence, contests and conditions at the ports. */
   sectorState: SectorState;
+  /** PORTFALL collections, provenance, and the mess league. */
+  portfall: PortfallState;
   /** Records of the live source; empty when a replay source was supplied. */
   readonly decisions: DecisionRecord[];
   /**
@@ -148,6 +156,8 @@ export function buildWorld(
   const council = createCouncil(crew);
   const standing = createFactionStanding(sector);
   const sectorState = createSectorState(sector);
+  // PORTFALL collections likewise: empty ledgers, no draws.
+  const portfall = createPortfallState(crew);
   ship.councilPublic = { cmoFilled: true, emergencyUntil: -1, acting: {} };
   const weather = new Weather();
   const ctx: CrewContext = {
@@ -157,6 +167,7 @@ export function buildWorld(
     history: [],
     meal: null,
     lastGameTick: new Map(),
+    portfall,
   };
 
   world.emit("ship_generated", [], {
@@ -193,6 +204,10 @@ export function buildWorld(
   engine.addSystem({
     name: "stores",
     step: (w) => stepStores(w, ship, crew, { sector, voyage, traffic }),
+  });
+  engine.addSystem({
+    name: "portfall",
+    step: (w) => stepPortfall(w, portfall, crew, { sector, voyage, sectorState }),
   });
   engine.addSystem({ name: "crew", step: (w) => stepCrew(w, crew, ctx) });
   engine.addSystem({ name: "society", step: (w) => stepSociety(w, crew) });
@@ -242,6 +257,9 @@ export function buildWorld(
   engine.addInvariant("sector influence in range", () =>
     checkSectorState(sector, sectorState),
   );
+  engine.addInvariant("portfall state in range", () =>
+    checkPortfallState(portfall, crew),
+  );
 
   let started = false;
   const start = (): void => {
@@ -268,6 +286,7 @@ export function buildWorld(
     council,
     standing,
     sectorState,
+    portfall,
     get decisions() {
       return decisions instanceof UtilitySource ? decisions.records : [];
     },
@@ -305,6 +324,8 @@ export interface RunContext {
   readonly standing: FactionStanding;
   /** The sector game: influence, contests and conditions at the ports. */
   readonly sectorState: SectorState;
+  /** PORTFALL collections, provenance, and the mess league. */
+  readonly portfall: PortfallState;
   /** Records of the live source; empty when a replay source was supplied. */
   readonly decisions: DecisionRecord[];
   /** The current tick (ticks completed so far). */
@@ -332,6 +353,7 @@ export function createRun(
     council: built.council,
     standing: built.standing,
     sectorState: built.sectorState,
+    portfall: built.portfall,
     get decisions() {
       return built.decisions;
     },

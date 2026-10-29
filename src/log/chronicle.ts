@@ -88,6 +88,16 @@ function oneDecimal(value: number): string {
   return String(Math.round(value * 10) / 10);
 }
 
+/** A serialized PORTFALL card, in the log's voice. */
+function cardText(raw: unknown): string {
+  const card = asRecord(raw);
+  const effect = str(card, "effect");
+  return (
+    `${str(card, "suit")} ${num(card, "power")}` +
+    (effect !== "" ? ` (${effect})` : "")
+  );
+}
+
 class Renderer implements ChronicleRenderer {
   private readonly knowsTruth: boolean;
   private shipName = "the ship";
@@ -1228,6 +1238,36 @@ class Renderer implements ChronicleRenderer {
         line(
           `${ts} — ${names} play a table game in the ${room(num(data, "room"))}; ` +
             `${person(str(data, "winner"))} wins.`,
+          true,
+        );
+        break;
+      }
+      case "portfall_packet": {
+        const best = asRecord(data.best);
+        const bestMember = str(best, "member");
+        if (bestMember === "") break;
+        const condition = str(data, "condition");
+        line(
+          `${ts} — PORTFALL packets open at ${str(data, "port")}` +
+            (condition !== "" ? ` under a ${condition}` : "") +
+            `; ${person(bestMember)} pulls ${cardText(best)}, ` +
+            `stamped ${str(best, "stamp")}.`,
+          true,
+        );
+        break;
+      }
+      case "portfall_trade": {
+        const aCard = asRecord(data.aCard);
+        const bCard = asRecord(data.bCard);
+        const qualifies = [aCard, bCard].some(
+          (card) => str(card, "effect") !== "" || num(card, "power") >= 6,
+        );
+        if (!qualifies) break;
+        line(
+          `${ts} — ${person(str(data, "a"))} trades ${cardText(aCard)} ` +
+            `(stamped ${str(aCard, "stamp")}) to ${person(str(data, "b"))} ` +
+            `for ${cardText(bCard)} (stamped ${str(bCard, "stamp")}) ` +
+            `at ${str(data, "port")}.`,
           true,
         );
         break;

@@ -32,7 +32,12 @@ import {
   type Routine,
   type WatchName,
 } from "./routine.ts";
-import { conditionFor, playMatch, starterDeck } from "./cards.ts";
+import { conditionFor, playMatch } from "./cards.ts";
+import {
+  fieldDeck,
+  recordPortfallMatch,
+  type PortfallState,
+} from "../world/portfall.ts";
 import { applySabotage, sabotageCandidate } from "../plots/sabotage.ts";
 import { maybeSocialSpeech } from "../perception/speech.ts";
 import { CONFIG } from "../scenario/config.ts";
@@ -192,6 +197,9 @@ export interface CrewContext {
   meal: MealServiceState | null;
   /** Last tick a table game started in each room, by room index. */
   lastGameTick: Map<number, number>;
+  /** PORTFALL slice 2: the collections the table plays from and
+   *  the league the results feed (src/world/portfall.ts). */
+  portfall: PortfallState;
 }
 
 function shuffled<T>(rng: Rng, items: readonly T[]): T[] {
@@ -1145,13 +1153,14 @@ function resolveGame(
   const condition = conditionFor(ctx.voyage.inPortAt(w.tick), ctx.weather.name);
   const cards = w.rng.get("cards");
   const match = playMatch(
-    starterDeck(w.config.seed, member.id),
-    starterDeck(w.config.seed, opponent.id),
+    fieldDeck(ctx.portfall, w.config.seed, member.id),
+    fieldDeck(ctx.portfall, w.config.seed, opponent.id),
     condition,
     (n) => cards.int(n),
   );
   const winner =
     match.winner === "a" ? member : match.winner === "b" ? opponent : null;
+  recordPortfallMatch(ctx.portfall, member.id, opponent.id, winner?.id ?? "");
   for (const player of participants) {
     player.needs.social = clamp01(player.needs.social + cfg.gameSocialRestore);
     player.needs.morale = clamp01(

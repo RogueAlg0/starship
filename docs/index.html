@@ -1460,6 +1460,32 @@
       freeQuartersDesire: 0.25
     },
     /**
+     * PORTFALL, slice 2: packets at ports, trading priced by
+     * relationship, and the mess league. Packets run once per
+     * stay; the sector's conditions bend the packet size the
+     * way they bend everything else at a port.
+     */
+    portfall: {
+      /** Regulars opening a packet at one stay: at least this
+       *  many, at most this many. */
+      packetMinPlayers: 2,
+      packetMaxPlayers: 4,
+      /** Cards in a standard packet. */
+      packetCards: 3,
+      /** A shortage thins the packet; a boom fattens it. */
+      shortageCards: 2,
+      boomCards: 4,
+      /** Under an active unrest, the packet may not arrive. */
+      unrestSkipChance: 0.5,
+      /** Mutual trust a pair needs before they will trade. */
+      tradeTrust: 0.2,
+      /** Swaps settled per stay, however many pairs are willing. */
+      tradesPerStay: 2,
+      /** The league table: three points for a win, one for a draw. */
+      leagueWinPoints: 3,
+      leagueDrawPoints: 1
+    },
+    /**
      * Crew chatter: speech from beliefs (the Chatter section of
      * DESIGN). The social machinery already moves suspicion and
      * company silently; this layer gives some of it a voice. Lines
@@ -3367,6 +3393,11 @@
   function oneDecimal(value) {
     return String(Math.round(value * 10) / 10);
   }
+  function cardText(raw) {
+    const card = asRecord(raw);
+    const effect = str2(card, "effect");
+    return `${str2(card, "suit")} ${num2(card, "power")}` + (effect !== "" ? ` (${effect})` : "");
+  }
   var Renderer = class {
     knowsTruth;
     shipName = "the ship";
@@ -4284,6 +4315,30 @@
           );
           break;
         }
+        case "portfall_packet": {
+          const best = asRecord(data.best);
+          const bestMember = str2(best, "member");
+          if (bestMember === "") break;
+          const condition = str2(data, "condition");
+          line(
+            `${ts} \u2014 PORTFALL packets open at ${str2(data, "port")}` + (condition !== "" ? ` under a ${condition}` : "") + `; ${person(bestMember)} pulls ${cardText(best)}, stamped ${str2(best, "stamp")}.`,
+            true
+          );
+          break;
+        }
+        case "portfall_trade": {
+          const aCard = asRecord(data.aCard);
+          const bCard = asRecord(data.bCard);
+          const qualifies = [aCard, bCard].some(
+            (card) => str2(card, "effect") !== "" || num2(card, "power") >= 6
+          );
+          if (!qualifies) break;
+          line(
+            `${ts} \u2014 ${person(str2(data, "a"))} trades ${cardText(aCard)} (stamped ${str2(aCard, "stamp")}) to ${person(str2(data, "b"))} for ${cardText(bCard)} (stamped ${str2(bCard, "stamp")}) at ${str2(data, "port")}.`,
+            true
+          );
+          break;
+        }
         case "gossip": {
           line(
             `${ts} \u2014 Shipboard rumour: ${person(str2(data, "to"))} now suspects ${person(str2(data, "about"))}.`,
@@ -5164,6 +5219,445 @@
       winner: scoreA > scoreB ? "a" : scoreB > scoreA ? "b" : null,
       condition
     };
+  }
+
+  // src/world/portfall.ts
+  function blankLeague() {
+    return { w: 0, l: 0, d: 0, points: 0 };
+  }
+  function createPortfallState(crew) {
+    const collections = {};
+    const league = {};
+    for (const member of crew) {
+      collections[member.id] = [];
+      league[member.id] = blankLeague();
+    }
+    return {
+      collections,
+      league,
+      packetStays: /* @__PURE__ */ new Set(),
+      tradedPairs: /* @__PURE__ */ new Set(),
+      nextOrder: 0,
+      matches: 0,
+      packets: 0,
+      trades: 0
+    };
+  }
+  function leagueEntry(state, memberId) {
+    return state.league[memberId] ?? blankLeague();
+  }
+  function leagueEntryForWrite(state, memberId) {
+    const existing = state.league[memberId];
+    if (existing !== void 0) return existing;
+    const entry = blankLeague();
+    state.league[memberId] = entry;
+    return entry;
+  }
+  function acquiredCards(state, memberId) {
+    return [...state.collections[memberId] ?? []].sort(
+      (a, b) => a.acquiredOrder - b.acquiredOrder
+    );
+  }
+  function fieldDeck(state, seed, memberId) {
+    const candidates = starterDeck(seed, memberId).map(
+      (card, index) => ({ card, acquired: false, order: index })
+    );
+    for (const card of state.collections[memberId] ?? []) {
+      candidates.push({ card, acquired: true, order: card.acquiredOrder });
+    }
+    const chosen = new Set(
+      [...candidates].sort(
+        (a, b) => b.card.power - a.card.power || Number(a.acquired) - Number(b.acquired) || a.order - b.order
+      ).slice(0, 12)
+    );
+    return candidates.filter((c) => chosen.has(c)).map((c) => c.card);
+  }
+  function recordPortfallMatch(state, aId, bId, winnerId) {
+    const a = leagueEntryForWrite(state, aId);
+    const b = leagueEntryForWrite(state, bId);
+    state.matches++;
+    if (winnerId === "") {
+      a.d++;
+      b.d++;
+      a.points += CONFIG.portfall.leagueDrawPoints;
+      b.points += CONFIG.portfall.leagueDrawPoints;
+    } else if (winnerId === aId) {
+      a.w++;
+      b.l++;
+      a.points += CONFIG.portfall.leagueWinPoints;
+    } else if (winnerId === bId) {
+      b.w++;
+      a.l++;
+      b.points += CONFIG.portfall.leagueWinPoints;
+    }
+  }
+  function leagueRank(state, crew, memberId) {
+    const order = crew.map((member, index) => ({ member, index })).sort((x, y) => {
+      const a = leagueEntry(state, x.member.id);
+      const b = leagueEntry(state, y.member.id);
+      return b.points - a.points || b.w - a.w || b.d - a.d || x.index - y.index;
+    });
+    const at = order.findIndex((entry) => entry.member.id === memberId);
+    return at < 0 ? 0 : at + 1;
+  }
+  function activeAboard(member, tick) {
+    return !member.dead && !member.leftShip && !member.ashore && tick >= member.confinedUntil;
+  }
+  function shuffledByRng(rng, items) {
+    const out = [...items];
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = rng.int(i + 1);
+      const tmp = out[i];
+      out[i] = out[j];
+      out[j] = tmp;
+    }
+    return out;
+  }
+  function suitWeights(sector, port) {
+    const weights = {
+      helm: 1,
+      forge: 1,
+      leaf: 1,
+      coin: 1
+    };
+    const add = (suit, amount) => {
+      weights[suit] += amount;
+    };
+    const faction = sector.factionOf(port);
+    if (faction !== null) {
+      switch (faction.kind) {
+        case "combine":
+          add("helm", 1);
+          add("forge", 1);
+          break;
+        case "syndicate":
+        case "cartel":
+          add("coin", 2);
+          break;
+        case "order":
+          add("leaf", 1);
+          add("helm", 1);
+          break;
+        case "church":
+          add("leaf", 2);
+          break;
+        case "league":
+          add("helm", 1);
+          add("coin", 1);
+          break;
+        case "company":
+          add("coin", 2);
+          add("forge", 1);
+          break;
+        case "communion":
+          add("leaf", 1);
+          add("coin", 1);
+          break;
+        default:
+          break;
+      }
+      switch (faction.temperament) {
+        case "greedy":
+        case "generous":
+        case "jealous":
+          add("coin", 1);
+          break;
+        case "martial":
+          add("forge", 1);
+          add("helm", 1);
+          break;
+        case "curious":
+        case "proud":
+          add("helm", 1);
+          break;
+        case "pious":
+        case "insular":
+        case "patient":
+          add("leaf", 1);
+          break;
+        case "weary":
+          add("forge", 1);
+          break;
+        default:
+          break;
+      }
+    }
+    switch (port.character) {
+      case "industrial":
+      case "refinery":
+        add("forge", 1);
+        break;
+      case "agrarian":
+      case "shrine":
+        add("leaf", 2);
+        break;
+      case "free port":
+      case "company town":
+        add("coin", 2);
+        break;
+      case "shipyard":
+        add("forge", 2);
+        add("helm", 1);
+        break;
+      case "listening post":
+        add("helm", 2);
+        break;
+      default:
+        break;
+    }
+    return weights;
+  }
+  function pickSuit(rng, weights) {
+    const total = SUITS.reduce((sum, suit) => sum + weights[suit], 0);
+    let roll = rng.next() * total;
+    for (const suit of SUITS) {
+      roll -= weights[suit];
+      if (roll < 0) return suit;
+    }
+    return SUITS[SUITS.length - 1];
+  }
+  function plainPower(rng) {
+    const roll = rng.next();
+    if (roll < 0.12) return 2;
+    if (roll < 0.34) return 3;
+    if (roll < 0.6) return 4;
+    if (roll < 0.82) return 5;
+    if (roll < 0.95) return 6;
+    return 7;
+  }
+  function drawPacketCard(w, state, port, factionName, weights) {
+    const rng = w.rng.get("portfall");
+    const suit = pickSuit(rng, weights);
+    const effectRoll = rng.next();
+    let power;
+    let effect;
+    if (effectRoll < 0.06) {
+      power = 4;
+      effect = "anchor";
+    } else if (effectRoll < 0.13) {
+      power = 3;
+      effect = "surge";
+    } else {
+      power = plainPower(rng);
+      effect = void 0;
+    }
+    const card = {
+      suit,
+      power,
+      originPort: port.index,
+      originName: port.name,
+      factionName,
+      stamp: port.name,
+      acquiredTick: w.tick,
+      acquiredOrder: state.nextOrder++,
+      owners: []
+    };
+    if (effect !== void 0) card.effect = effect;
+    return card;
+  }
+  function serializeCard(card) {
+    return {
+      suit: card.suit,
+      power: card.power,
+      effect: card.effect ?? "",
+      stamp: card.stamp,
+      originPort: card.originPort,
+      originName: card.originName,
+      faction: card.factionName,
+      owners: [...card.owners]
+    };
+  }
+  function pairKey(stayIndex, aId, bId) {
+    const [first, second] = [aId, bId].sort();
+    return `${stayIndex}:${first}:${second}`;
+  }
+  function canTrade(state, a, b, crew, stayIndex) {
+    if (a === b) return false;
+    if (state.tradedPairs.has(pairKey(stayIndex, a.id, b.id))) return false;
+    if (a.beliefs.grudges.includes(b.id)) return false;
+    if (b.beliefs.grudges.includes(a.id)) return false;
+    const labelAB = relationshipLabel(a, b, crew);
+    const labelBA = relationshipLabel(b, a, crew);
+    if (labelAB === "feud" || labelBA === "feud") return false;
+    if (labelAB === "confidant" || labelBA === "confidant") return true;
+    return trustOf(a.beliefs, b.id) >= CONFIG.portfall.tradeTrust && trustOf(b.beliefs, a.id) >= CONFIG.portfall.tradeTrust;
+  }
+  function spareCard(state, seed, member) {
+    const held = state.collections[member.id] ?? [];
+    if (held.length === 0) return null;
+    const fielded = new Set(fieldDeck(state, seed, member.id));
+    const spares = held.filter((card) => !fielded.has(card));
+    const pool = spares.length > 0 ? spares : held;
+    let worst = pool[0];
+    for (const card of pool) {
+      if (card.power < worst.power || card.power === worst.power && card.acquiredOrder < worst.acquiredOrder) {
+        worst = card;
+      }
+    }
+    return worst;
+  }
+  function performTrades(w, state, crew, portName, stayIndex) {
+    const rng = w.rng.get("portfall");
+    const aboard = crew.filter(
+      (member) => activeAboard(member, w.tick) && (state.collections[member.id] ?? []).length > 0
+    );
+    const pairs = [];
+    for (let i = 0; i < aboard.length; i++) {
+      for (let j = i + 1; j < aboard.length; j++) {
+        pairs.push([aboard[i], aboard[j]]);
+      }
+    }
+    let done = 0;
+    for (const [a, b] of shuffledByRng(rng, pairs)) {
+      if (done >= CONFIG.portfall.tradesPerStay) break;
+      if (!canTrade(state, a, b, crew, stayIndex)) continue;
+      const cardA = spareCard(state, w.config.seed, a);
+      const cardB = spareCard(state, w.config.seed, b);
+      if (cardA === null || cardB === null || cardA === cardB) continue;
+      const aHeld = state.collections[a.id];
+      const bHeld = state.collections[b.id];
+      aHeld.splice(aHeld.indexOf(cardA), 1);
+      bHeld.splice(bHeld.indexOf(cardB), 1);
+      cardA.owners.push(a.id);
+      cardB.owners.push(b.id);
+      bHeld.push(cardA);
+      aHeld.push(cardB);
+      state.tradedPairs.add(pairKey(stayIndex, a.id, b.id));
+      state.trades++;
+      done++;
+      w.emit("portfall_trade", [a.id, b.id], {
+        port: portName,
+        stayIndex,
+        a: a.id,
+        b: b.id,
+        aCard: serializeCard(cardA),
+        bCard: serializeCard(cardB)
+      });
+    }
+  }
+  function stepPortfall(w, state, crew, galaxy) {
+    const { sector, voyage, sectorState } = galaxy;
+    const stay = voyage.stayAt(w.tick);
+    if (stay === null) return;
+    if (state.packetStays.has(stay.index)) return;
+    state.packetStays.add(stay.index);
+    const port = sector.portAt(stay.port);
+    const faction = sector.factionOf(port);
+    const factionName = faction?.name ?? "Free port";
+    const condition = sectorState.conditions[port.index] ?? null;
+    const conditionState = condition !== null && condition.phase === "active" ? condition.state : "";
+    const rng = w.rng.get("portfall");
+    const cfg = CONFIG.portfall;
+    const unrestSkips = conditionState === "unrest" && rng.chance(cfg.unrestSkipChance);
+    if (!unrestSkips) {
+      const packetSize = conditionState === "shortage" ? cfg.shortageCards : conditionState === "boom" ? cfg.boomCards : cfg.packetCards;
+      const aboard = crew.filter((member) => activeAboard(member, w.tick));
+      const regulars = aboard.filter((member) => {
+        const entry = leagueEntry(state, member.id);
+        return entry.w + entry.l + entry.d > 0;
+      });
+      const pool = regulars.length >= cfg.packetMinPlayers ? regulars : aboard;
+      if (pool.length > 0) {
+        const count = Math.min(
+          pool.length,
+          cfg.packetMinPlayers + rng.int(cfg.packetMaxPlayers - cfg.packetMinPlayers + 1)
+        );
+        const recipients = shuffledByRng(rng, pool).slice(0, count);
+        const weights = suitWeights(sector, port);
+        const cardsBy = [];
+        let best = null;
+        for (const member of recipients) {
+          const cards = [];
+          for (let i = 0; i < packetSize; i++) {
+            cards.push(drawPacketCard(w, state, port, factionName, weights));
+          }
+          state.collections[member.id].push(...cards);
+          cardsBy.push({
+            member: member.id,
+            cards: cards.map(serializeCard)
+          });
+          for (const card of cards) {
+            if (best === null || card.power > best.power || card.power === best.power && card.effect !== void 0 && best.effect === "") {
+              best = { member: member.id, ...serializeCard(card) };
+            }
+          }
+        }
+        state.packets++;
+        w.emit("portfall_packet", recipients.map((m) => m.id), {
+          port: port.name,
+          portIndex: port.index,
+          stayIndex: stay.index,
+          condition: conditionState,
+          faction: factionName,
+          cardsBy,
+          best
+        });
+      }
+    }
+    performTrades(w, state, crew, port.name, stay.index);
+  }
+  function checkPortfallState(state, crew) {
+    const ids = new Set(crew.map((member) => member.id));
+    let maxOrder = -1;
+    let totalCards = 0;
+    for (const member of crew) {
+      const held = state.collections[member.id];
+      if (held === void 0) {
+        throw new Error(`portfall: no collection for ${member.id}`);
+      }
+      const entry = state.league[member.id];
+      if (entry === void 0) {
+        throw new Error(`portfall: no league entry for ${member.id}`);
+      }
+      for (const [label, value] of Object.entries(entry)) {
+        if (!Number.isInteger(value) || value < 0) {
+          throw new Error(
+            `portfall: ${member.id} league ${label} out of range: ${value}`
+          );
+        }
+      }
+      const expectedPoints = entry.w * CONFIG.portfall.leagueWinPoints + entry.d * CONFIG.portfall.leagueDrawPoints;
+      if (entry.points !== expectedPoints) {
+        throw new Error(
+          `portfall: ${member.id} league points ${entry.points} != ${expectedPoints}`
+        );
+      }
+      for (const card of held) {
+        totalCards++;
+        maxOrder = Math.max(maxOrder, card.acquiredOrder);
+        if (!SUITS.includes(card.suit)) {
+          throw new Error(`portfall: bad suit ${card.suit}`);
+        }
+        if (!Number.isInteger(card.power) || card.power < 2 || card.power > 7) {
+          throw new Error(`portfall: card power out of range: ${card.power}`);
+        }
+        if (card.effect === "anchor" && card.power !== 4) {
+          throw new Error("portfall: an Anchor must be power 4");
+        }
+        if (card.effect === "surge" && card.power !== 3) {
+          throw new Error("portfall: a Surge must be power 3");
+        }
+        if (card.originPort < 0 || card.acquiredTick < 0) {
+          throw new Error("portfall: card provenance out of range");
+        }
+        if (card.stamp === "" || card.originName === "") {
+          throw new Error("portfall: card carries no stamp");
+        }
+        for (const owner of card.owners) {
+          if (!ids.has(owner)) {
+            throw new Error(`portfall: card owner ${owner} is not crew`);
+          }
+        }
+      }
+    }
+    if (state.nextOrder !== maxOrder + 1 && totalCards > 0) {
+      throw new Error(
+        `portfall: nextOrder ${state.nextOrder} disagrees with cards (max ${maxOrder})`
+      );
+    }
+    if (state.nextOrder !== 0 && totalCards === 0) {
+      throw new Error("portfall: orders spent with no cards held");
+    }
   }
 
   // src/plots/sabotage.ts
@@ -7059,12 +7553,13 @@
     const condition = conditionFor(ctx.voyage.inPortAt(w.tick), ctx.weather.name);
     const cards = w.rng.get("cards");
     const match = playMatch(
-      starterDeck(w.config.seed, member.id),
-      starterDeck(w.config.seed, opponent.id),
+      fieldDeck(ctx.portfall, w.config.seed, member.id),
+      fieldDeck(ctx.portfall, w.config.seed, opponent.id),
       condition,
       (n) => cards.int(n)
     );
     const winner = match.winner === "a" ? member : match.winner === "b" ? opponent : null;
+    recordPortfallMatch(ctx.portfall, member.id, opponent.id, winner?.id ?? "");
     for (const player of participants) {
       player.needs.social = clamp01(player.needs.social + cfg.gameSocialRestore);
       player.needs.morale = clamp01(
@@ -7144,9 +7639,9 @@
     for (const other of table) {
       if (other === member) continue;
       tablemates.push(other.id);
-      const pairKey = [member.id, other.id].sort().join("|");
-      if (state.pairs.has(pairKey)) continue;
-      state.pairs.add(pairKey);
+      const pairKey2 = [member.id, other.id].sort().join("|");
+      if (state.pairs.has(pairKey2)) continue;
+      state.pairs.add(pairKey2);
       spreadGossip(w, member, other);
       spreadGossip(w, other, member);
       maybeSocialSpeech(w, member, other, ctx.ship, ctx.weather, ctx.voyage, "table");
@@ -11092,6 +11587,7 @@
     const council = createCouncil(crew);
     const standing = createFactionStanding(sector);
     const sectorState = createSectorState(sector);
+    const portfall = createPortfallState(crew);
     ship.councilPublic = { cmoFilled: true, emergencyUntil: -1, acting: {} };
     const weather = new Weather();
     const ctx = {
@@ -11100,7 +11596,8 @@
       voyage,
       history: [],
       meal: null,
-      lastGameTick: /* @__PURE__ */ new Map()
+      lastGameTick: /* @__PURE__ */ new Map(),
+      portfall
     };
     world.emit("ship_generated", [], {
       name: ship.name,
@@ -11135,6 +11632,10 @@
     engine.addSystem({
       name: "stores",
       step: (w) => stepStores(w, ship, crew, { sector, voyage, traffic })
+    });
+    engine.addSystem({
+      name: "portfall",
+      step: (w) => stepPortfall(w, portfall, crew, { sector, voyage, sectorState })
     });
     engine.addSystem({ name: "crew", step: (w) => stepCrew(w, crew, ctx) });
     engine.addSystem({ name: "society", step: (w) => stepSociety(w, crew) });
@@ -11190,6 +11691,10 @@
       "sector influence in range",
       () => checkSectorState(sector, sectorState)
     );
+    engine.addInvariant(
+      "portfall state in range",
+      () => checkPortfallState(portfall, crew)
+    );
     let started = false;
     const start = () => {
       if (started) return;
@@ -11214,6 +11719,7 @@
       council,
       standing,
       sectorState,
+      portfall,
       get decisions() {
         return decisions instanceof UtilitySource ? decisions.records : [];
       },
@@ -11240,6 +11746,7 @@
       council: built.council,
       standing: built.standing,
       sectorState: built.sectorState,
+      portfall: built.portfall,
       get decisions() {
         return built.decisions;
       },
@@ -11651,7 +12158,9 @@
 
   // viewer/src/feed.ts
   function laneForEvent(event, item) {
-    if (event.type === "leisure_game") return "cards";
+    if (event.type === "leisure_game" || event.type === "portfall_packet" || event.type === "portfall_trade") {
+      return "cards";
+    }
     if (event.type.startsWith("sector_") || event.type === "faction_standing" || event.type === "harbour_news") {
       return "sector";
     }
@@ -11705,6 +12214,34 @@
       });
     }
     return { strip: { condition, a, b, runs }, scoreA, scoreB };
+  }
+  function readCard(raw) {
+    if (typeof raw !== "object" || raw === null) return null;
+    const card = raw;
+    const suit = card.suit;
+    const power = card.power;
+    const stamp2 = card.stamp;
+    if (typeof suit !== "string" || typeof power !== "number" || typeof stamp2 !== "string") {
+      return null;
+    }
+    const effect = card.effect;
+    return {
+      suit,
+      power,
+      effect: typeof effect === "string" && effect !== "" ? effect : void 0,
+      stamp: stamp2
+    };
+  }
+  function readPacketBest(event) {
+    const raw = event.data.best;
+    if (typeof raw !== "object" || raw === null) return null;
+    const member = raw.member;
+    if (typeof member !== "string") return null;
+    const card = readCard(raw);
+    return card === null ? null : { member, card };
+  }
+  function cardPhrase(card) {
+    return `${card.suit} ${card.power}` + (card.effect !== void 0 ? ` (${card.effect})` : "");
   }
   var REPLIES_AGREE = [
     "Anytime.",
@@ -11903,6 +12440,38 @@
           author: winner,
           text: `Beat ${names.firstName(loser)} ${score} at PORTFALL in the ${roomName2}, on a ${strip.condition} table. ${flavour}`,
           match: strip
+        };
+      }
+      case "portfall_packet": {
+        const best = readPacketBest(event);
+        if (best === null) return null;
+        const condition = str3(event, "condition");
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: best.member,
+          text: `Opened a fresh packet at ${str3(event, "port")}` + (condition !== "" ? ` under a ${condition}` : "") + `. Best pull: ${cardPhrase(best.card)}, stamped ${best.card.stamp}. The table is already arguing over it.`
+        };
+      }
+      case "portfall_trade": {
+        const aCard = readCard(event.data.aCard);
+        const bCard = readCard(event.data.bCard);
+        const a = str3(event, "a");
+        const b = str3(event, "b");
+        if (aCard === null || bCard === null || a === "" || b === "") {
+          return null;
+        }
+        const qualifies = [aCard, bCard].some(
+          (card) => card.effect !== void 0 || card.power >= 6
+        );
+        if (!qualifies) return null;
+        return {
+          kind: "post",
+          seq,
+          tick,
+          author: a,
+          text: `Traded ${cardPhrase(aCard)} (stamped ${aCard.stamp}) to ${names.firstName(b)} for ${cardPhrase(bCard)} (stamped ${bCard.stamp}). Provenance matters.`
         };
       }
       case "meal_service": {
@@ -19885,7 +20454,8 @@
     }
     sink.appendChild(needs);
     sink.appendChild(dossierLabel("PORTFALL"));
-    const record = portfallRecord.get(member.id);
+    const league = leagueEntry(run.portfall, member.id);
+    const record = league.w + league.l + league.d > 0 ? league : portfallRecord.get(member.id);
     if (record !== void 0 && record.w + record.l + record.d > 0) {
       sink.appendChild(
         dossierRow(
@@ -19896,12 +20466,13 @@
     }
     const deckStrip = document.createElement("div");
     deckStrip.className = "deck-strip";
-    for (const cardFace of starterDeck(currentSeed, member.id)) {
+    for (const cardFace of fieldDeck(run.portfall, currentSeed, member.id)) {
       deckStrip.appendChild(miniCardEl(cardFace, false, false));
     }
     sink.appendChild(deckStrip);
     {
-      const deck2 = starterDeck(currentSeed, member.id);
+      const deck2 = fieldDeck(run.portfall, currentSeed, member.id);
+      const pulled = acquiredCards(run.portfall, member.id);
       if (record !== void 0 && record.w + record.l + record.d > 0) {
         portfallPanel.appendChild(
           dossierRow(
@@ -19909,7 +20480,19 @@
             record.d > 0 ? `${record.w} W \xB7 ${record.l} L \xB7 ${record.d} D` : `${record.w} W \xB7 ${record.l} L`
           )
         );
+        const rank = leagueRank(run.portfall, run.crew, member.id);
+        if (rank > 0) {
+          portfallPanel.appendChild(
+            dossierRow("League", `#${rank} \xB7 ${league.points} pts`)
+          );
+        }
       }
+      portfallPanel.appendChild(
+        dossierRow(
+          "Collection",
+          pulled.length > 0 ? `${12 + pulled.length} cards \xB7 ${pulled.length} pulled` : "12 cards \xB7 starter only"
+        )
+      );
       const tally = /* @__PURE__ */ new Map();
       for (const held of deck2) {
         tally.set(held.suit, (tally.get(held.suit) ?? 0) + 1);
@@ -19928,6 +20511,16 @@
           `${suitWord(best.suit)} ${best.power}` + (best.effect !== void 0 ? ` (${best.effect})` : "")
         )
       );
+      if (pulled.length > 0) {
+        portfallPanel.appendChild(
+          dossierRow(
+            "Stamped",
+            pulled.slice(-4).map(
+              (card) => `${suitWord(card.suit)} ${card.power} (${card.stamp})`
+            ).join(" \xB7 ")
+          )
+        );
+      }
       const fullStrip = document.createElement("div");
       fullStrip.className = "deck-strip";
       for (const held of deck2) fullStrip.appendChild(miniCardEl(held, false, false));

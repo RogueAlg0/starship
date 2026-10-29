@@ -85,7 +85,13 @@ export type FeedItem = FeedPost | FeedPoll;
  * council poll) is Crew, the ship speaking for itself is Ship.
  */
 export function laneForEvent(event: SimEvent, item: FeedItem): FeedLane {
-  if (event.type === "leisure_game") return "cards";
+  if (
+    event.type === "leisure_game" ||
+    event.type === "portfall_packet" ||
+    event.type === "portfall_trade"
+  ) {
+    return "cards";
+  }
   if (
     event.type.startsWith("sector_") ||
     event.type === "faction_standing" ||
@@ -174,6 +180,55 @@ function readDuel(event: SimEvent): {
     });
   }
   return { strip: { condition, a, b, runs }, scoreA, scoreB };
+}
+
+/** One serialized PORTFALL card from a packet or trade event. */
+interface PacketCard {
+  suit: string;
+  power: number;
+  effect?: string;
+  stamp: string;
+}
+
+function readCard(raw: unknown): PacketCard | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const card = raw as Record<string, unknown>;
+  const suit = card.suit;
+  const power = card.power;
+  const stamp = card.stamp;
+  if (
+    typeof suit !== "string" ||
+    typeof power !== "number" ||
+    typeof stamp !== "string"
+  ) {
+    return null;
+  }
+  const effect = card.effect;
+  return {
+    suit,
+    power,
+    effect:
+      typeof effect === "string" && effect !== "" ? effect : undefined,
+    stamp,
+  };
+}
+
+function readPacketBest(
+  event: SimEvent,
+): { member: string; card: PacketCard } | null {
+  const raw = event.data.best;
+  if (typeof raw !== "object" || raw === null) return null;
+  const member = (raw as Record<string, unknown>).member;
+  if (typeof member !== "string") return null;
+  const card = readCard(raw);
+  return card === null ? null : { member, card };
+}
+
+function cardPhrase(card: PacketCard): string {
+  return (
+    `${card.suit} ${card.power}` +
+    (card.effect !== undefined ? ` (${card.effect})` : "")
+  );
 }
 
 const REPLIES_AGREE = [
@@ -412,6 +467,45 @@ export function feedItemFor(event: SimEvent, names: FeedNames): FeedItem | null 
           `Beat ${names.firstName(loser)} ${score} at PORTFALL in the ${roomName}, ` +
           `on a ${strip.condition} table. ${flavour}`,
         match: strip,
+      };
+    }
+    case "portfall_packet": {
+      const best = readPacketBest(event);
+      if (best === null) return null;
+      const condition = str(event, "condition");
+      return {
+        kind: "post",
+        seq,
+        tick,
+        author: best.member,
+        text:
+          `Opened a fresh packet at ${str(event, "port")}` +
+          (condition !== "" ? ` under a ${condition}` : "") +
+          `. Best pull: ${cardPhrase(best.card)}, stamped ${best.card.stamp}. ` +
+          "The table is already arguing over it.",
+      };
+    }
+    case "portfall_trade": {
+      const aCard = readCard(event.data.aCard);
+      const bCard = readCard(event.data.bCard);
+      const a = str(event, "a");
+      const b = str(event, "b");
+      if (aCard === null || bCard === null || a === "" || b === "") {
+        return null;
+      }
+      const qualifies = [aCard, bCard].some(
+        (card) => card.effect !== undefined || card.power >= 6,
+      );
+      if (!qualifies) return null;
+      return {
+        kind: "post",
+        seq,
+        tick,
+        author: a,
+        text:
+          `Traded ${cardPhrase(aCard)} (stamped ${aCard.stamp}) to ` +
+          `${names.firstName(b)} for ${cardPhrase(bCard)} ` +
+          `(stamped ${bCard.stamp}). Provenance matters.`,
       };
     }
     case "meal_service": {

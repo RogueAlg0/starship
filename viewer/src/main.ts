@@ -59,7 +59,12 @@ import {
   type MatchCardFace,
   type MatchStrip,
 } from "./feed.ts";
-import { starterDeck } from "../../src/entities/cards.ts";
+import {
+  acquiredCards,
+  fieldDeck,
+  leagueEntry,
+  leagueRank,
+} from "../../src/world/portfall.ts";
 import {
   ALERT_KIND_DEFS,
   AlertStack,
@@ -1477,7 +1482,11 @@ function buildDossier(member: CrewMember): void {
   // PORTFALL sits at the root of the card, under the needs: the
   // record this voyage and the deck they carry, dealt face up.
   sink.appendChild(dossierLabel("PORTFALL"));
-  const record = portfallRecord.get(member.id);
+  const league = leagueEntry(run.portfall, member.id);
+  const record =
+    league.w + league.l + league.d > 0
+      ? league
+      : portfallRecord.get(member.id);
   if (record !== undefined && record.w + record.l + record.d > 0) {
     sink.appendChild(
       dossierRow(
@@ -1490,7 +1499,7 @@ function buildDossier(member: CrewMember): void {
   }
   const deckStrip = document.createElement("div");
   deckStrip.className = "deck-strip";
-  for (const cardFace of starterDeck(currentSeed, member.id)) {
+  for (const cardFace of fieldDeck(run.portfall, currentSeed, member.id)) {
     deckStrip.appendChild(miniCardEl(cardFace, false, false));
   }
   sink.appendChild(deckStrip);
@@ -1498,7 +1507,8 @@ function buildDossier(member: CrewMember): void {
   // The PORTFALL lens carries the fuller read of the same deck:
   // the record again, the suit tally, and the strongest card.
   {
-    const deck = starterDeck(currentSeed, member.id);
+    const deck = fieldDeck(run.portfall, currentSeed, member.id);
+    const pulled = acquiredCards(run.portfall, member.id);
     if (record !== undefined && record.w + record.l + record.d > 0) {
       portfallPanel.appendChild(
         dossierRow(
@@ -1508,7 +1518,21 @@ function buildDossier(member: CrewMember): void {
             : `${record.w} W · ${record.l} L`,
         ),
       );
+      const rank = leagueRank(run.portfall, run.crew, member.id);
+      if (rank > 0) {
+        portfallPanel.appendChild(
+          dossierRow("League", `#${rank} · ${league.points} pts`),
+        );
+      }
     }
+    portfallPanel.appendChild(
+      dossierRow(
+        "Collection",
+        pulled.length > 0
+          ? `${12 + pulled.length} cards · ${pulled.length} pulled`
+          : "12 cards · starter only",
+      ),
+    );
     const tally = new Map<string, number>();
     for (const held of deck) {
       tally.set(held.suit, (tally.get(held.suit) ?? 0) + 1);
@@ -1531,6 +1555,20 @@ function buildDossier(member: CrewMember): void {
           (best.effect !== undefined ? ` (${best.effect})` : ""),
       ),
     );
+    if (pulled.length > 0) {
+      portfallPanel.appendChild(
+        dossierRow(
+          "Stamped",
+          pulled
+            .slice(-4)
+            .map(
+              (card) =>
+                `${suitWord(card.suit)} ${card.power} (${card.stamp})`,
+            )
+            .join(" · "),
+        ),
+      );
+    }
     const fullStrip = document.createElement("div");
     fullStrip.className = "deck-strip";
     for (const held of deck) fullStrip.appendChild(miniCardEl(held, false, false));

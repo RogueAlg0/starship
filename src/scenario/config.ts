@@ -527,6 +527,33 @@ export const CONFIG = {
   },
 
   /**
+   * PORTFALL, slice 2: packets at ports, trading priced by
+   * relationship, and the mess league. Packets run once per
+   * stay; the sector's conditions bend the packet size the
+   * way they bend everything else at a port.
+   */
+  portfall: {
+    /** Regulars opening a packet at one stay: at least this
+     *  many, at most this many. */
+    packetMinPlayers: 2,
+    packetMaxPlayers: 4,
+    /** Cards in a standard packet. */
+    packetCards: 3,
+    /** A shortage thins the packet; a boom fattens it. */
+    shortageCards: 2,
+    boomCards: 4,
+    /** Under an active unrest, the packet may not arrive. */
+    unrestSkipChance: 0.5,
+    /** Mutual trust a pair needs before they will trade. */
+    tradeTrust: 0.2,
+    /** Swaps settled per stay, however many pairs are willing. */
+    tradesPerStay: 2,
+    /** The league table: three points for a win, one for a draw. */
+    leagueWinPoints: 3,
+    leagueDrawPoints: 1,
+  },
+
+  /**
    * Crew chatter: speech from beliefs (the Chatter section of
    * DESIGN). The social machinery already moves suspicion and
    * company silently; this layer gives some of it a voice. Lines
